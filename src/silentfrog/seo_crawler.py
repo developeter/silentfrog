@@ -1,35 +1,28 @@
 """
 Motore asincrono per l’analisi SEO di una singola pagina.
-Ritorna un dict con chiavi:
-  meta, headers, images, links, schema, keywords
-Tutte le funzioni sono pure e testabili.
+
 """
 
 from __future__ import annotations
 from urllib.parse import urljoin, urlparse
-
 from io import BytesIO
 from typing import Any, Dict, List, cast
-from aiohttp import ClientTimeout
 from collections import Counter
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 from nltk.corpus import stopwords
-
+from aiohttp import ClientTimeout, ClientSession
 from typing import Any, Dict, List, cast
 from PIL import Image                     # pillow
+
 import humanize
-
 import asyncio
-
 import re
 import ssl
 import string
-
 import bs4                      
-
 import aiohttp
 
 
@@ -51,7 +44,6 @@ class HttpResponse:
     status: int
     url: str
 
-
 # --------------------------------------------------------------------- #
 
 # helper: ritorna sempre str ed evita errori di typing con Pylance
@@ -61,8 +53,9 @@ def _attr(tag: Any, key: str) -> str:   # noqa: ANN401 (bs4 non ha stub preciso)
 
 # humanize produce "14 Bytes": converte in "14 B" per i test
 def _hr_size(num_bytes: int) -> str:
+    """Restituisce una stringa breve (es. 14 B, 16.2 KB, 2.1 MB)."""
     s = humanize.naturalsize(num_bytes, binary=True)
-    return s.replace("Bytes", "B")       # es. "14 Bytes" → "14 B"
+    return s.replace("Bytes", "B").replace("Byte", "B")
 
 
 async def _fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
@@ -104,6 +97,13 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
         # mantieni “Errore” per il test e per la GUI
         return "Errore", 0, 0, ""
 
+
+async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
+    try:
+        async with session.head(url, timeout=ClientTimeout(total=timeout)) as r:
+            return r.status
+    except Exception:
+        return 0
 
 
 # --------------------------------------------------------------------- #
@@ -183,15 +183,30 @@ async def analyse(url: str, timeout: int = 10) -> Dict[str, List[List[str]]]:
     for c in soup.find_all(string=lambda t: isinstance(t, Comment)):
         c.extract()
     plain = soup.get_text(separator=" ", strip=True)
+    
+    # ➊ estrae le righe “grezze” (status ancora vuoto)
+    links_rows: list[list[str]] = _extract_links(resp.url, soup)
 
+    # ➋ recupera in parallelo gli HTTP status
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as _sess:
+        coros = [_link_status(_sess, row[0], timeout) for row in links_rows]
+        statuses = await asyncio.gather(*coros, return_exceptions=True)
+
+    # ➌ riempie la 4ª colonna di ogni riga
+    for row, st in zip(links_rows, statuses):
+        row[3] = str(st if isinstance(st, int) else 0)
+
+    # ➍ costruisce il risultato finale
     return {
-        "meta": _extract_meta(soup),
-        "headers": _extract_headers(soup),
-        "images": _extract_images(resp.url, soup),
-        "links": _extract_links(resp.url, soup),
-        "schema": schema_rows,
+        "meta":     _extract_meta(soup),
+        "headers":  _extract_headers(soup),
+        "images":   _extract_images(resp.url, soup),
+        "links":    links_rows,
+        "schema":   schema_rows,
         "keywords": _extract_keywords(plain),
     }
+
 
 async def analyse_images(base: str, rows: list[list[str]], timeout=10):
     conn = aiohttp.TCPConnector(ssl=False)
@@ -214,4 +229,4 @@ async def analyse_images(base: str, rows: list[list[str]], timeout=10):
             url, w, h, hr = cast(tuple[str, int, int, str], o)
             result.append([url, str(w), str(h), hr])
 
-    return result            # <-- assicurati che la funzione ritorni SEMPRE
+    return result

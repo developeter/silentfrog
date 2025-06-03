@@ -1,18 +1,16 @@
 from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from PyQt5 import QtCore, QtGui, QtWidgets
+from .seo_crawler import analyse
+from functools import partial
+from .seo_crawler import analyse, analyse_images
 
+import webbrowser
 import sys
 import asyncio
 import threading
 import logging
-from pathlib import Path
-from typing import Any
-
-from PyQt5 import QtCore, QtGui, QtWidgets
-
-from .seo_crawler import analyse
-
-from functools import partial
-from .seo_crawler import analyse, analyse_images
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -44,7 +42,8 @@ class _BaseModel(QtCore.QAbstractTableModel):
         role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
     ):
         if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
-            return self._rows[index.row()][index.column()]
+            row = self._rows[index.row()]
+            return row[index.column()] if index.column() < len(row) else ""
         return None
 
     def headerData(  # noqa: N802
@@ -76,7 +75,11 @@ class GenericModel(_BaseModel):
         try:
             self.layoutAboutToBeChanged.emit()
             self._rows.sort(
-                key=lambda r: float(r[column].replace(',', '').replace('KB','').replace('MB','').replace('GB',''))
+                key=lambda r: (
+                    float(r[column].split()[0])  # per "14 B", "2.1 MB"…
+                    if r[column] and r[column][0].isdigit()
+                    else r[column].lower()
+                )
                 if r[column].replace('.','',1).isdigit() else r[column].lower(),
                 reverse=(order == QtCore.Qt.SortOrder.DescendingOrder), 
             )
@@ -119,6 +122,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         # connessioni segnali → slot GUI
         self.dataReady.connect(self._populate_tables)
         self.errorSig.connect(self._show_error)
+
+        # link cliccabili
+        self.img_view.doubleClicked.connect(self._open_img_url)
+        self.meta_view.doubleClicked.connect(self._open_meta_url)
+
 
     # --------------------------- costruzione UI --------------------------- #
     def _build_ui(self) -> None:
@@ -277,21 +285,35 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _run_img_worker(self, rows: list[list[str]]) -> None:
         try:
             out = asyncio.run(analyse_images(self.url_edit.text(), rows, timeout=15))
-            self.dataReady.emit({"img_update": out})  # piggy-back sul segnale esistente
-        except Exception as exc:  # noqa: BLE001
+            # combina alt/title con w/h/peso
+            merged = [
+                [u, alt, title, w, h, hr]
+                for (u, alt, title, *_), (u2, w, h, hr) in zip(rows, out)
+            ]
+            self.dataReady.emit({"img_update": merged})
+        except Exception as exc:                           # noqa: BLE001
             self.errorSig.emit(str(exc))
 
+    # --- APRI URL ---------------------------------------------------- #
+    def _open_img_url(self, index: QtCore.QModelIndex) -> None:
+        url = index.sibling(index.row(), 0).data()  # colonna Src
+        if url and isinstance(url, str):
+            webbrowser.open(url)
 
+    def _open_meta_url(self, index: QtCore.QModelIndex) -> None:
+        name = index.sibling(index.row(), 0).data()
+        if name in ("og:image", "og:image:url"):
+            url = index.sibling(index.row(), 1).data()
+            if url and isinstance(url, str):
+                webbrowser.open(url)
+
+    #Converte le righe (url, w, h, peso) nel formato a 6 colonne.
     def _update_images(self, rows: list[list[str]]) -> None:
-        
-        img_headers = ["Src", "Alt", "Title", "W", "H", "Peso"]
-        # append w/h/peso alle vecchie colonne o rimpiazza?
-        self.img_view.setModel(GenericModel(img_headers, rows))
-        model = self.img_view.model()
-        if isinstance(model, QtCore.QAbstractTableModel):  # evita “None” per Pylance
-            model.layoutChanged.emit()
+        headers = ["Src", "Alt", "Title", "W", "H", "Peso"]
+        model = GenericModel(headers, rows)
+        self.img_view.setModel(model)
+        model.layoutChanged.emit()
         self.img_view.resizeColumnsToContents()
-        log.info("Aggiornate immagini: %d righe", len(rows))
 
 
     def _reset_ui(self) -> None:

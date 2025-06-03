@@ -5,8 +5,23 @@ import importlib.resources
 import sys, platform, ctypes, importlib.resources
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
-
+from PyQt5 import QtCore, QtWidgets          # + QtGui for icons/fonts
 from .redirect_gui import RedirectWindow
+
+# ---------- THEMES --------------------------------------------------- #
+DARK_STYLESHEET = """
+QWidget      { background:#1e1e1e; color:#f0f0f0; }
+QPushButton  { background:#333;    color:#f0f0f0; border:1px solid #555;
+               padding:6px 12px; border-radius:6px; }
+QPushButton:hover { background:#444; }
+QTabWidget::pane { border:1px solid #555; }
+"""
+LIGHT_STYLESHEET = ""  # Qt default – leave empty
+
+def apply_theme(app: QtWidgets.QApplication, dark: bool = True) -> None:
+    app.setStyleSheet(DARK_STYLESHEET if dark else LIGHT_STYLESHEET)
+
+
 icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
 
 class HomeWindow(QMainWindow):
@@ -20,7 +35,9 @@ class HomeWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(icon_path)))
 
         layout = QVBoxLayout()
-        for idx, label in enumerate(("Check Redirect Massivo", "Analisi webpage SEO", "Esporta Report")):
+        
+
+        for idx, label in enumerate(("Check Redirect Massivo", "Analisi webpage SEO", "Coming soon")):
             btn = QPushButton(label)
             if idx == 0:
                 btn.clicked.connect(self.open_redirect)
