@@ -12,6 +12,7 @@ import asyncio
 import threading
 import logging
 
+
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -177,7 +178,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         # pulsanti extra --------------------------------------------------- #
         hbox = QtWidgets.QHBoxLayout()
-        self.btn_export = QtWidgets.QPushButton("Esporta Excel")
+        self.btn_export = QtWidgets.QPushButton("Esporta Excel (TBD)")
         self.btn_export.setEnabled(False)
         hbox.addWidget(self.btn_export)
 
