@@ -6,7 +6,6 @@ Motore asincrono per l’analisi SEO di una singola pagina.
 from __future__ import annotations
 from urllib.parse import urljoin, urlparse
 from io import BytesIO
-from typing import Any, Dict, List, cast
 from collections import Counter
 from dataclasses import dataclass
 from html import unescape
@@ -24,6 +23,16 @@ import ssl
 import string
 import bs4                      
 import aiohttp
+
+# ─── Safe import of extruct (fallback if lxml is broken) ──────────────────────
+try:
+    import extruct
+    from w3lib.html import get_base_url
+    USE_EXTRUCT = True
+except Exception:                       # ImportError, lxml errors, etc.
+    # extruct or lxml is unavailable → fall back to JSON-LD-only extractor
+    USE_EXTRUCT = False
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 # Carichiamo stop-word per 4 lingue (IT/EN/ES/FR)
@@ -152,12 +161,35 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
     return out
 
 
-def _extract_schema(soup: BeautifulSoup) -> list[list[str]]:
-    out: list[list[str]] = []
-    for script in soup.find_all("script", {"type": "application/ld+json"}):
-        raw = script.get_text(strip=True)            # -> sempre str
-        out.append([raw])
-    return out
+def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
+    """
+    If USE_EXTRUCT is True, extract JSON-LD + Microdata + RDFa + OpenGraph via Extruct.
+    Otherwise, fall back to looking only for <script type="application/ld+json"> blocks.
+    """
+    if USE_EXTRUCT:
+        # ----- full Extruct-based extraction -----
+        base_url = response_url
+        results = extruct.extract(
+            html_text,
+            base_url=base_url,
+            syntaxes=["json-ld", "microdata", "rdfa", "opengraph"],
+            uniform=True,
+        )
+        collected: list[dict] = []
+        for syntax in ("json-ld", "microdata", "rdfa", "opengraph"):
+            items = results.get(syntax) or []
+            for item in items:
+                item["_extracted_via"] = syntax
+                collected.append(item)
+        return collected
+    else:
+        # ----- fallback: only JSON-LD inside <script> tags -----
+        soup = BeautifulSoup(html_text, "lxml")
+        out: list[list[str]] = []
+        for script in soup.find_all("script", {"type": "application/ld+json"}):
+            raw = script.get_text(strip=True) or ""
+            out.append([raw])
+        return out
 
 
 def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:
@@ -173,10 +205,10 @@ def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:
 
 
 # --------------------------------------------------------------------- #
-async def analyse(url: str, timeout: int = 10) -> Dict[str, List[List[str]]]:
+async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
     resp = await fetch_page(url, timeout)
     soup = BeautifulSoup(resp.body, "html.parser")
-    schema_rows = _extract_schema(soup)
+    schema_rows = _extract_schema_all(resp.body, resp.url)
     # rimuovi commenti e script/style per trovare keyword
     for tag in soup.find_all(["script", "style"]):
         tag.extract()

@@ -11,6 +11,7 @@ import sys
 import asyncio
 import threading
 import logging
+import json
 
 
 logging.basicConfig(
@@ -168,8 +169,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.link_view.setSortingEnabled(True)
         self.tabs.addTab(self.link_view, "Link")
 
-        self.schema_view = QtWidgets.QTableView()
-        self.schema_view.setModel(_BaseModel([]))
+        # -------------------- Schema.org tab as a read-only QTextEdit --------------------
+        self.schema_view = QtWidgets.QTextEdit()
+        self.schema_view.setReadOnly(True)
         self.tabs.addTab(self.schema_view, "Schema.org")
 
         self.key_view = QtWidgets.QTableView()
@@ -257,7 +259,41 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         _set(self.link_view,   GenericModel(
             ["Href", "Tipo", "Follow", "Status"], data["links"])
         )
-        _set(self.schema_view, GenericModel(["JSON-LD"], data["schema"]))
+        
+       # ----- schema.org: pretty-print all variants or red warning -----
+
+        schema_items = data.get("schema", [])
+        if schema_items:
+            pretty_blocks: list[str] = []
+            for row in schema_items:
+                if isinstance(row, dict):
+                    # row is a dict (Extruct returned a dict for JSON-LD, microdata, etc.)
+                    try:
+                        # Render the entire dict as pretty-printed JSON
+                        pretty_blocks.append(json.dumps(row, indent=2, ensure_ascii=False))
+                    except Exception:
+                        # fallback to raw string if dict not JSON-serializable
+                        pretty_blocks.append(str(row))
+                elif isinstance(row, list) and row:
+                    # row is a one-element list [raw_jsonld]
+                    raw_json = row[0]
+                    try:
+                        parsed = json.loads(raw_json)
+                        pretty_blocks.append(json.dumps(parsed, indent=2, ensure_ascii=False))
+                    except Exception:
+                        pretty_blocks.append(raw_json)
+                else:
+                    # Anything else: convert to string
+                    pretty_blocks.append(str(row))
+
+            combined = "\n\n".join(pretty_blocks)
+            self.schema_view.setPlainText(combined)
+        else:
+            self.schema_view.setHtml(
+                "<span style='color:red; font-weight:bold;'>Schema.org not found</span>"
+            )
+
+
         _set(self.key_view,    GenericModel(["Termine", "Freq"], data["keywords"]))
         self._update_images(data["images"])
 
