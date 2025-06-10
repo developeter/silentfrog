@@ -1,136 +1,116 @@
-# Silentfrog – Desktop SEO Toolkit 🇬🇧
-simple python seo web crawler
+# Silentfrog – Desktop SEO Toolkit
 
-Silentfrog is a cross-platform desktop application (PyQt5) that helps SEO
-specialists audit redirect maps and individual web pages.  
-It is developed entirely in **Python 3.11+** with **Poetry** for reproducible
-dependencies and **pytest** for tests.
+Silentfrog is a **simple desktop SEO auditor** built with Python 3.11 + PyQt 5.
 
-| Feature                                                           | Status |
-                                                     
-| Mass-check redirects (XLSX in → styled XLSX out)                   ✔
-| Web-page SEO analyser (meta, headers, images, links, schema …)     ✔ 
-| Image deep-analysis (real WxH, weight, W/H ratio)                  ✔
-| Export results to Excel                                            X (TBD) 
-| Pause / resume tasks                                               ✔ 
+It lets quickly: 
+
+| Capability                                                          | Status     |
+| ------------------------------------------------------------------- | ---------- |
+| Bulk‑check redirects from Excel                                     | ✅ Done     |
+| Single‑page SEO analyser (meta, headers, images, links, Schema.org) | ✅ Done     |
+| Export results to Excel                                           | 🚧 Planned |
 
 ---
 
-## 1.  Prerequisites
+## 1  Prerequisites
 
+|            | Recommended      | Why                                                                 |
+| ---------- | ---------------- | ------------------------------------------------------------------- |
+| **Python** | **3.11 or 3.12** | `extruct 0.16` is pinned to **lxml 4.x** (no wheel for Py 3.13 yet) |
+| **Poetry** | ≥ 1.8            | Reproducible virtual‑envs                                           |
+| **Git**    | any              | Clone updates                                                       |
 
-| Python ≥ 3.11 | <https://www.python.org/downloads/windows/>       |
-| Poetry ≥ 1.8  | `pip install poetry` **or** official installer    |
-| Git           |   |
-
-> **Python in PATH** – make sure `python --version` returns ≥ 3.11  
-> On Windows you can enable “❑ Add Python to PATH” in the installer.
+> On **Windows** enable “Add Python to PATH” during install.
+> On **macOS** use Homebrew (`brew install python@3.12`).
 
 ---
 
-## 2.  Clone & install
+## 2  Quick start
 
 ```bash
-# 1. Clone the repo (replace URL with your Git remote)
-git clone https://github.com/your-org/silentfrog.git
-cd silentfrog
+# clone
+$ git clone https://github.com/your‑org/silentfrog.git
+$ cd silentfrog
 
-# 2. Install dependencies in an isolated virtual-env
-poetry install
-````
+# pick the right interpreter
+$ poetry env use $(which python3.12)    # or python3.11
 
-Poetry will:
+# install (pre‑built wheels, no compile step)
+$ poetry install --sync
 
-* create a venv under `%APPDATA%\pypoetry\` (Win) or `~/.cache/pypoetry/`
-* install all runtime deps (PyQt5, aiohttp, pillow, humanize …)
-* install all dev/test deps in the `--with dev` group
-
----
-
-## 3.  First run
-
-```bash
-# Activate the venv & launch the GUI
-poetry run silentfrog
+# launch GUI
+$ poetry run silentfrog
 ```
 
-* **Windows** – an **Installer prompt** (“Windows protected your PC”) may
-  appear the very first time because the app is unsigned; click **More info → Run anyway**.
-* **macOS** – if Gatekeeper blocks Qt, run
-  `xattr -dr com.apple.quarantine silentfrog` once inside the repo.
+### macOS first‑run issues
+
+* **Gatekeeper** – if the window won’t open: `xattr -dr com.apple.quarantine silentfrog`
+* **lxml build fails** with CPython 3.13 – use Python 3.12 **or** follow the manual‑compile instructions in § 8.
 
 ---
 
-## 4.  Running the test-suite
+## 3  Running the test‑suite
 
 ```bash
-poetry run pytest -q     # 5 tests, all green
+poetry run pytest -q   # ~4 s, 100 % pass
 ```
 
-> The first run downloads NLTK stop-word corpora; if outbound traffic is
-> blocked, run
-> `python -m nltk.downloader stopwords` manually inside the venv.
-
----
-
-## 5.  Updating / adding dependencies
+The first run downloads NLTK stop‑word data. If outbound traffic is blocked run:
 
 ```bash
-poetry add <package>
-poetry lock             # regenerate lockfile
-```
-
-Dev-only packages:
-
-```bash
-poetry add --group dev types-pillow types-humanize
+poetry run python -m nltk.downloader stopwords
 ```
 
 ---
 
-## 6.  Packaging (optional)
-
-| Target      | Command                                    | Output                |
-| ----------- | ------------------------------------------ | --------------------- |
-| Windows EXE | `poetry run pyinstaller silentfrog.spec`   | `dist/Silentfrog.exe` |
-| macOS app   | `poetry run pyinstaller --windowed gui.py` | `dist/Silentfrog.app` |
-
-> A pre-built **icon** is available in `src/silentfrog/assets/icon.*`
-> feel free to replace it with your agency branding.
-
----
-
-## 7.  Folder structure (tl;dr)
+## 4  Folder layout
 
 ```
 silentfrog/
-├─ src/
-│  └─ silentfrog/
-│      ├─ gui.py            # Home window
-│      ├─ redirect*.py      # Redirect checker engine + GUI
-│      ├─ seo_crawler.py    # Async crawler
-│      ├─ seo_gui.py        # SEO analyser GUI
-│      └─ assets/
-│          ├─ icon.png
-│          └─ icon.ico
-├─ tests/                   # pytest suite
-└─ pyproject.toml           # Poetry config
+│  pyproject.toml
+│  README.md
+├─ src/silentfrog/
+│    gui.py               # Home window + global theme switch
+│    redirect*.py         # Redirect‑checker engine & GUI
+│    seo_crawler.py       # Async crawler (aiohttp + extruct)
+│    seo_gui.py           # Tabbed SEO analyser window
+│    assets/              # App & tray icons
+└─ tests/                 # pytest suite
 ```
 
 ---
 
-## 8.  Common issues & fixes
+## 5  Packaging binaries (optional)
 
-| Symptom                                              | Fix                                                       |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| **“Cannot load Qt platform plugin”** on Ubuntu 22.04 | `sudo apt install libxcb-xinerama0`                       |
-| NLTK `stopwords` missing                             | `poetry run python -m nltk.downloader stopwords`          |
-| PyQt5 import error on M1 Mac                         | `brew install qt@5 && poetry add PyQt5-Qt5-macos==5.15.*` |
-
-> Still stuck? Open an issue or ping `@your-name` on Slack.
+| OS      | Command                                    | Output                |
+| ------- | ------------------------------------------ | --------------------- |
+| Windows | `poetry run pyinstaller silentfrog.spec`   | `dist/Silentfrog.exe` |
+| macOS   | `poetry run pyinstaller --windowed gui.py` | `dist/Silentfrog.app` |
 
 ---
 
-Happy crawling! 🐸
+## 6  Troubleshooting
 
+| Symptom / log snippet                                                        | Root cause                    | Fix                                                                                                   |
+| ---------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ImportError: cannot import name '_ElementStringResult' from lxml.etree`     | lxml 5.x wheel + extruct 0.16 | Stick to Python 3.11/3.12 → wheel pulls **lxml 4.9.x** automatically.  Or `poetry add "lxml>=4.9,<5"` |
+| **Poetry fails building lxml 4.9 on macOS**                                  | Using Python 3.13 (no wheels) | `brew install python@3.12 && poetry env use $(which python3.12)`                                      |
+| GUI crashes when clicking **Analizza** and log shows `TypeError: list found` | Mixed schema row formats      | Upgrade to Silentfrog ≥ 0.1.3 (fix merged 2025‑06‑04)                                                 |
+| `“Cannot load Qt platform plugin 'xcb'”` on Ubuntu                           | Missing Qt runtime libs       | `sudo apt install libxcb‑xinerama0`                                                                   |
+
+---
+
+## 7 Compiling on Python 3.13 anyway (macOS / Linux)
+
+```bash
+brew install libxml2 libxslt libiconv            # C headers
+poetry env use python3.13
+poetry add "git+https://github.com/scrapinghub/extruct.git@master#egg=extruct"
+poetry add "lxml>=5,<6"    # will build from source
+poetry install --sync
 ```
+
+
+---
+
+> **Happy crawling!**🐸  Bugs & PRs welcome.
