@@ -2,7 +2,6 @@
 Motore asincrono per l’analisi SEO di una singola pagina.
 
 """
-
 from __future__ import annotations
 from urllib.parse import urljoin, urlparse
 from io import BytesIO
@@ -15,14 +14,17 @@ from nltk.corpus import stopwords
 from aiohttp import ClientTimeout, ClientSession
 from typing import Any, Dict, List, cast
 from PIL import Image                     # pillow
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 import humanize
 import asyncio
 import re
 import ssl
 import string
-import bs4                      
+import bs4
 import aiohttp
+import email
 
 # ─── Safe import of extruct (fallback if lxml is broken) ──────────────────────
 try:
@@ -49,11 +51,19 @@ for lang in ("english", "italian", "spanish", "french"):
 
 @dataclass
 class HttpResponse:
-    body: str
-    status: int
-    url: str
+    """Lightweight container returned by fetch_page()."""
 
-# --------------------------------------------------------------------- #
+    def __init__(
+        self,
+        body: str,
+        status: int,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.body = body
+        self.status = status
+        self.url = url
+        self.headers = headers or {}
 
 # helper: ritorna sempre str ed evita errori di typing con Pylance
 def _attr(tag: Any, key: str) -> str:   # noqa: ANN401 (bs4 non ha stub preciso)
@@ -75,7 +85,12 @@ async def _fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> Http
             allow_redirects=True,
         ) as r:
             text = await r.text("utf-8", errors="ignore")
-            return HttpResponse(text, r.status, str(r.url))
+            return HttpResponse(
+                body=text,
+                status=r.status,
+                url=str(r.url),
+                headers=dict(r.headers),
+            )
     except Exception:
         return HttpResponse("", 0, url)
 
@@ -113,6 +128,30 @@ async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
             return r.status
     except Exception:
         return 0
+
+# ── robots.txt helper ───────────────────────────────────────────────────
+async def _check_robots(url: str, timeout: int = 5) -> bool:
+    """
+    Return True if the URL is allowed for User-agent '*' according to
+    the site's robots.txt.  Network errors → assume allowed.
+    """
+    parsed = urlparse(url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                robots_url,
+                timeout=ClientTimeout(total=timeout),   # Pylance-safe
+            ) as r:
+                txt = await r.text()
+    except Exception:
+        # Could not fetch robots.txt → be permissive
+        return True
+
+    rp = RobotFileParser()
+    rp.parse(txt.splitlines())
+    return rp.can_fetch("*", url)
 
 
 # --------------------------------------------------------------------- #
@@ -236,6 +275,10 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
         "images":   _extract_images(resp.url, soup),
         "links":    links_rows,
         "schema":   schema_rows,
+        "robots_allowed": await _check_robots(resp.url, timeout=timeout),
+        "meta_robots":  resp.headers.get("X-Robots-Tag", "") or
+                        next((m[1] for m in _extract_meta(soup)
+                            if m[0].lower() == "robots"), ""),
         "keywords": _extract_keywords(plain),
     }
 

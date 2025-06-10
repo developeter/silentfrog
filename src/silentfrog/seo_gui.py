@@ -169,7 +169,12 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.link_view.setSortingEnabled(True)
         self.tabs.addTab(self.link_view, "Link")
 
-        # -------------------- Schema.org tab as a read-only QTextEdit --------------------
+        # ---------- Robots tab ------------------------------------------- #
+        self.robots_view = QtWidgets.QTableView()
+        self.robots_view.setModel(_BaseModel([]))   # empty model for now
+        self.tabs.addTab(self.robots_view, "Robots")
+
+        # -----------Schema.org tab as a read-only QTextEdit --------------------
         self.schema_view = QtWidgets.QTextEdit()
         self.schema_view.setReadOnly(True)
         self.tabs.addTab(self.schema_view, "Schema.org")
@@ -252,6 +257,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         _set(self.meta_view,   MetaModel(data["meta"]))
         _set(self.h_view,      HeaderModel(data["headers"]))
+
+        # ---------- Robots table (Allowed? / Meta robots) ---------------
+        robots_rows = [
+            ["Robots.txt allowed", "Yes" if data.get("robots_allowed", True) else "No"],
+            ["Meta / X-Robots-Tag", data.get("meta_robots", "") or "—"],
+        ]
+        _set(self.robots_view, GenericModel(["Check", "Value"], robots_rows))
 
         _set(self.img_view,    GenericModel(
             ["Src", "Alt", "Title", "Peso", "W", "H"], data["images"])
