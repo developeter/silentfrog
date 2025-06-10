@@ -162,12 +162,17 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.img_view = QtWidgets.QTableView()
         self.img_view.setModel(_BaseModel([]))
         self.img_view.setSortingEnabled(True)
-        self.tabs.addTab(self.img_view, "Immagini")
+        self.tabs.addTab(self.img_view, "Images")
 
         self.link_view = QtWidgets.QTableView()
         self.link_view.setModel(_BaseModel([]))
         self.link_view.setSortingEnabled(True)
         self.tabs.addTab(self.link_view, "Link")
+
+        # ---------- Canonical tab ---------------------------------------- #
+        self.canon_view = QtWidgets.QTableView()
+        self.canon_view.setModel(_BaseModel([]))
+        self.tabs.addTab(self.canon_view, "Canonical")
 
         # ---------- Robots tab ------------------------------------------- #
         self.robots_view = QtWidgets.QTableView()
@@ -271,6 +276,17 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         _set(self.link_view,   GenericModel(
             ["Href", "Tipo", "Follow", "Status"], data["links"])
         )
+
+        # ---------- Canonical table -------------------------------------- #
+        canon = data.get("canonical", {})
+        canon_rows = [
+            ["Canonical URL", canon.get("target", "") or "—"],
+            ["Self-referencing", "Yes" if canon.get("self") else "No"],
+            ["Multiple canonicals", "Yes" if canon.get("multiple") else "No"],
+            ["Canonical status", canon.get("status", "") or "—"],
+        ]
+        _set(self.canon_view, GenericModel(["Check", "Value"], canon_rows))
+
         
        # ----- schema.org: pretty-print all variants or red warning -----
 

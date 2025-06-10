@@ -83,7 +83,7 @@ class HomeWindow(QMainWindow):
 
         # ---------- three main buttons ----------
         for idx, label in enumerate(
-            ("Check Redirect Massivo", "Analisi webpage SEO", "Coming soon")
+            ("Massive Redirect Check", "SEO Webpage analysis", "coming soon...")
         ):
             btn = QPushButton(label)
             font = btn.font()

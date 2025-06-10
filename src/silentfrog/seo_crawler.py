@@ -154,6 +154,41 @@ async def _check_robots(url: str, timeout: int = 5) -> bool:
     return rp.can_fetch("*", url)
 
 
+# ── canonical helper ──────────────────────────────────────────────────────────
+async def _check_canonical(
+    page_url: str,
+    soup: BeautifulSoup,
+    timeout: int = 5,
+) -> tuple[str, bool, bool, str]:
+    """
+    Returns:
+        (canonical_url,
+         is_self_referencing,
+         has_multiple,
+         status_code_or_error)
+    """
+    links = [l["href"].strip() for l in soup.find_all("link", rel="canonical", href=True)]
+    has_multiple = len(links) > 1
+    canonical_url = urljoin(page_url, links[0]) if links else ""
+    is_self = canonical_url.rstrip("/") == page_url.rstrip("/")
+
+    # HEAD request to see if canonical resolves (optional,  timeout-guarded)
+    status = ""
+    if canonical_url:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.head(
+                    canonical_url,
+                    timeout=ClientTimeout(total=timeout),
+                    allow_redirects=True,
+                ) as r:
+                    status = str(r.status)
+        except Exception as exc:
+            status = f"error {exc.__class__.__name__}"
+
+    return canonical_url, is_self, has_multiple, status
+
+
 # --------------------------------------------------------------------- #
 def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
@@ -255,26 +290,36 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
         c.extract()
     plain = soup.get_text(separator=" ", strip=True)
     
-    # ➊ estrae le righe “grezze” (status ancora vuoto)
+    # estrae le righe “grezze” (status ancora vuoto)
     links_rows: list[list[str]] = _extract_links(resp.url, soup)
 
-    # ➋ recupera in parallelo gli HTTP status
+    # recupera in parallelo gli HTTP status
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as _sess:
         coros = [_link_status(_sess, row[0], timeout) for row in links_rows]
         statuses = await asyncio.gather(*coros, return_exceptions=True)
 
-    # ➌ riempie la 4ª colonna di ogni riga
+    # riempie la 4ª colonna di ogni riga
     for row, st in zip(links_rows, statuses):
         row[3] = str(st if isinstance(st, int) else 0)
 
-    # ➍ costruisce il risultato finale
+    canonical_url, is_self, many_canon, canon_status = await _check_canonical(
+    resp.url, soup, timeout=timeout
+    )
+
+    # costruisce il risultato finale
     return {
         "meta":     _extract_meta(soup),
         "headers":  _extract_headers(soup),
         "images":   _extract_images(resp.url, soup),
         "links":    links_rows,
         "schema":   schema_rows,
+        "canonical": {
+            "target": canonical_url,
+            "self":   is_self,
+            "multiple": many_canon,
+            "status": canon_status,
+        },
         "robots_allowed": await _check_robots(resp.url, timeout=timeout),
         "meta_robots":  resp.headers.get("X-Robots-Tag", "") or
                         next((m[1] for m in _extract_meta(soup)
