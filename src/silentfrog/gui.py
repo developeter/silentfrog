@@ -42,7 +42,25 @@ QTableView QHeaderView::section {
 }
 /* ──────────────────────────────────────────────────────────────────────── */
 """
-LIGHT_STYLESHEET = ""  # Qt default – leave empty
+LIGHT_STYLESHEET = """
+QWidget            { background: #f0f0f0; color: #1e1e1e; }
+QPushButton        { background: #f0f0f0; color: #333; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; }
+QPushButton:hover  { background: #555555; color: #f0f0f0}
+QTabWidget::pane   { border: 1px solid #555; background: #f0f0f0; }
+QTabBar::tab       { background: #f0f0f0; color: #2e2e2e; padding: 6px; min-width: 80px; }
+QTabBar::tab:selected { background: #666; color: #f0f0f0}
+QTabBar::tab:hover { background: #888; color: #2e2e2e}
+
+/* ─── TABLE / HEADER STYLING ───────────────────────────────────────────── */
+QTableView         { background: #f0f0f0; gridline-color: #555555; }
+QTableView QHeaderView::section {
+    background-color: #f0f0f0;
+    color: #2e2e2e;
+    padding: 4px;
+    border: 1px solid #555555;
+}
+/* ──────────────────────────────────────────────────────────────────────── */
+"""
 
 def apply_theme(app, dark: bool = True) -> None:
     """
