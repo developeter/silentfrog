@@ -71,19 +71,38 @@ class GenericModel(_BaseModel):
     def sort(
         self,
         column: int,
-        order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.AscendingOrder,  # noqa: N802
-    ):
+        order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.AscendingOrder,
+    ) -> None:
+        """Smart sort: understands bytes / KB / MB, plain numbers, or strings."""
+
+        def _size_to_bytes(text: str) -> float | None:
+            units = {"b": 1, "kb": 1_024, "mb": 1_048_576}
+            parts = text.lower().split()
+            if len(parts) != 2:
+                return None
+            try:
+                num = float(parts[0])
+            except ValueError:
+                return None
+            return num * units.get(parts[1], 1)
+
+        def _key(row: list[str]):
+            cell = row[column].strip()
+            # Try human-friendly size first
+            size_val = _size_to_bytes(cell)
+            if size_val is not None:
+                return size_val
+            # Try plain numbers (“123” or “3.14”)
+            if cell.replace(".", "", 1).isdigit():
+                return float(cell)
+            # Fallback: case-insensitive text
+            return cell.lower()
 
         try:
             self.layoutAboutToBeChanged.emit()
             self._rows.sort(
-                key=lambda r: (
-                    float(r[column].split()[0])  # per "14 B", "2.1 MB"…
-                    if r[column] and r[column][0].isdigit()
-                    else r[column].lower()
-                )
-                if r[column].replace('.','',1).isdigit() else r[column].lower(),
-                reverse=(order == QtCore.Qt.SortOrder.DescendingOrder), 
+                key=_key,
+                reverse=(order == QtCore.Qt.SortOrder.DescendingOrder),
             )
         finally:
             self.layoutChanged.emit()
@@ -168,6 +187,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.link_view.setModel(_BaseModel([]))
         self.link_view.setSortingEnabled(True)
         self.tabs.addTab(self.link_view, "Link")
+
+        # ---------- Redirect tab ---------------------------------------- #
+        self.redir_view = QtWidgets.QTableView()
+        self.redir_view.setModel(_BaseModel([]))
+        self.tabs.addTab(self.redir_view, "Redirect")
 
         # ---------- Canonical tab ---------------------------------------- #
         self.canon_view = QtWidgets.QTableView()
@@ -262,20 +286,29 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         _set(self.meta_view,   MetaModel(data["meta"]))
         _set(self.h_view,      HeaderModel(data["headers"]))
+        
+        
+        # ---------- Robots table ---------------------------------------- #
+        robots_map: dict = data.get("robots", {})
+        meta_str = data.get("meta_robots", "") or "—"
 
-        # ---------- Robots table (Allowed? / Meta robots) ---------------
-        robots_rows = [
-            ["Robots.txt allowed", "Yes" if data.get("robots_allowed", True) else "No"],
-            ["Meta / X-Robots-Tag", data.get("meta_robots", "") or "—"],
-        ]
-        _set(self.robots_view, GenericModel(["Check", "Value"], robots_rows))
+        rows: list[list[str]] = [["Meta / X-Robots-Tag", meta_str], ["", ""]]
 
-        _set(self.img_view,    GenericModel(
-            ["Src", "Alt", "Title", "Peso", "W", "H"], data["images"])
+        # Flatten every UA section:
+        for ua, directives in robots_map.items():
+            rows.append([f"User-Agent: {ua}", ""])          # header row
+            for verb, path in directives:
+                rows.append([verb, path])
+
+        if not robots_map:
+            rows.append(["robots.txt", "Not fetched or empty"])
+
+        model = GenericModel(["Directive", "Value"], rows)
+        _set(self.robots_view, model)
+        self.robots_view.horizontalHeader().setSectionResizeMode(
+            1, QtWidgets.QHeaderView.Stretch
         )
-        _set(self.link_view,   GenericModel(
-            ["Href", "Tipo", "Follow", "Status"], data["links"])
-        )
+
 
         # ---------- Canonical table -------------------------------------- #
         canon = data.get("canonical", {})
@@ -286,6 +319,27 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Canonical status", canon.get("status", "") or "—"],
         ]
         _set(self.canon_view, GenericModel(["Check", "Value"], canon_rows))
+
+
+        # ---------- Redirect table -------------------------------------- #
+        red = data.get("redirect", {})
+        chain_txt = " ➜ ".join(red.get("chain", [])) if red.get("chain") else "—"
+        red_rows = [
+            ["Redirect chain", chain_txt],
+            ["Hop count",      str(red.get("hops", ""))],
+            ["Final status",   red.get("final_status", "")],
+            ["Loop detected",  "Yes" if red.get("loop") else "No"],
+        ]
+        _set(self.redir_view, GenericModel(["Check", "Value"], red_rows))
+        self.redir_view.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+
+        # ---------- Links table ----------------------------------------- #
+        link_rows = data.get("links", [])
+        link_headers = ["URL", "Anchor", "Follow ?", "Status"]
+        _set(self.link_view, GenericModel(link_headers, link_rows))
+        self.link_view.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.Stretch
+        )
 
         
        # ----- schema.org: pretty-print all variants or red warning -----
@@ -379,6 +433,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.img_view.setModel(model)
         model.layoutChanged.emit()
         self.img_view.resizeColumnsToContents()
+        # --- keep URL column reasonable (max 280 px) ------------------
+        self.img_view.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.Interactive
+        )
+        self.img_view.setColumnWidth(0, 280)
 
 
     def _reset_ui(self) -> None:

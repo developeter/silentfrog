@@ -130,29 +130,62 @@ async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
         return 0
 
 # ── robots.txt helper ───────────────────────────────────────────────────
-async def _check_robots(url: str, timeout: int = 5) -> bool:
-    """
-    Return True if the URL is allowed for User-agent '*' according to
-    the site's robots.txt.  Network errors → assume allowed.
-    """
+async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
+    """Return robots.txt text or None on network failure."""
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(
                 robots_url,
-                timeout=ClientTimeout(total=timeout),   # Pylance-safe
+                timeout=ClientTimeout(total=timeout),
             ) as r:
-                txt = await r.text()
+                return await r.text()
     except Exception:
-        # Could not fetch robots.txt → be permissive
-        return True
+        return None
 
-    rp = RobotFileParser()
-    rp.parse(txt.splitlines())
-    return rp.can_fetch("*", url)
 
+async def _parse_robots(url: str, timeout: int = 5) -> dict[str, list[tuple[str, str]]]:
+    """
+    Returns a mapping:
+        { user_agent: [ (directive, path), ... ] }
+    Example:
+        { '*': [ ('Disallow', '/admin'), ('Allow', '/') ],
+          'Googlebot': [ ('Allow', '/special') ] }
+    """
+    txt = await _fetch_robots(url, timeout)
+    if txt is None:
+        return {}
+
+    result: dict[str, list[tuple[str, str]]] = {}
+    current_agents: list[str] = ["*"]
+
+    for raw in txt.splitlines():
+        line = raw.split("#", 1)[0].strip()     # strip comments
+        if not line:
+            continue
+
+        if ":" not in line:
+            continue
+        key, value = (p.strip() for p in line.split(":", 1))
+        key_low = key.lower()
+
+        if key_low == "user-agent":
+            current_agents = [a.strip() for a in value.split()]
+            for ua in current_agents:
+                result.setdefault(ua, [])
+            continue
+
+        if key_low in ("allow", "disallow"):
+            for ua in current_agents:
+                result.setdefault(ua, []).append((key.title(), value))
+            continue
+
+        # record any other directive verbatim
+        for ua in current_agents:
+            result.setdefault(ua, []).append((key.title(), value))
+
+    return result
 
 # ── canonical helper ──────────────────────────────────────────────────────────
 async def _check_canonical(
@@ -187,6 +220,43 @@ async def _check_canonical(
             status = f"error {exc.__class__.__name__}"
 
     return canonical_url, is_self, has_multiple, status
+
+# ── redirect-chain helper ───────────────────────────────────────────────
+async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
+    """
+    Follow HEAD requests (max 6 hops) and return:
+        • list of hop URLs  (including start & each Location)
+        • final_status      (string)
+        • hops              (int)
+        • is_loop           (bool)  True if any URL repeats
+    """
+    max_hops = 6
+    hop_urls: list[str] = [url]
+    try:
+        async with aiohttp.ClientSession() as sess:
+            cur = url
+            for _ in range(max_hops):
+                async with sess.head(
+                    cur,
+                    allow_redirects=False,
+                    timeout=ClientTimeout(total=timeout),
+                ) as r:
+                    status = r.status
+                    if 300 <= status < 400 and "Location" in r.headers:
+                        nxt = urljoin(cur, r.headers["Location"])
+                        if nxt in hop_urls:
+                            # loop detected
+                            hop_urls.append(nxt)
+                            return hop_urls, str(status), len(hop_urls) - 1, True
+                        hop_urls.append(nxt)
+                        cur = nxt
+                        continue
+                    # reached final
+                    return hop_urls, str(status), len(hop_urls) - 1, False
+        # exceeded max_hops
+        return hop_urls, "max-hops", len(hop_urls) - 1, False
+    except Exception as exc:
+        return hop_urls, f"error {exc.__class__.__name__}", len(hop_urls) - 1, False
 
 
 # --------------------------------------------------------------------- #
@@ -307,6 +377,10 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
     resp.url, soup, timeout=timeout
     )
 
+    # --- Redirect chain -------------------------------------------------
+    hops, final_status, hop_count, is_loop = await _trace_redirects(url)
+
+
     # costruisce il risultato finale
     return {
         "meta":     _extract_meta(soup),
@@ -320,7 +394,13 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
             "multiple": many_canon,
             "status": canon_status,
         },
-        "robots_allowed": await _check_robots(resp.url, timeout=timeout),
+        "redirect": {
+            "hops": hop_count,
+            "chain": hops,
+            "final_status": final_status,
+            "loop": is_loop,
+        },
+        "robots":  await _parse_robots(resp.url, timeout=timeout),   # full UA map
         "meta_robots":  resp.headers.get("X-Robots-Tag", "") or
                         next((m[1] for m in _extract_meta(soup)
                             if m[0].lower() == "robots"), ""),
