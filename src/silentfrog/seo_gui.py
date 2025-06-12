@@ -203,6 +203,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.robots_view.setModel(_BaseModel([]))   # empty model for now
         self.tabs.addTab(self.robots_view, "Robots")
 
+        # ---------- Hreflang tab --------------------------------------- #
+        self.hlang_view = QtWidgets.QTableView()
+        self.hlang_view.setModel(_BaseModel([]))
+        self.tabs.addTab(self.hlang_view, "Hreflang")
+
         # -----------Schema.org tab as a read-only QTextEdit --------------------
         self.schema_view = QtWidgets.QTextEdit()
         self.schema_view.setReadOnly(True)
@@ -341,6 +346,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             0, QtWidgets.QHeaderView.Stretch
         )
 
+        # ---------- Hreflang table ------------------------------------- #
+        h_rows = data.get("hreflang", [])
+        h_headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
+        _set(self.hlang_view, GenericModel(h_headers, h_rows))
+        self.hlang_view.horizontalHeader().setSectionResizeMode(
+            1, QtWidgets.QHeaderView.Stretch
+        )
         
        # ----- schema.org: pretty-print all variants or red warning -----
 

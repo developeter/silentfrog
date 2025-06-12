@@ -14,7 +14,7 @@ from nltk.corpus import stopwords
 from aiohttp import ClientTimeout, ClientSession
 from typing import Any, Dict, List, cast
 from PIL import Image                     # pillow
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
 import humanize
@@ -221,6 +221,57 @@ async def _check_canonical(
 
     return canonical_url, is_self, has_multiple, status
 
+# ── hreflang helper ────────────────────────────────────────────────────
+_HREFLANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")   # e.g. en , fr-FR
+
+async def _extract_hreflang(
+    page_url: str,
+    soup: BeautifulSoup,
+    timeout: int = 5,
+) -> list[list[str]]:
+    """
+    Returns list rows:
+        [lang, target_url, status, valid?, return_link?]
+    """
+    # 1) Collect tags
+    rows: list[list[str]] = []
+    rels: dict[str, str] = {}          # lang → url
+    for tag in soup.find_all("link", rel="alternate", hreflang=True, href=True):
+        lang = tag["hreflang"].strip()
+        href = urljoin(page_url, tag["href"].strip())
+        rels[lang.lower()] = href
+
+    # 2) HEAD-fetch each URL (in serial to keep code short)
+    async with aiohttp.ClientSession() as sess:
+        for lang, href in rels.items():
+            try:
+                async with sess.head(
+                    href,
+                    allow_redirects=True,
+                    timeout=ClientTimeout(total=timeout),
+                ) as r:
+                    status = str(r.status)
+            except Exception as exc:
+                status = f"error {exc.__class__.__name__}"
+
+            rows.append(
+                [
+                    lang,
+                    href,
+                    status,
+                    "Yes" if _HREFLANG_RE.match(lang) else "No",
+                    "",           # placeholder for return-link
+                ]
+            )
+
+    # 3) Compute return-link symmetry
+    for row in rows:
+        lang, href = row[0], row[1]
+        # fetch that page's hreflang back to us?
+        row[4] = "Yes" if rels.get(lang) == href else "No"
+
+    return rows
+
 # ── redirect-chain helper ───────────────────────────────────────────────
 async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
     """
@@ -380,6 +431,8 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
     # --- Redirect chain -------------------------------------------------
     hops, final_status, hop_count, is_loop = await _trace_redirects(url)
 
+    hreflang_rows = await _extract_hreflang(resp.url, soup, timeout=timeout)
+
 
     # costruisce il risultato finale
     return {
@@ -404,6 +457,7 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
         "meta_robots":  resp.headers.get("X-Robots-Tag", "") or
                         next((m[1] for m in _extract_meta(soup)
                             if m[0].lower() == "robots"), ""),
+        "hreflang": hreflang_rows,
         "keywords": _extract_keywords(plain),
     }
 
