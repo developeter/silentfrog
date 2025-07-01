@@ -8,4 +8,4 @@ def test_seo_window_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
     assert isinstance(win, QtWidgets.QWidget)
-    assert win.tabs.count() == 9                # Meta, Header, Immagini, Link, Schema, Keywords, Robots
+    assert win.tabs.count() == 12                # Meta, Header, Immagini, Link, Schema, Keywords, Robots

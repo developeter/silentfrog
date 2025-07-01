@@ -3,7 +3,6 @@ Motore asincrono per l’analisi SEO di una singola pagina.
 
 """
 from __future__ import annotations
-from urllib.parse import urljoin, urlparse
 from io import BytesIO
 from collections import Counter
 from dataclasses import dataclass
@@ -13,9 +12,11 @@ from bs4 import BeautifulSoup, Comment
 from nltk.corpus import stopwords
 from aiohttp import ClientTimeout, ClientSession
 from typing import Any, Dict, List, cast
-from PIL import Image                     # pillow
+from PIL import Image, ImageDraw
 from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
+from base64 import b64encode
+from textwrap import shorten
 
 import humanize
 import asyncio
@@ -272,6 +273,75 @@ async def _extract_hreflang(
 
     return rows
 
+# ── AI-crawl helper ─────────────────────────────────────────────────────
+_AI_AGENTS = {
+    "GPTBot":      "gptbot",
+    "Google-Extended": "google-extended",
+    "Gemini":      "google-other",        # Gemini uses generic UA per Google doc
+}
+
+def _ai_crawl_matrix(
+    robots_map: dict[str, list[tuple[str, str]]],
+    meta_robots: str,
+    page_url: str,
+) -> list[list[str]]:
+    """
+    Returns rows: [Agent, Robots.txt allowed?, Meta-robots disallow?, Verdict]
+    """
+    def _allowed_by_robots(agent_token: str) -> bool:
+        # Very simple: look for Disallow that matches '*' or our agent
+        disallows = []
+        for ua, directives in robots_map.items():
+            if ua in ("*", agent_token):
+                disallows.extend(
+                    path for verb, path in directives if verb.lower() == "disallow"
+                )
+        # If a blanket Disallow: / or path prefix matches URL
+        return not any(page_url.startswith(urljoin(page_url, d)) for d in disallows)
+
+    out: list[list[str]] = []
+    meta_disallow = "noai" in meta_robots.lower() or "noimageai" in meta_robots.lower()
+    for pretty, token in _AI_AGENTS.items():
+        allowed = _allowed_by_robots(token)
+        verdict = "Blocked" if (not allowed or meta_disallow) else "Allowed"
+        out.append([pretty, "Yes" if allowed else "No", "Yes" if meta_disallow else "No", verdict])
+    return out
+
+
+# ── SERP preview helper ────────────────────────────────────────────────
+def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
+    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    desc_tag = soup.find("meta", attrs={"name": "description"})
+    description = desc_tag["content"].strip() if desc_tag and desc_tag.get("content") else ""
+    # Google shows ~155 chars on desktop
+    description = shorten(description, width=155, placeholder="…")
+    return {
+        "title": title,
+        "description": description,
+        "display_url": urlparse(page_url).netloc.replace("www.", "") + "/…",
+    }
+
+# ── Title audit helper ──────────────────────────────────────────────────
+_MEAN_PX = 7.2           # average desktop pixel width per glyph
+
+def _title_audit(title: str, headers: list[list[str]]) -> dict[str, str]:
+    """Return a dict with all title warning flags."""
+    h1_text = next((h[1] for h in headers if h and h[0].lower() == "h1"), "")
+    length = len(title)
+    pixels = int(length * _MEAN_PX)
+    return {
+        "too_long":     "Yes" if length > 60 else "No",
+        "too_short":    "Yes" if length < 30 else "No",
+        "px_over":      "Yes" if pixels > 561 else "No",
+        "px_under":     "Yes" if pixels < 200 else "No",
+        "equals_h1":    "Yes" if title.strip().lower() == h1_text.strip().lower() else "No",
+        "missing":      "Yes" if not title else "No",
+        "px_len":       str(pixels),
+        "char_len":     str(length),
+    }
+
+
+
 # ── redirect-chain helper ───────────────────────────────────────────────
 async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
     """
@@ -432,7 +502,98 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
     hops, final_status, hop_count, is_loop = await _trace_redirects(url)
 
     hreflang_rows = await _extract_hreflang(resp.url, soup, timeout=timeout)
+    
+    meta_robots = resp.headers.get("X-Robots-Tag", "") or next(
+        (m[1] for m in _extract_meta(soup) if m[0].lower() == "robots"), ""
+    )
 
+    robots_map = await _parse_robots(url, timeout=timeout)
+    ai_rows = _ai_crawl_matrix(robots_map, meta_robots, resp.url)
+    serp_preview = _serp_preview(resp.url, soup)
+    title_audit = _title_audit(serp_preview["title"], _extract_headers(soup))
+
+    # -- SERP helper ----------------------------------------------------------------
+    from urllib.parse import urlparse, unquote
+
+    async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
+            async def _to_data_uri(img_url: str) -> str:
+                """Download *img_url* and return a data-URI.  
+                Falls back to the original URL on error."""
+                try:
+                    async with aiohttp.ClientSession() as _s:
+                        async with _s.get(img_url, timeout=5) as _r:
+                            if _r.status == 200:
+                                raw = await _r.read()
+                                # cut a 16×16 round icon
+                                with Image.open(BytesIO(raw)).convert("RGBA") as im:
+                                    im = im.resize((16, 16), Image.LANCZOS)
+                                    mask = Image.new("L", (16, 16), 0)
+                                    ImageDraw.Draw(mask).ellipse((0, 0, 16, 16), fill=255)
+                                    im.putalpha(mask)
+                                    buf = BytesIO()
+                                    im.save(buf, format="PNG")
+                                    raw = buf.getvalue()
+                                return f"data:image/png;base64,{b64encode(raw).decode()}"
+                except Exception:
+                    pass
+                return img_url
+            
+            parsed = urlparse(page_url)
+            domain = parsed.netloc
+
+            # ── site / brand name ────────────────────────────────────────────
+            og_site = soup.find("meta", property="og:site_name")
+            if og_site and og_site.get("content"):
+                site_name = og_site["content"].strip()
+            else:
+                # fallback: second-level domain, e.g. “example” from “www.example.com”
+                site_name = (domain.split(".")[-2].capitalize() if domain else "")
+
+
+            # ── title (use empty string if <title> missing) ────────────────────────
+            title_tag = soup.title
+            raw_title = (title_tag.string or "").strip() if title_tag else ""
+
+            # ── truncate by pixel width (~600 px ≈ 7.2 px per glyph) ────────────
+            _MAX_PX = 600
+            _CHAR_LIMIT = int(_MAX_PX / _MEAN_PX)          # ≈ 83 chars
+            title = (
+                raw_title[: _CHAR_LIMIT - 1].rstrip() + "…"
+                if len(raw_title) > _CHAR_LIMIT
+                else raw_title
+            )
+
+            # breadcrumb:  example.com › section › page
+            path = unquote(parsed.path.strip("/")).replace("/", " › ")
+            breadcrumb = f"{domain} › {path}" if path else domain
+
+            # ----- description (truncate 160 chars, add ellipsis) ------------------
+            desc_tag = (
+                soup.find("meta", attrs={"name": "description"}) or
+                soup.find("meta", property="og:description")
+                )
+            raw_desc = (desc_tag["content"]
+                if desc_tag and desc_tag.has_attr("content") else "").strip()
+            description = (raw_desc[:157] + "…") if len(raw_desc) > 160 else raw_desc
+
+            favicon_tag = soup.find("link", rel=lambda v: v and "icon" in v.lower())
+
+            if favicon_tag and favicon_tag.has_attr("href"):
+                raw_icon = favicon_tag["href"]
+                favicon = urljoin(page_url, raw_icon)               # make absolute
+            else:
+                # Google-style fallback service (always https, 48 px)
+                favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+
+            return {
+                "title":       title,
+                # truncate to 160 chars, add ellipsis the Google way
+                "description": (description[:157] + "…") if len(description) > 160 else description,
+                "url":         page_url,
+                "site_name":   site_name,
+                "favicon":     await _to_data_uri(favicon),
+                "breadcrumb":  breadcrumb,
+            }
 
     # costruisce il risultato finale
     return {
@@ -458,7 +619,11 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
                         next((m[1] for m in _extract_meta(soup)
                             if m[0].lower() == "robots"), ""),
         "hreflang": hreflang_rows,
+        "ai_crawl": ai_rows,
+        "serp":      await _make_serp_snippet(soup, resp.url),
+        "serp_audit": title_audit,
         "keywords": _extract_keywords(plain),
+  
     }
 
 

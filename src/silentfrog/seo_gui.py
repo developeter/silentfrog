@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import QUrl
 from .seo_crawler import analyse
 from functools import partial
 from .seo_crawler import analyse, analyse_images
@@ -217,6 +218,32 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.key_view.setModel(_BaseModel([]))
         self.tabs.addTab(self.key_view, "Keywords")
 
+        # ---------- AI Crawl tab --------------------------------------- #
+        self.ai_view = QtWidgets.QTableView()
+        self.ai_view.setModel(_BaseModel([]))
+        self.tabs.addTab(self.ai_view, "AI Crawl")
+   
+       # ─── SERP preview tab ────────────────────────────────────────────────────
+        self.serp_view = QtWidgets.QTextBrowser()
+        self.serp_view.setOpenExternalLinks(True)
+        self.serp_view.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.serp_view.setMaximumHeight(220)
+        self.serp_view.setStyleSheet("background:#fff; border:0;")
+
+        self.serp_table = QtWidgets.QTableView()
+        self.serp_table.setModel(_BaseModel([]))
+        self.serp_table.setSortingEnabled(False)
+
+        serp_tab = QtWidgets.QWidget()
+        serp_lay = QtWidgets.QVBoxLayout(serp_tab)  # PyQt5 accepts only the parent
+        serp_lay.setSpacing(0)                      # spacing = 0
+        serp_lay.setContentsMargins(0, 0, 0, 0)     # left, top, right, bottom
+        # ------------------------------------------------------------------------
+
+        serp_lay.addWidget(self.serp_view)
+        serp_lay.addWidget(self.serp_table)
+        self.tabs.addTab(serp_tab, "SERP")
+
         # pulsanti extra --------------------------------------------------- #
         hbox = QtWidgets.QHBoxLayout()
         self.btn_export = QtWidgets.QPushButton("Esporta Excel (TBD)")
@@ -353,7 +380,82 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.hlang_view.horizontalHeader().setSectionResizeMode(
             1, QtWidgets.QHeaderView.Stretch
         )
-        
+
+        # ---------- AI Crawl table ------------------------------------- #
+        ai_rows = data.get("ai_crawl", [])
+        ai_headers = ["Agent", "Robots.txt OK", "Meta noai?", "Verdict"]
+        _set(self.ai_view, GenericModel(ai_headers, ai_rows))
+        self.ai_view.horizontalHeader().setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeToContents
+        )
+        self.ai_view.horizontalHeader().setSectionResizeMode(
+            3, QtWidgets.QHeaderView.ResizeToContents
+        )
+
+        # ---------- SERP Preview & Title Audit ------------------------- #
+        serp = data.get("serp", {})
+        audit = data.get("serp_audit", {})
+
+        # Force-light preview; title and URL colours match real Google
+        desc = serp.get("description", "")
+        if len(desc) > 160:
+            desc = desc[:157].rstrip() + "…"
+
+        serp_html = f"""
+        <div style='font-family:Roboto,Arial,sans-serif;font-size:14px;
+                    line-height:1.3;background:#fff;color:#202124;padding:8px'>
+           <table cellpadding='0' cellspacing='0' style='border:none;margin:0;padding:0'>
+              <tr>
+                <!-- favicon, centrato verticalmente sulle due righe a destra -->
+                <td rowspan='2' style='padding-right:6px;vertical-align:middle'>
+                  {"<img src=\"" + serp["favicon"] + "\" width='30' height='30' alt='icon'/>"
+                   if serp.get("favicon") else ""}
+                </td>
+                <!-- ①  nome sito -->
+                <td style='font-size:14px;color:#202124;font-weight:500;vertical-align:bottom'>
+                  {serp["site_name"]}
+                </td>
+              </tr>
+              <tr>
+                <!-- ②  breadcrumb, allineato sotto al nome sito ma stessa colonna -->
+                <td style='font-size:12px;color:#4d5156;vertical-align:top'>
+                  {serp["breadcrumb"]}
+                </td>
+              </tr>
+            </table>
+            <div>
+                <a href='{serp["url"]}'
+                style='font-size:18px;font-weight:400;color:#1a0dab;
+                        text-decoration:none;display:inline-block;max-width:600px;
+                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>
+                    {serp["title"]}
+                </a>
+            </div>
+            <div style='font-size:14px;color:#4d5156;margin-top:3px;max-width:600px'>
+                {serp["description"]}
+            </div>
+        </div>
+        """
+
+
+        self.serp_view.setHtml(serp_html)
+
+        audit_rows = [
+            ["Length (chars)", audit.get("char_len", "")],
+            ["Length (pixels)", audit.get("px_len", "")],
+            ["> 60 chars", audit.get("too_long", "")],
+            ["< 30 chars", audit.get("too_short", "")],
+            ["> 561 px", audit.get("px_over", "")],
+            ["< 200 px", audit.get("px_under", "")],
+            ["Equals H1", audit.get("equals_h1", "")],
+            ["Missing", audit.get("missing", "")],
+        ]
+        _set(self.serp_table, GenericModel(["Check", "Result"], audit_rows))
+        self.serp_table.horizontalHeader().setSectionResizeMode(
+            1, QtWidgets.QHeaderView.ResizeToContents
+        )
+
+
        # ----- schema.org: pretty-print all variants or red warning -----
 
         schema_items = data.get("schema", [])
