@@ -2,10 +2,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import QUrl
+from PyQt5.QtCore import QUrl, Qt
 from .seo_crawler import analyse
 from functools import partial
 from .seo_crawler import analyse, analyse_images
+from PyQt5.QtGui import QColor, QBrush
 
 import webbrowser
 import sys
@@ -111,11 +112,81 @@ class GenericModel(_BaseModel):
 
 class MetaModel(_BaseModel):
     HEADERS = ["Name/Property", "Content", "Length"]
+    # add colour coding for Title/Description length
+    def data(  # type: ignore[override]
+        self,
+        index: QtCore.QModelIndex,
+        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+    ):
 
+        # 1️  Standard text display
+        if role == QtCore.Qt.DisplayRole:                # type: ignore[attr-defined]
+            return super().data(index, role)
+
+        # 2️  Background colouring (only column “Length”)
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 2:
+            GOOD = QBrush(QColor(0, 180, 0, 60))         # semi-transparent green
+            BAD  = QBrush(QColor(200, 0, 0, 60))         # semi-transparent red
+
+            key = self._rows[index.row()][0].lower()     # e.g. "description"
+            try:
+                n = int(self._rows[index.row()][2])
+            except ValueError:
+                return BAD
+
+            # Description ideal 120-160 chars
+            if key == "description":
+                return GOOD if 120 <= n <= 160 else BAD
+
+            # Robots meta: flag “noindex/nofollow”
+            if key == "robots":
+                bad = any(tok in self._rows[index.row()][1].lower()
+                          for tok in ("noindex", "nofollow"))
+                return BAD if bad else GOOD
+
+        # Fallback → default behaviour
+        return super().data(index, role)
 
 class HeaderModel(_BaseModel):
     HEADERS = ["Tag", "Text"]
 
+# -------------------------------------------------------------------
+# Links tab model – colour “Status” column (index 3)
+# -------------------------------------------------------------------
+class LinksModel(GenericModel):
+    """Highlights HTTP status: green 2xx | yellow 3xx | red 4xx/5xx."""
+
+    def __init__(self, rows: list[list[str]]) -> None:
+        headers = ["URL", "Anchor", "Follow ?", "Status"]
+        super().__init__(headers, rows)
+
+    def data(  # type: ignore[override]
+        self,
+        index: QtCore.QModelIndex,
+        role: int = QtCore.Qt.DisplayRole,          # type: ignore[attr-defined]
+    ):
+        # 1️⃣  Normal cell text
+        if role == QtCore.Qt.DisplayRole:                # type: ignore[attr-defined]
+            return super().data(index, role)
+
+        # 2️⃣  Background colour for Status column
+        if role == QtCore.Qt.BackgroundRole and index.column() == 3:
+            GREEN  = QBrush(QColor(  0, 180,   0, 60))   # semi-transparent
+            YELLOW = QBrush(QColor(255, 200,   0, 60))
+            RED    = QBrush(QColor(200,   0,   0, 60))
+
+            try:
+                code = int(self._rows[index.row()][3])
+            except ValueError:
+                return RED
+
+            if 200 <= code < 300:
+                return GREEN
+            if 300 <= code < 400:
+                return YELLOW
+            return RED
+
+        return super().data(index, role)
 
 # --------------------------------------------------------------------------- #
 #                              FINESTRA PRINCIPALE                            #
@@ -189,7 +260,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.link_view.setSortingEnabled(True)
         self.tabs.addTab(self.link_view, "Link")
 
-        # ---------- Redirect tab ---------------------------------------- #
+        # ---------- Redirect tab ----------------------------------------- #
         self.redir_view = QtWidgets.QTableView()
         self.redir_view.setModel(_BaseModel([]))
         self.tabs.addTab(self.redir_view, "Redirect")
@@ -204,12 +275,12 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.robots_view.setModel(_BaseModel([]))   # empty model for now
         self.tabs.addTab(self.robots_view, "Robots")
 
-        # ---------- Hreflang tab --------------------------------------- #
+        # ---------- Hreflang tab ----------------------------------------- #
         self.hlang_view = QtWidgets.QTableView()
         self.hlang_view.setModel(_BaseModel([]))
         self.tabs.addTab(self.hlang_view, "Hreflang")
 
-        # -----------Schema.org tab as a read-only QTextEdit --------------------
+        # -----------Schema.org tab as a read-only QTextEdit --------------- #
         self.schema_view = QtWidgets.QTextEdit()
         self.schema_view.setReadOnly(True)
         self.tabs.addTab(self.schema_view, "Schema.org")
@@ -263,7 +334,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setVisible(False)
         vbox.addWidget(self.bar)
 
-    # -------------------- avvio analisi (thread worker) ------------------ #
+    # -------------------- avvio analisi (thread worker) ------------------- #
     def _start_analysis(self) -> None:
         self._models.clear()           # libera modelli precedenti
         log.info("Pulizia modelli, ora: %d", len(self._models))
@@ -365,13 +436,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         _set(self.redir_view, GenericModel(["Check", "Value"], red_rows))
         self.redir_view.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
-        # ---------- Links table ----------------------------------------- #
+        # -------- Links tab ------------------------------------------
         link_rows = data.get("links", [])
-        link_headers = ["URL", "Anchor", "Follow ?", "Status"]
-        _set(self.link_view, GenericModel(link_headers, link_rows))
+        _set(self.link_view, LinksModel(link_rows))
+        self.link_view.setAlternatingRowColors(False)   # keep colours crisp
         self.link_view.horizontalHeader().setSectionResizeMode(
-            0, QtWidgets.QHeaderView.Stretch
-        )
+             0, QtWidgets.QHeaderView.Stretch
+         )
 
         # ---------- Hreflang table ------------------------------------- #
         h_rows = data.get("hreflang", [])
@@ -406,18 +477,15 @@ class WebpageSeoWindow(QtWidgets.QWidget):
                     line-height:1.3;background:#fff;color:#202124;padding:8px'>
            <table cellpadding='0' cellspacing='0' style='border:none;margin:0;padding:0'>
               <tr>
-                <!-- favicon, centrato verticalmente sulle due righe a destra -->
                 <td rowspan='2' style='padding-right:6px;vertical-align:middle'>
                   {"<img src=\"" + serp["favicon"] + "\" width='30' height='30' alt='icon'/>"
                    if serp.get("favicon") else ""}
                 </td>
-                <!-- ①  nome sito -->
                 <td style='font-size:14px;color:#202124;font-weight:500;vertical-align:bottom'>
                   {serp["site_name"]}
                 </td>
               </tr>
               <tr>
-                <!-- ②  breadcrumb, allineato sotto al nome sito ma stessa colonna -->
                 <td style='font-size:12px;color:#4d5156;vertical-align:top'>
                   {serp["breadcrumb"]}
                 </td>
