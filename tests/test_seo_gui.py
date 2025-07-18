@@ -2,10 +2,10 @@ import pytest
 from PyQt5 import QtWidgets
 from silentfrog.seo_gui import WebpageSeoWindow
 
-def test_seo_window_tabs(qtbot):
-    """La finestra si apre e contiene 9 schede."""
+def test_seo_window_tabs_and_sort(qtbot):
+    """Window opens, has 12 tabs"""
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
     win.show()
     assert isinstance(win, QtWidgets.QWidget)
-    assert win.tabs.count() == 12                # Meta, Header, Immagini, Link, Schema, Keywords, Robots
+    assert win.tabs.count() == 12

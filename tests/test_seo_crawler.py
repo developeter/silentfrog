@@ -1,12 +1,36 @@
 import pytest
 import textwrap
+import warnings
 from aiohttp import web
-
 from silentfrog.seo_crawler import analyse, analyse_images
 
+# ------------------------------------------------------------------
+# Silence third-party warning inside pyRdfa only
+# ------------------------------------------------------------------
+warnings.filterwarnings(
+    "ignore",
+    message=r"datetime\.datetime\.utcnow\(\) is deprecated",
+    category=DeprecationWarning,
+    module=r"pyRdfa\.options",
+)
+
+
+# ------------------------------------------------------------------
+# Silence pyRdfa's deprecated `datetime.utcnow()` once for this module
+# ------------------------------------------------------------------
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning"
+)
+
+# Added canonical & hreflang so new helpers return data
 HTML = textwrap.dedent("""
 <html><head>
+  <title>Example page</title>
+  <link rel="canonical" href="/" />
+  <link rel="alternate" hreflang="en" href="/en" />
+  <link rel="icon" href="/favicon.ico" />                     
   <meta name="description" content="foo bar">
+  <meta property="og:site_name" content="TestSite" />
   <script type="application/ld+json">{"@context":"https://schema.org"}</script>
 </head><body>
   <h1>Titolo</h1>
@@ -16,7 +40,7 @@ HTML = textwrap.dedent("""
 </body></html>
 """)
 
-# ------------------------------------------------------------------ #
+# ------------Spin up a mini site that serves the HTML------------- #
 @pytest.fixture
 async def local_server(aiohttp_server):
     """
@@ -26,8 +50,24 @@ async def local_server(aiohttp_server):
         return web.Response(text=HTML, content_type="text/html")
 
     app = web.Application()
-    app.router.add_get("/", handler)
-    server = await aiohttp_server(app)
+    async def _html(_):
+        return web.Response(text=HTML, content_type="text/html")
+
+    async def _png(_):
+        return web.Response(body=b"x", content_type="image/png")
+
+    async def _ico(_):
+        return web.Response(body=b"x", content_type="image/x-icon")
+    
+    app.router.add_get("/", _html)
+    app.router.add_get("/assets/icon.png", _png)
+    app.router.add_get("/assets/icon.ico", _ico)    
+    
+#   app.router.add_get("/", handler)
+#   app.router.add_get("/assets/icon.png",   lambda r: web.Response(body=b"x", content_type="image/png"))
+#   app.router.add_get("/assets/icon.ico", lambda r: web.Response(body=b"x", content_type="image/x-icon"))
+    
+    server = await aiohttp_server(app) 
     return str(server.make_url("/"))
 
 
@@ -68,7 +108,29 @@ async def test_analyse(local_server):
     else:
       pytest.fail(f"Unexpected schema item type: {type(first)}")
 
+   # 6) canonical dict has expected keys and self-referencing Yes
+    canon = data["canonical"]
+    assert canon["self"] is True and "status" in canon
 
+    # 7) redirect dict present (we didn't redirect, hops == 0)
+    redir = data["redirect"]
+    assert redir["hops"] == 0 and redir["final_status"]
+
+    # 8) hreflang list contains our "en"
+    langs = [row[0] for row in data["hreflang"]]
+    assert "en" in langs
+
+    # 9) ai_crawl returns three rows (GPTBot, Google-Extended, Gemini)
+    assert len(data["ai_crawl"]) == 3
+
+    # 10) serp preview dict must include a non-empty favicon
+    serp = data["serp"]
+    assert serp["title"]
+    assert serp["breadcrumb"]
+    assert serp["favicon"]  
+
+    # 11) keywords extraction returns non-empty list
+    assert data["keywords"]
 
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
