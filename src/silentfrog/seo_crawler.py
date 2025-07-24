@@ -427,19 +427,27 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
 
 
 def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
+
     """
-    If USE_EXTRUCT is True, extract JSON-LD + Microdata + RDFa + OpenGraph via Extruct.
-    Otherwise, fall back to looking only for <script type="application/ld+json"> blocks.
+    If USE_EXTRUCT is True, extract JSON-LD + Microdata + OpenGraph via Extruct.
+    (RDFa removed because its helper library *pyRdfa* uses deprecated
+    datetime.utcnow() on Python ≥ 3.12.)
+    Otherwise, fall back to looking only for
+    <script type="application/ld+json"> blocks.
     """
+
     if USE_EXTRUCT:
         # ----- full Extruct-based extraction -----
         base_url = response_url
+
         results = extruct.extract(
             html_text,
             base_url=base_url,
-            syntaxes=["json-ld", "microdata", "rdfa", "opengraph"],
+            # drop "rdfa" ➜ no import of pyRdfa ➜ no DeprecationWarning
+            syntaxes=["json-ld", "microdata", "opengraph"],
             uniform=True,
         )
+
         collected: list[dict] = []
         for syntax in ("json-ld", "microdata", "rdfa", "opengraph"):
             items = results.get(syntax) or []
