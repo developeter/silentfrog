@@ -26,6 +26,10 @@ import string
 import bs4
 import aiohttp
 import email
+import json
+import os
+import html as _html
+import logging
 
 # ─── Safe import of extruct (fallback if lxml is broken) ──────────────────────
 try:
@@ -35,8 +39,19 @@ try:
 except Exception:                       # ImportError, lxml errors, etc.
     # extruct or lxml is unavailable → fall back to JSON-LD-only extractor
     USE_EXTRUCT = False
-# ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+ 
+# ------------------------------------------------------------------------------
+# Schema debug logger (opt-in via SILENTFROG_DEBUG).  Defined unconditionally,
+# so it can never raise NameError even if imported elsewhere.
+DEBUG_SCHEMA = os.environ.get("SILENTFROG_DEBUG", "").lower() in ("1", "true", "yes", "y")
+_SCHEMA_LOGGER = logging.getLogger("silentfrog.schema")
+
+def _log_schema(msg: str) -> None:
+    """Emit debug messages for schema extraction; silent unless env is set."""
+    if DEBUG_SCHEMA:
+        _SCHEMA_LOGGER.info(msg)
 
 # Carichiamo stop-word per 4 lingue (IT/EN/ES/FR)
 STOP = set()
@@ -427,42 +442,293 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
 
 
 def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
-
     """
-    If USE_EXTRUCT is True, extract JSON-LD + Microdata + OpenGraph via Extruct.
-    (RDFa removed because its helper library *pyRdfa* uses deprecated
-    datetime.utcnow() on Python ≥ 3.12.)
-    Otherwise, fall back to looking only for
-    <script type="application/ld+json"> blocks.
+    Schema.org extraction (robust, logged, still lightweight):
+      • JSON-LD manual harvest FIRST (so JSON-LD items stay first in output)
+      • extruct pass (lxml) → retry with html5lib tree if needed
+      • Flatten JSON-LD @graph; keep malformed blocks as {"@raw": "..."}
+      • Heuristic discovery inside generic JSON (e.g. __NEXT_DATA__, __NUXT__)
+      • Append {"_schema_issues":[...]} with concise hints
+    RDFa intentionally excluded.
     """
+    # Ask extruct for every lightweight syntax, including RDFa.
+    syntaxes = ["json-ld", "microdata", "opengraph", "microformat", "rdfa"]
+    collected: list[dict] = []
+    seen: set[str] = set()
 
-    if USE_EXTRUCT:
-        # ----- full Extruct-based extraction -----
-        base_url = response_url
+    # --- helpers --------------------------------------------------------------
+    def _add_flat(obj: dict, via: str) -> None:
+        """Add obj (flattening @graph) with dedup and provenance tag."""
+        g = obj.get("@graph")
+        if isinstance(g, list) and g:
+            for n in g:
+                isinstance(n, dict) and _add_flat(n, via)
+            return
+        sig = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+        if sig in seen:
+            return
+        seen.add(sig)
+        o = dict(obj); o["_extracted_via"] = via
+        collected.append(o)
 
-        results = extruct.extract(
-            html_text,
-            base_url=base_url,
-            # drop "rdfa" ➜ no import of pyRdfa ➜ no DeprecationWarning
-            syntaxes=["json-ld", "microdata", "opengraph"],
-            uniform=True,
-        )
+    def _scrub_jsonish(s: str) -> str:
+        """Make common broken JSON parseable (BOM, HTML/JS comments, trailing commas)."""
+        s = s.lstrip("\ufeff").strip()
+        s = re.sub(r"(?s)<!--.*?-->", "", s)           # HTML comments
+        s = re.sub(r"(?s)/\*.*?\*/", "", s)            # /* block comments */
+        s = re.sub(r"(?m)^\s*//.*$", "", s)            # // line comments
+        s = re.sub(r",\s*([}\]])", r"\1", s)           # trailing commas
+        return s
 
-        collected: list[dict] = []
-        for syntax in ("json-ld", "microdata", "rdfa", "opengraph"):
-            items = results.get(syntax) or []
-            for item in items:
-                item["_extracted_via"] = syntax
-                collected.append(item)
-        return collected
-    else:
-        # ----- fallback: only JSON-LD inside <script> tags -----
-        soup = BeautifulSoup(html_text, "lxml")
-        out: list[list[str]] = []
-        for script in soup.find_all("script", {"type": "application/ld+json"}):
-            raw = script.get_text(strip=True) or ""
-            out.append([raw])
+    def _safe_load(s: str) -> Any:
+        """Try strict JSON, then scrubbed, then HTML-unescaped → scrubbed."""
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        try:
+            return json.loads(_scrub_jsonish(s))
+        except Exception:
+            pass
+        try:
+            return json.loads(_scrub_jsonish(_html.unescape(s)))
+        except Exception:
+            return None
+
+    def _walk_jsonld(obj: Any) -> list[dict]:
+        """
+        Find JSON-LD dicts anywhere inside a generic JSON structure
+        (covers __NEXT_DATA__, __NUXT__, CMS blobs, etc.).
+        Also handles stringified JSON-LD nested as values.
+        """
+        out: list[dict] = []
+        stack = [obj]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, dict):
+                if ("@context" in cur) or ("@type" in cur) or ("@graph" in cur):
+                    out.append(cur)
+                stack.extend(cur.values())
+            elif isinstance(cur, list):
+                stack.extend(cur)
+            elif isinstance(cur, str) and ("@context" in cur or "@type" in cur):
+                loaded = _safe_load(cur)
+                isinstance(loaded, (list, dict)) and stack.append(loaded)
         return out
+    
+    
+    # -------- minimal BeautifulSoup fallbacks for Microdata / RDFa ----------
+    def _is_within_other(scope: bs4.element.Tag, node: bs4.element.Tag, attr: str) -> bool:
+        """Return True if *node* is inside a descendant subtree that also has *attr*."""
+        p = node.parent
+        while p is not None and p is not scope:
+            if isinstance(p, bs4.element.Tag) and p.has_attr(attr):
+                return True
+            p = p.parent
+        return False
+
+    def _microdata_bs(soup: BeautifulSoup) -> list[dict]:
+        """Very small Microdata scraper (itemscope/itemtype/itemprop)."""
+        out: list[dict] = []
+        for scope in soup.find_all(attrs={"itemscope": True}):
+            if not isinstance(scope, bs4.element.Tag):
+                continue
+            typ = (scope.get("itemtype") or "").split()[:1]
+            item: dict[str, Any] = {"@type": typ[0] if typ else "Thing"}
+            for prop in scope.find_all(attrs={"itemprop": True}):
+                if not isinstance(prop, bs4.element.Tag):
+                    continue
+                if _is_within_other(scope, prop, "itemscope"):
+                    continue
+                keys = str(prop.get("itemprop") or "").split()
+                val = (
+                    prop.get("content")
+                    or prop.get("href")
+                    or prop.get("src")
+                    or " ".join(prop.stripped_strings)
+                )
+                for k in keys:
+                    k and (item.__setitem__(k, val))
+            out.append(item)
+        return out
+
+    def _rdfa_bs(soup: BeautifulSoup) -> list[dict]:
+        """Very small RDFa scraper (typeof / property / content|href|src|text)."""
+        out: list[dict] = []
+        for root in soup.find_all(attrs={"typeof": True}):
+            if not isinstance(root, bs4.element.Tag):
+                continue
+            typ = (root.get("typeof") or "").strip()
+            vocab = (root.get("vocab") or "").strip()
+            item: dict[str, Any] = {"@type": typ or (vocab or "Thing")}
+            for prop in root.find_all(attrs={"property": True}):
+                if not isinstance(prop, bs4.element.Tag):
+                    continue
+                if _is_within_other(root, prop, "typeof"):
+                    continue
+                key = str(prop.get("property") or "").strip()
+                val = (
+                    prop.get("content")
+                    or prop.get("href")
+                    or prop.get("src")
+                    or " ".join(prop.stripped_strings)
+                )
+                key and (item.__setitem__(key, val))
+            out.append(item)
+        return out
+
+    # --- 1) Manual JSON-LD first ---------------------------------------------
+    try:
+        soup = BeautifulSoup(html_text, "html.parser")
+        ok = bad = 0
+        for s in soup.find_all("script"):
+            t = (s.get("type") or "").lower().strip()
+            # accept common variants: application/ld+json; charset=utf-8, json+ld, jsonld
+            is_ld = "ld+json" in t or t in ("application/jsonld", "application/json+ld")
+            # also accept generic JSON/plain when id/class hints schema (cms themes)
+            hint = "schema" in (s.get("id", "") + " " + " ".join(s.get("class", []))).lower()
+            if not (is_ld or hint):
+                continue
+            raw = (s.string or s.get_text() or "").strip()
+            if not raw:
+                continue
+            parsed = _safe_load(raw)
+            if parsed is None:
+                collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"}); bad += 1; continue
+            if isinstance(parsed, list):
+                for obj in parsed:
+                    isinstance(obj, dict) and _add_flat(obj, "json-ld")
+            elif isinstance(parsed, dict):
+                _add_flat(parsed, "json-ld")
+            else:
+                # not a dict/list → keep raw so user sees the block
+                collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"}); bad += 1; continue
+            ok += 1
+        _log_schema(f"manual json-ld blocks parsed={ok}, raw_bad={bad}")
+    except Exception as e:
+        _log_schema(f"manual json-ld error: {e!r}")
+
+    def _find_json_objects(text: str) -> list[str]:
+        """
+        Extract JSON-looking blocks from arbitrary JS (e.g. `window.__NUXT__ = {...}`).
+        We scan for balanced `{...}` blocks (no regex backtracking). Fast and robust.
+        """
+        out: list[str] = []
+        depth = 0
+        start = -1
+        in_str = ""
+        esc = False
+        for i, ch in enumerate(text):
+            if in_str:
+                esc = (ch == "\\" and not esc)
+                if ch == in_str and not esc:
+                    in_str = ""
+                continue
+            if ch in ("'", '"'):
+                in_str = ch
+                esc = False
+                continue
+            if ch == "{":
+                depth += 1
+                start = i if depth == 1 else start
+                continue
+            if ch == "}":
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    out.append(text[start : i + 1])
+        return out
+
+
+    # --- 1b) Heuristic discovery inside generic JS/JSON blobs -----------------
+    # Covers __NEXT_DATA__, window.__NUXT__ = {...}, CMS blobs, etc.
+    try:
+        soup2 = BeautifulSoup(html_text, "html.parser")
+        hits = 0
+        for s in soup2.find_all("script"):
+            raw = (s.string or s.get_text() or "").strip()
+            if not raw or ("@context" not in raw and "@type" not in raw):
+                continue
+            # 1) Try whole block as-is / scrubbed
+            parsed = _safe_load(raw)
+            if isinstance(parsed, (list, dict)):
+                for node in _walk_jsonld(parsed):
+                    _add_flat(node, "json-ld"); hits += 1
+                continue
+            # 2) If it's an assignment (JS), carve out balanced {...} blocks
+            for chunk in _find_json_objects(raw):
+                parsed2 = _safe_load(chunk)
+                if isinstance(parsed2, (list, dict)):
+                    for node in _walk_jsonld(parsed2):
+                        _add_flat(node, "json-ld"); hits += 1
+        hits and _log_schema(f"heuristic nested json-ld nodes found={hits}")
+    except Exception as e:
+        _log_schema(f"heuristic json-ld error: {e!r}")
+
+    # --- 2) extruct passes (lxml → html5lib) ---------------------------------
+    if USE_EXTRUCT:
+        def _extract_lxml() -> dict[str, Any]:
+            try:
+                data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+                _log_schema("extruct:lxml ok")
+                return data
+            except Exception as e:
+                _log_schema(f"extruct:lxml error: {e!r}")
+                return {}
+        def _extract_html5lib() -> dict[str, Any]:
+            try:
+                from extruct.utils import parse_html as _parse_html
+                tree = _parse_html(html_text, treebuilder="html5lib")
+                data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+                _log_schema("extruct:html5lib ok")
+                return data
+            except Exception as e:
+                _log_schema(f"extruct:html5lib error: {e!r}")
+                return {}
+        res = _extract_lxml()
+        if not any(res.get(k) for k in syntaxes):
+            res = _extract_html5lib()
+        for syntax in syntaxes:
+            items = res.get(syntax) or []
+            for it in items:
+                isinstance(it, dict) and _add_flat(it, syntax)
+            if items:
+                _log_schema(f"extruct:{syntax} -> {len(items)} items")
+                
+    # --- 2b) Microdata/RDFa BeautifulSoup fallbacks (when extruct gave none) -
+    soup_md = BeautifulSoup(html_text, "html.parser")
+    have_micro = any(isinstance(o, dict) and o.get("_extracted_via") == "microdata" for o in collected)
+    have_rdfa  = any(isinstance(o, dict) and o.get("_extracted_via") == "rdfa"      for o in collected)
+    not have_micro and [_add_flat(o, "microdata") for o in _microdata_bs(soup_md)] and _log_schema("fallback: microdata added")
+    not have_rdfa  and [_add_flat(o, "rdfa")      for o in _rdfa_bs(soup_md)]      and _log_schema("fallback: rdfa added")
+
+
+    # --- 3) Issue summary (explicit; no Pylance “unused expression”) ----------
+    issues: list[str] = []
+    for obj in collected:
+        via = str(obj.get("_extracted_via", ""))
+        if via in ("json-ld", "json-ld-raw"):
+            checks = [
+                ("@raw" in obj, "Unparseable JSON-LD block"),
+                ("@context" not in obj and "@raw" not in obj, "JSON-LD missing @context"),
+                ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
+            ]
+            issues.extend([msg for cond, msg in checks if cond])
+        if via == "microdata" and "@type" not in obj:
+            issues.append("Microdata item missing @type")
+        if via == "rdfa" and "@type" not in obj:
+            issues.append("RDFa item missing @type")
+    if issues:
+        collected.append({"_schema_issues": sorted(set(issues))})
+
+    # --- 4) Last resort: raw JSON-LD scripts if everything else failed --------
+    if collected:
+        return collected
+    soup = BeautifulSoup(html_text, "html.parser")
+    out: list[list[str]] = []
+    for script in soup.find_all("script", {"type": "application/ld+json"}):
+        raw = script.get_text(strip=True) or ""
+        raw and out.append([raw])
+    return out
 
 
 def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:

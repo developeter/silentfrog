@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Any
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import QUrl, Qt
-from .seo_crawler import analyse
-from functools import partial
 from .seo_crawler import analyse, analyse_images
 from PyQt5.QtGui import QColor, QBrush
 
@@ -14,6 +12,7 @@ import asyncio
 import threading
 import logging
 import json
+import html as _html
 
 
 logging.basicConfig(
@@ -124,7 +123,7 @@ class MetaModel(_BaseModel):
             return super().data(index, role)
 
         # 2️  Background colouring (only column “Length”)
-        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 2:
+        if role == Qt.BackgroundRole and index.column() == 2:
             GOOD = QBrush(QColor(0, 180, 0, 60))         # semi-transparent green
             BAD  = QBrush(QColor(200, 0, 0, 60))         # semi-transparent red
 
@@ -170,7 +169,7 @@ class LinksModel(GenericModel):
             return super().data(index, role)
 
         # 2️⃣  Background colour for Status column
-        if role == QtCore.Qt.BackgroundRole and index.column() == 3:
+        if role == Qt.BackgroundRole and index.column() == 3:
             GREEN  = QBrush(QColor(  0, 180,   0, 60))   # semi-transparent
             YELLOW = QBrush(QColor(255, 200,   0, 60))
             RED    = QBrush(QColor(200,   0,   0, 60))
@@ -523,40 +522,73 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             1, QtWidgets.QHeaderView.ResizeToContents
         )
 
-
-       # ----- schema.org: pretty-print all variants or red warning -----
-
+        # ----- Schema.org tab: show data AND issues (like Google/Schema tester) -----
         schema_items = data.get("schema", [])
-        if schema_items:
-            pretty_blocks: list[str] = []
+        if not schema_items:
+            self.schema_view.setHtml(
+                "<span style='color:red;font-weight:bold'>Schema.org not found</span>"
+            )
+        else:
+            # theme-aware colours (QTextEdit uses Palette.Base for its background)
+            bg = self.schema_view.palette().color(QtGui.QPalette.Base)
+            is_dark = bg.value() < 128
+            pre_bg     = "#111111" if is_dark else "#f7f7f7"
+            pre_fg     = "#f0f0f0" if is_dark else "#202124"
+            pre_border = "#444444" if is_dark else "#cccccc"
+            # ensure the widget background follows the theme (HTML colors handle inner blocks)
+            self.schema_view.setStyleSheet(
+                "background:#1e1e1e; color:#f0f0f0;" if is_dark else "background:#ffffff; color:#202124;"
+            )
+
+            # split issues and data; count by source
+            issues = []
+            blocks = []
+            counts = {"json-ld": 0, "microdata": 0, "rdfa": 0, "opengraph": 0, "json-ld-raw": 0}
             for row in schema_items:
+                if isinstance(row, dict) and "_schema_issues" in row:
+                    issues.extend(row["_schema_issues"] or [])
+                    continue
                 if isinstance(row, dict):
-                    # row is a dict (Extruct returned a dict for JSON-LD, microdata, etc.)
+                    via = str(row.get("_extracted_via", ""))
+                    counts[via] = counts.get(via, 0) + 1
                     try:
-                        # Render the entire dict as pretty-printed JSON
-                        pretty_blocks.append(json.dumps(row, indent=2, ensure_ascii=False))
+                        blocks.append(json.dumps(row, indent=2, ensure_ascii=False))
                     except Exception:
-                        # fallback to raw string if dict not JSON-serializable
-                        pretty_blocks.append(str(row))
-                elif isinstance(row, list) and row:
-                    # row is a one-element list [raw_jsonld]
+                        blocks.append(str(row))
+                    continue
+                if isinstance(row, list) and row:
                     raw_json = row[0]
                     try:
                         parsed = json.loads(raw_json)
-                        pretty_blocks.append(json.dumps(parsed, indent=2, ensure_ascii=False))
+                        blocks.append(json.dumps(parsed, indent=2, ensure_ascii=False))
                     except Exception:
-                        pretty_blocks.append(raw_json)
-                else:
-                    # Anything else: convert to string
-                    pretty_blocks.append(str(row))
+                        counts["json-ld-raw"] = counts.get("json-ld-raw", 0) + 1
+                        blocks.append(str(raw_json))
+                    continue
+                blocks.append(str(row))
 
-            combined = "\n\n".join(pretty_blocks)
-            self.schema_view.setPlainText(combined)
-        else:
-            self.schema_view.setHtml(
-                "<span style='color:red; font-weight:bold;'>Schema.org not found</span>"
+            total = sum(v for v in counts.values())
+            color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
+            hdr = (
+                f"<div style='font-weight:bold;color:{color}'>"
+                f"Schema.org: {total} items &nbsp; "
+                f"(JSON-LD {counts.get('json-ld',0)}, Microdata {counts.get('microdata',0)}, "
+                f"RDFa {counts.get('rdfa',0)}, OpenGraph {counts.get('opengraph',0)}, "
+                f"Raw {counts.get('json-ld-raw',0)})"                
+                f"</div>"
             )
-
+            err = ""
+            if issues:
+                items = "".join(f"<li>{_html.escape(x)}</li>" for x in sorted(set(issues)))
+                err = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items}</ul></div>"
+            code = "".join(
+                f"<pre style='background:{pre_bg};color:{pre_fg};border:1px solid {pre_border};"
+                f"padding:6px;white-space:pre-wrap'>"
+                f"{_html.escape(b)}"
+                f"</pre>"
+                for b in blocks
+            )
+            self.schema_view.setHtml(hdr + err + code)
 
         _set(self.key_view,    GenericModel(["Termine", "Freq"], data["keywords"]))
         self._update_images(data["images"])
