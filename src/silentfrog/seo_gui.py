@@ -7,6 +7,7 @@ from .seo_crawler import analyse, analyse_images
 from PyQt5.QtGui import QColor, QBrush
 
 import webbrowser
+import re
 import sys
 import asyncio
 import threading
@@ -20,6 +21,15 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Shared brushes used by multiple table models (semi-transparent overlays)
+# --------------------------------------------------------------------------- #
+BR_GREEN  = QBrush(QColor(  0, 180,   0, 60))
+BR_YELLOW = QBrush(QColor(255, 200,   0, 60))
+BR_RED    = QBrush(QColor(200,   0,   0, 60))
+
 
 # --------------------------------------------------------------------------- #
 #                               MODELLI TABELLA                               #
@@ -77,12 +87,16 @@ class GenericModel(_BaseModel):
         """Smart sort: understands bytes / KB / MB, plain numbers, or strings."""
 
         def _size_to_bytes(text: str) -> float | None:
-            units = {"b": 1, "kb": 1_024, "mb": 1_048_576}
+            units = {
+                "b": 1,
+                "kb": 1_024, "mb": 1_048_576, "gb": 1_073_741_824,
+                "kib": 1_024, "mib": 1_048_576, "gib": 1_073_741_824,
+            }
             parts = text.lower().split()
             if len(parts) != 2:
                 return None
             try:
-                num = float(parts[0])
+                num = float(parts[0].replace(",", "."))
             except ValueError:
                 return None
             return num * units.get(parts[1], 1)
@@ -146,8 +160,235 @@ class MetaModel(_BaseModel):
         # Fallback → default behaviour
         return super().data(index, role)
 
+# -------------------------------------------------------------------
+# Images tab – highlight ALT and "Peso" (size)
+# -------------------------------------------------------------------
+class ImagesModel(GenericModel):
+    """Color rules:
+       • Alt/Title empty → YELLOW; else GREEN
+       • W/H → no color (always)
+       • Peso empty → no color; >100 KB → YELLOW; >500 KB → RED; else GREEN
+    """
+
+    def __init__(self, rows: list[list[str]]) -> None:
+        super().__init__(["Src", "Alt", "Title", "W", "H", "Peso"], rows)
+
+    # --- tiny helpers to avoid if/elif cascades --------------------------------
+    @staticmethod
+    def _filled(x: object) -> bool:
+        return bool(str(x).strip())
+
+
+    @staticmethod
+    def _bytes(human: object) -> int:
+        # Accept both SI and IEC units: KB/MB/GB and KiB/MiB/GiB
+        s = str(human).strip()
+        m = re.search(r"([\d.,]+)\s*([KMGT]?I?B)", s, re.I) if s else None
+        if not m:
+            return -1
+        n = float(m.group(1).replace(",", "."))
+        unit = m.group(2).upper()
+        mult = {
+            "B": 1,
+            "KB": 1024, "MB": 1024**2, "GB": 1024**3,
+            "KIB": 1024, "MIB": 1024**2, "GIB": 1024**3,
+            "TB": 1024**4, "TIB": 1024**4,
+        }.get(unit, 1)
+        return int(n * mult)
+
+    @staticmethod
+    def _color_required(x: object):
+        # required text fields: filled → green, empty → yellow
+        return BR_GREEN if ImagesModel._filled(x) else BR_YELLOW
+
+    @staticmethod
+    def _color_size(x: object):
+        # size: unknown → no color; thresholds 100/500 KB
+        b = ImagesModel._bytes(x)
+        return None if b < 0 else next(
+            c for cond, c in (
+                (b > 500 * 1024, BR_RED),
+                (b > 100 * 1024, BR_YELLOW),
+                (True, BR_GREEN),
+            ) if cond
+        )
+
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role != Qt.BackgroundRole:
+            return None
+        row, col = index.row(), index.column()
+        
+        # column → color function (W/H uncolored by design)
+        fn = {1: self._color_required, 2: self._color_required, 5: self._color_size}.get(col)
+        return fn(self._rows[row][col]) if fn else None
+
+# -------------------------------------------------------------------
+# Robots tab – meta robots + robots.txt highlights
+# -------------------------------------------------------------------
+class RobotsModel(GenericModel):
+    """Warn on robots meta nofollow and dangerous disallows; red on noindex."""
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role == Qt.BackgroundRole and index.column() == 1:
+            key = (self._rows[index.row()][0] or "").lower()
+            val = (self._rows[index.row()][1] or "").lower()
+            # Meta / X-Robots-Tag row
+            if key.startswith("meta"):
+                return BR_RED if "noindex" in val else (BR_YELLOW if "nofollow" in val else BR_GREEN)
+            # robots.txt directives
+            if key == "disallow":
+                v = val.strip()
+                return BR_RED if v in ("/", "/*") else BR_YELLOW
+        return None
+
+# -------------------------------------------------------------------
+# Canonical tab – basic checks
+# -------------------------------------------------------------------
+class CanonicalModel(GenericModel):
+    """Green self-referencing; red on multiple or bad status; yellow if cross-canonical."""
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role == Qt.BackgroundRole and index.column() == 1:
+            key = (self._rows[index.row()][0] or "").lower()
+            val = str(self._rows[index.row()][1] or "")
+            if key == "canonical url":
+                return BR_GREEN if val and val != "—" else BR_RED
+            if key == "self-referencing":
+                return BR_GREEN if val.lower().startswith("y") else BR_YELLOW
+            if key == "multiple canonicals":
+                return BR_RED if val.lower().startswith("y") else BR_GREEN
+            if key == "canonical status":
+                m = re.search(r"\d{3}", val)
+                code = int(m.group(0)) if m else 0
+                return BR_GREEN if 200 <= code < 300 else (BR_YELLOW if 300 <= code < 400 else BR_RED)
+        return None
+
+# -------------------------------------------------------------------
+# Redirect tab – chain, hops, final status, loops
+# -------------------------------------------------------------------
+class RedirectModel(GenericModel):
+    """Green on 0 hops/200; yellow on 1–2 hops; red on loops or bad final status."""
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role == Qt.BackgroundRole and index.column() == 1:
+            key = (self._rows[index.row()][0] or "").lower()
+            val = str(self._rows[index.row()][1] or "")
+            if key == "hop count":
+                try:
+                    n = int(val)
+                except Exception:
+                    n = 0
+                return BR_GREEN if n == 0 else (BR_YELLOW if n <= 2 else BR_RED)
+            if key == "final status":
+                m = re.search(r"\d{3}", val)
+                code = int(m.group(0)) if m else 0
+                return BR_GREEN if 200 <= code < 300 else (BR_YELLOW if 300 <= code < 400 else BR_RED)
+            if key == "loop detected":
+                return BR_RED if val.lower().startswith("y") else BR_GREEN
+            if key == "redirect chain":
+                return BR_YELLOW if "➜" in val else BR_GREEN
+        return None
+
+# -------------------------------------------------------------------
+# Hreflang tab – status + validation columns
+# -------------------------------------------------------------------
+class HreflangModel(GenericModel):
+    """HTTP 2xx green, 3xx yellow, 4xx/5xx red; Lang-OK green; Return? green/yellow."""
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role == Qt.BackgroundRole:
+            col = index.column()
+            r = self._rows[index.row()]
+            if col == 2:  # HTTP status
+                try:
+                    code = int(re.search(r"\d{3}", str(r[2])).group(0))  # type: ignore[union-attr]
+                except Exception:
+                    code = 0
+                return BR_GREEN if 200 <= code < 300 else (BR_YELLOW if 300 <= code < 400 else BR_RED)
+            if col == 3:  # Lang-OK?
+                return BR_GREEN if str(r[3]).strip().lower().startswith("y") else BR_RED
+            if col == 4:  # Return?
+                return BR_GREEN if str(r[4]).strip().lower().startswith("y") else BR_YELLOW
+        return None
+
+# -------------------------------------------------------------------
+# SERP Title Audit – turn checks into quick colors
+# -------------------------------------------------------------------
+class SerpAuditModel(GenericModel):
+    """Green when checks pass, yellow for limits exceeded, red if missing."""
+    def data(  # type: ignore[override]
+        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+    ):
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        if role == Qt.BackgroundRole and index.column() == 1:
+            key = (self._rows[index.row()][0] or "").lower()
+            val = str(self._rows[index.row()][1] or "").strip().lower()
+            # boolean-ish values
+            yes = val in ("yes", "true", "1")
+            # Missing → RED if Yes
+            if key == "missing":
+                return BR_RED if yes else BR_GREEN
+            # limit flags → YELLOW if Yes
+            if key in ("> 60 chars", "< 30 chars", "> 561 px", "< 200 px", "equals h1"):
+                return BR_YELLOW if yes else BR_GREEN
+            # numeric summaries → fast thresholds
+            if key.startswith("length (chars)"):
+                try:
+                    n = int(val or "0")
+                except Exception:
+                    n = 0
+                return BR_GREEN if 30 <= n <= 60 else BR_YELLOW
+            if key.startswith("length (pixels)"):
+                try:
+                    n = int(val or "0")
+                except Exception:
+                    n = 0
+                return BR_GREEN if 200 <= n <= 561 else BR_YELLOW
+        return None
+
+
+
 class HeaderModel(_BaseModel):
     HEADERS = ["Tag", "Text"]
+
+    def __init__(self, rows: list[list[str]]) -> None:
+        super().__init__(rows)
+        # cache how many H1 we have; useful to highlight all H1 rows at a glance
+        self._h1_count = sum(
+            1 for r in rows if r and str(r[0]).strip().lower() == "h1"
+        )
+
+    def data(  # type: ignore[override]
+        self,
+        index: QtCore.QModelIndex,
+        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+    ):
+        # Display text as-is
+        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+            return super().data(index, role)
+        # Color all H1 rows: green if single H1, yellow if multiple H1
+        if role == Qt.BackgroundRole and index.column() in (0, 1):
+            tag = (self._rows[index.row()][0] or "").strip().lower()
+            if tag == "h1":
+                return BR_GREEN if self._h1_count == 1 else BR_YELLOW
+        return None
 
 # -------------------------------------------------------------------
 # Links tab model – colour “Status” column (index 3)
@@ -405,7 +646,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         if not robots_map:
             rows.append(["robots.txt", "Not fetched or empty"])
 
-        model = GenericModel(["Directive", "Value"], rows)
+        model = RobotsModel(["Directive", "Value"], rows)  # type: ignore[arg-type]
         _set(self.robots_view, model)
         self.robots_view.horizontalHeader().setSectionResizeMode(
             1, QtWidgets.QHeaderView.Stretch
@@ -420,7 +661,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Multiple canonicals", "Yes" if canon.get("multiple") else "No"],
             ["Canonical status", canon.get("status", "") or "—"],
         ]
-        _set(self.canon_view, GenericModel(["Check", "Value"], canon_rows))
+        _set(self.canon_view, CanonicalModel(["Check", "Value"], canon_rows))  # type: ignore[arg-type]
 
 
         # ---------- Redirect table -------------------------------------- #
@@ -432,7 +673,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Final status",   red.get("final_status", "")],
             ["Loop detected",  "Yes" if red.get("loop") else "No"],
         ]
-        _set(self.redir_view, GenericModel(["Check", "Value"], red_rows))
+        _set(self.redir_view, RedirectModel(["Check", "Value"], red_rows))  # type: ignore[arg-type]
         self.redir_view.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
         # -------- Links tab ------------------------------------------
@@ -446,7 +687,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         # ---------- Hreflang table ------------------------------------- #
         h_rows = data.get("hreflang", [])
         h_headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
-        _set(self.hlang_view, GenericModel(h_headers, h_rows))
+        _set(self.hlang_view, HreflangModel(h_headers, h_rows))
         self.hlang_view.horizontalHeader().setSectionResizeMode(
             1, QtWidgets.QHeaderView.Stretch
         )
@@ -517,7 +758,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Equals H1", audit.get("equals_h1", "")],
             ["Missing", audit.get("missing", "")],
         ]
-        _set(self.serp_table, GenericModel(["Check", "Result"], audit_rows))
+        _set(self.serp_table, SerpAuditModel(["Check", "Result"], audit_rows))
         self.serp_table.horizontalHeader().setSectionResizeMode(
             1, QtWidgets.QHeaderView.ResizeToContents
         )
@@ -643,7 +884,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     #Converte le righe (url, w, h, peso) nel formato a 6 colonne.
     def _update_images(self, rows: list[list[str]]) -> None:
         headers = ["Src", "Alt", "Title", "W", "H", "Peso"]
-        model = GenericModel(headers, rows)
+        model = ImagesModel(rows)  # color-coded ALT/size
         self.img_view.setModel(model)
         model.layoutChanged.emit()
         self.img_view.resizeColumnsToContents()
