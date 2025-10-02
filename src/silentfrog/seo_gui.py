@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import QUrl, Qt
 from .seo_crawler import analyse, analyse_images
@@ -31,6 +31,9 @@ BR_YELLOW = QBrush(QColor(255, 200,   0, 60))
 BR_RED    = QBrush(QColor(200,   0,   0, 60))
 
 
+def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
+    return cast(QtWidgets.QHeaderView, view.horizontalHeader())
+
 # --------------------------------------------------------------------------- #
 #                               MODELLI TABELLA                               #
 # --------------------------------------------------------------------------- #
@@ -52,9 +55,9 @@ class _BaseModel(QtCore.QAbstractTableModel):
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+        role: int = Qt.ItemDataRole.DisplayRole,  # type: ignore[attr-defined]
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             row = self._rows[index.row()]
             return row[index.column()] if index.column() < len(row) else ""
         return None
@@ -63,10 +66,10 @@ class _BaseModel(QtCore.QAbstractTableModel):
         self,
         section: int,
         orientation: QtCore.Qt.Orientation,
-        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+        role: int = Qt.ItemDataRole.DisplayRole,  # type: ignore[attr-defined]
     ):
         if (
-            role == QtCore.Qt.DisplayRole  # type: ignore[attr-defined]
+            role == Qt.ItemDataRole.DisplayRole  # type: ignore[attr-defined]
             and orientation == QtCore.Qt.Horizontal  # type: ignore[attr-defined]
         ):
             return self.HEADERS[section]
@@ -129,15 +132,15 @@ class MetaModel(_BaseModel):
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+        role: int = Qt.ItemDataRole.DisplayRole,  # type: ignore[attr-defined]
     ):
 
         # 1️  Standard text display
-        if role == QtCore.Qt.DisplayRole:                # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:                # type: ignore[attr-defined]
             return super().data(index, role)
 
         # 2️  Background colouring (only column “Length”)
-        if role == Qt.BackgroundRole and index.column() == 2:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 2:
             GOOD = QBrush(QColor(0, 180, 0, 60))         # semi-transparent green
             BAD  = QBrush(QColor(200, 0, 0, 60))         # semi-transparent red
 
@@ -214,11 +217,11 @@ class ImagesModel(GenericModel):
         )
 
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role != Qt.BackgroundRole:
+        if role != Qt.ItemDataRole.BackgroundRole:
             return None
         row, col = index.row(), index.column()
         
@@ -232,11 +235,11 @@ class ImagesModel(GenericModel):
 class RobotsModel(GenericModel):
     """Warn on robots meta nofollow and dangerous disallows; red on noindex."""
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role == Qt.BackgroundRole and index.column() == 1:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 1:
             key = (self._rows[index.row()][0] or "").lower()
             val = (self._rows[index.row()][1] or "").lower()
             # Meta / X-Robots-Tag row
@@ -254,11 +257,11 @@ class RobotsModel(GenericModel):
 class CanonicalModel(GenericModel):
     """Green self-referencing; red on multiple or bad status; yellow if cross-canonical."""
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role == Qt.BackgroundRole and index.column() == 1:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 1:
             key = (self._rows[index.row()][0] or "").lower()
             val = str(self._rows[index.row()][1] or "")
             if key == "canonical url":
@@ -279,11 +282,11 @@ class CanonicalModel(GenericModel):
 class RedirectModel(GenericModel):
     """Green on 0 hops/200; yellow on 1–2 hops; red on loops or bad final status."""
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role == Qt.BackgroundRole and index.column() == 1:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 1:
             key = (self._rows[index.row()][0] or "").lower()
             val = str(self._rows[index.row()][1] or "")
             if key == "hop count":
@@ -308,11 +311,11 @@ class RedirectModel(GenericModel):
 class HreflangModel(GenericModel):
     """HTTP 2xx green, 3xx yellow, 4xx/5xx red; Lang-OK green; Return? green/yellow."""
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role == Qt.BackgroundRole:
+        if role == Qt.ItemDataRole.BackgroundRole:
             col = index.column()
             r = self._rows[index.row()]
             if col == 2:  # HTTP status
@@ -333,11 +336,11 @@ class HreflangModel(GenericModel):
 class SerpAuditModel(GenericModel):
     """Green when checks pass, yellow for limits exceeded, red if missing."""
     def data(  # type: ignore[override]
-        self, index: QtCore.QModelIndex, role: int = QtCore.Qt.DisplayRole
+        self, index: QtCore.QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ):
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
-        if role == Qt.BackgroundRole and index.column() == 1:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 1:
             key = (self._rows[index.row()][0] or "").lower()
             val = str(self._rows[index.row()][1] or "").strip().lower()
             # boolean-ish values
@@ -378,13 +381,13 @@ class HeaderModel(_BaseModel):
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,  # type: ignore[attr-defined]
+        role: int = Qt.ItemDataRole.DisplayRole,  # type: ignore[attr-defined]
     ):
         # Display text as-is
-        if role == QtCore.Qt.DisplayRole:  # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:  # type: ignore[attr-defined]
             return super().data(index, role)
         # Color all H1 rows: green if single H1, yellow if multiple H1
-        if role == Qt.BackgroundRole and index.column() in (0, 1):
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() in (0, 1):
             tag = (self._rows[index.row()][0] or "").strip().lower()
             if tag == "h1":
                 return BR_GREEN if self._h1_count == 1 else BR_YELLOW
@@ -403,14 +406,14 @@ class LinksModel(GenericModel):
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,          # type: ignore[attr-defined]
+        role: int = Qt.ItemDataRole.DisplayRole,          # type: ignore[attr-defined]
     ):
         # 1️⃣  Normal cell text
-        if role == QtCore.Qt.DisplayRole:                # type: ignore[attr-defined]
+        if role == Qt.ItemDataRole.DisplayRole:                # type: ignore[attr-defined]
             return super().data(index, role)
 
         # 2️⃣  Background colour for Status column
-        if role == Qt.BackgroundRole and index.column() == 3:
+        if role == Qt.ItemDataRole.BackgroundRole and index.column() == 3:
             GREEN  = QBrush(QColor(  0, 180,   0, 60))   # semi-transparent
             YELLOW = QBrush(QColor(255, 200,   0, 60))
             RED    = QBrush(QColor(200,   0,   0, 60))
@@ -648,9 +651,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         model = RobotsModel(["Directive", "Value"], rows)  # type: ignore[arg-type]
         _set(self.robots_view, model)
-        self.robots_view.horizontalHeader().setSectionResizeMode(
-            1, QtWidgets.QHeaderView.Stretch
-        )
+        _header(self.robots_view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
 
         # ---------- Canonical table -------------------------------------- #
@@ -674,34 +675,26 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Loop detected",  "Yes" if red.get("loop") else "No"],
         ]
         _set(self.redir_view, RedirectModel(["Check", "Value"], red_rows))  # type: ignore[arg-type]
-        self.redir_view.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _header(self.redir_view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
         # -------- Links tab ------------------------------------------
         link_rows = data.get("links", [])
         _set(self.link_view, LinksModel(link_rows))
         self.link_view.setAlternatingRowColors(False)   # keep colours crisp
-        self.link_view.horizontalHeader().setSectionResizeMode(
-             0, QtWidgets.QHeaderView.Stretch
-         )
+        _header(self.link_view).setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
 
         # ---------- Hreflang table ------------------------------------- #
         h_rows = data.get("hreflang", [])
         h_headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
         _set(self.hlang_view, HreflangModel(h_headers, h_rows))
-        self.hlang_view.horizontalHeader().setSectionResizeMode(
-            1, QtWidgets.QHeaderView.Stretch
-        )
+        _header(self.hlang_view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
         # ---------- AI Crawl table ------------------------------------- #
         ai_rows = data.get("ai_crawl", [])
         ai_headers = ["Agent", "Robots.txt OK", "Meta noai?", "Verdict"]
         _set(self.ai_view, GenericModel(ai_headers, ai_rows))
-        self.ai_view.horizontalHeader().setSectionResizeMode(
-            0, QtWidgets.QHeaderView.ResizeToContents
-        )
-        self.ai_view.horizontalHeader().setSectionResizeMode(
-            3, QtWidgets.QHeaderView.ResizeToContents
-        )
+        _header(self.ai_view).setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        _header(self.ai_view).setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
 
         # ---------- SERP Preview & Title Audit ------------------------- #
         serp = data.get("serp", {})
@@ -759,9 +752,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             ["Missing", audit.get("missing", "")],
         ]
         _set(self.serp_table, SerpAuditModel(["Check", "Result"], audit_rows))
-        self.serp_table.horizontalHeader().setSectionResizeMode(
-            1, QtWidgets.QHeaderView.ResizeToContents
-        )
+        _header(self.serp_table).setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
 
         # ----- Schema.org tab: show data AND issues (like Google/Schema tester) -----
         schema_items = data.get("schema", [])
@@ -889,9 +880,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         model.layoutChanged.emit()
         self.img_view.resizeColumnsToContents()
         # --- keep URL column reasonable (max 280 px) ------------------
-        self.img_view.horizontalHeader().setSectionResizeMode(
-            0, QtWidgets.QHeaderView.Interactive
-        )
+        _header(self.img_view).setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
         self.img_view.setColumnWidth(0, 280)
 
 

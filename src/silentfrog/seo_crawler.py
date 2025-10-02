@@ -10,7 +10,7 @@ from html import unescape
 from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 from nltk.corpus import stopwords
-from aiohttp import ClientTimeout, ClientSession
+from aiohttp import ClientTimeout, ClientSession  # type: ignore
 from typing import Any, Dict, List, cast
 from PIL import Image, ImageDraw
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -18,23 +18,28 @@ from urllib.robotparser import RobotFileParser
 from base64 import b64encode
 from textwrap import shorten
 
-import humanize
+import humanize  # type: ignore
 import asyncio
 import re
 import ssl
 import string
 import bs4
-import aiohttp
+import aiohttp  # type: ignore
 import email
 import json
 import os
 import html as _html
 import logging
 
+Tag = bs4.element.Tag
+NavigableString = bs4.element.NavigableString
+_RESAMPLING_BASE = getattr(Image, "Resampling", None)
+_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS", getattr(Image, "LANCZOS", 1))
+
 # ─── Safe import of extruct (fallback if lxml is broken) ──────────────────────
 try:
-    import extruct
-    from w3lib.html import get_base_url
+    import extruct  # type: ignore
+    from w3lib.html import get_base_url  # type: ignore
     USE_EXTRUCT = True
 except Exception:                       # ImportError, lxml errors, etc.
     # extruct or lxml is unavailable → fall back to JSON-LD-only extractor
@@ -216,7 +221,11 @@ async def _check_canonical(
          has_multiple,
          status_code_or_error)
     """
-    links = [l["href"].strip() for l in soup.find_all("link", rel="canonical", href=True)]
+    links: list[str] = []
+    for link_tag in soup.find_all("link", rel="canonical", href=True):
+        href_val = _attr(link_tag, "href").strip()
+        if href_val:
+            links.append(href_val)
     has_multiple = len(links) > 1
     canonical_url = urljoin(page_url, links[0]) if links else ""
     is_self = canonical_url.rstrip("/") == page_url.rstrip("/")
@@ -253,9 +262,11 @@ async def _extract_hreflang(
     rows: list[list[str]] = []
     rels: dict[str, str] = {}          # lang → url
     for tag in soup.find_all("link", rel="alternate", hreflang=True, href=True):
-        lang = tag["hreflang"].strip()
-        href = urljoin(page_url, tag["href"].strip())
-        rels[lang.lower()] = href
+        lang_val = _attr(tag, "hreflang").strip()
+        href_val = _attr(tag, "href").strip()
+        if not lang_val or not href_val:
+            continue
+        rels[lang_val.lower()] = urljoin(page_url, href_val)
 
     # 2) HEAD-fetch each URL (in serial to keep code short)
     async with aiohttp.ClientSession() as sess:
@@ -325,9 +336,14 @@ def _ai_crawl_matrix(
 
 # ── SERP preview helper ────────────────────────────────────────────────
 def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
-    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    title = ""
+    title_tag = soup.title
+    if isinstance(title_tag, Tag):
+        title = (title_tag.string or "").strip()
     desc_tag = soup.find("meta", attrs={"name": "description"})
-    description = desc_tag["content"].strip() if desc_tag and desc_tag.get("content") else ""
+    description = ""
+    if isinstance(desc_tag, Tag):
+        description = _attr(desc_tag, "content").strip()
     # Google shows ~155 chars on desktop
     description = shorten(description, width=155, placeholder="…")
     return {
@@ -462,7 +478,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         g = obj.get("@graph")
         if isinstance(g, list) and g:
             for n in g:
-                isinstance(n, dict) and _add_flat(n, via)
+                if isinstance(n, dict):
+                    _add_flat(n, via)
             return
         sig = json.dumps(obj, sort_keys=True, ensure_ascii=False)
         if sig in seen:
@@ -513,7 +530,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                 stack.extend(cur)
             elif isinstance(cur, str) and ("@context" in cur or "@type" in cur):
                 loaded = _safe_load(cur)
-                isinstance(loaded, (list, dict)) and stack.append(loaded)
+                if isinstance(loaded, (list, dict)):
+                    stack.append(loaded)
         return out
     
     
@@ -531,24 +549,24 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         """Very small Microdata scraper (itemscope/itemtype/itemprop)."""
         out: list[dict] = []
         for scope in soup.find_all(attrs={"itemscope": True}):
-            if not isinstance(scope, bs4.element.Tag):
+            if not isinstance(scope, Tag):
                 continue
-            typ = (scope.get("itemtype") or "").split()[:1]
-            item: dict[str, Any] = {"@type": typ[0] if typ else "Thing"}
+            typ_tokens = _attr(scope, "itemtype").split()
+            item_type = typ_tokens[0] if typ_tokens else "Thing"
+            item: dict[str, Any] = {"@type": item_type}
             for prop in scope.find_all(attrs={"itemprop": True}):
-                if not isinstance(prop, bs4.element.Tag):
+                if not isinstance(prop, Tag):
                     continue
                 if _is_within_other(scope, prop, "itemscope"):
                     continue
-                keys = str(prop.get("itemprop") or "").split()
-                val = (
-                    prop.get("content")
-                    or prop.get("href")
-                    or prop.get("src")
-                    or " ".join(prop.stripped_strings)
-                )
-                for k in keys:
-                    k and (item.__setitem__(k, val))
+                key_tokens = _attr(prop, "itemprop").split()
+                raw_content = _attr(prop, "content")
+                raw_href = _attr(prop, "href")
+                raw_src = _attr(prop, "src")
+                value = raw_content or raw_href or raw_src or " ".join(prop.stripped_strings)
+                for key in key_tokens:
+                    if key:
+                        item[key] = value
             out.append(item)
         return out
 
@@ -556,24 +574,23 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         """Very small RDFa scraper (typeof / property / content|href|src|text)."""
         out: list[dict] = []
         for root in soup.find_all(attrs={"typeof": True}):
-            if not isinstance(root, bs4.element.Tag):
+            if not isinstance(root, Tag):
                 continue
-            typ = (root.get("typeof") or "").strip()
-            vocab = (root.get("vocab") or "").strip()
+            typ = _attr(root, "typeof").strip()
+            vocab = _attr(root, "vocab").strip()
             item: dict[str, Any] = {"@type": typ or (vocab or "Thing")}
             for prop in root.find_all(attrs={"property": True}):
-                if not isinstance(prop, bs4.element.Tag):
+                if not isinstance(prop, Tag):
                     continue
                 if _is_within_other(root, prop, "typeof"):
                     continue
-                key = str(prop.get("property") or "").strip()
-                val = (
-                    prop.get("content")
-                    or prop.get("href")
-                    or prop.get("src")
-                    or " ".join(prop.stripped_strings)
-                )
-                key and (item.__setitem__(key, val))
+                key = _attr(prop, "property").strip()
+                raw_content = _attr(prop, "content")
+                raw_href = _attr(prop, "href")
+                raw_src = _attr(prop, "src")
+                value = raw_content or raw_href or raw_src or " ".join(prop.stripped_strings)
+                if key:
+                    item[key] = value
             out.append(item)
         return out
 
@@ -581,15 +598,18 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     try:
         soup = BeautifulSoup(html_text, "html.parser")
         ok = bad = 0
-        for s in soup.find_all("script"):
-            t = (s.get("type") or "").lower().strip()
-            # accept common variants: application/ld+json; charset=utf-8, json+ld, jsonld
-            is_ld = "ld+json" in t or t in ("application/jsonld", "application/json+ld")
-            # also accept generic JSON/plain when id/class hints schema (cms themes)
-            hint = "schema" in (s.get("id", "") + " " + " ".join(s.get("class", []))).lower()
+        for node in soup.find_all("script"):
+            if not isinstance(node, Tag):
+                continue
+            tag_type = _attr(node, "type").lower().strip()
+            is_ld = "ld+json" in tag_type or tag_type in ("application/jsonld", "application/json+ld")
+            ident = _attr(node, "id")
+            class_attr = node.get("class") or []
+            class_text = " ".join(class_attr) if isinstance(class_attr, (list, tuple)) else str(class_attr)
+            hint = "schema" in f"{ident} {class_text}".lower()
             if not (is_ld or hint):
                 continue
-            raw = (s.string or s.get_text() or "").strip()
+            raw = (node.string or node.get_text() or "").strip()
             if not raw:
                 continue
             parsed = _safe_load(raw)
@@ -597,11 +617,11 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                 collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"}); bad += 1; continue
             if isinstance(parsed, list):
                 for obj in parsed:
-                    isinstance(obj, dict) and _add_flat(obj, "json-ld")
+                    if isinstance(obj, dict):
+                        _add_flat(obj, "json-ld")
             elif isinstance(parsed, dict):
                 _add_flat(parsed, "json-ld")
             else:
-                # not a dict/list → keep raw so user sees the block
                 collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"}); bad += 1; continue
             ok += 1
         _log_schema(f"manual json-ld blocks parsed={ok}, raw_bad={bad}")
@@ -644,23 +664,26 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     try:
         soup2 = BeautifulSoup(html_text, "html.parser")
         hits = 0
-        for s in soup2.find_all("script"):
-            raw = (s.string or s.get_text() or "").strip()
+        for node in soup2.find_all("script"):
+            if not isinstance(node, Tag):
+                continue
+            raw = (node.string or node.get_text() or "").strip()
             if not raw or ("@context" not in raw and "@type" not in raw):
                 continue
-            # 1) Try whole block as-is / scrubbed
             parsed = _safe_load(raw)
             if isinstance(parsed, (list, dict)):
-                for node in _walk_jsonld(parsed):
-                    _add_flat(node, "json-ld"); hits += 1
+                for item in _walk_jsonld(parsed):
+                    _add_flat(item, "json-ld")
+                    hits += 1
                 continue
-            # 2) If it's an assignment (JS), carve out balanced {...} blocks
             for chunk in _find_json_objects(raw):
                 parsed2 = _safe_load(chunk)
                 if isinstance(parsed2, (list, dict)):
-                    for node in _walk_jsonld(parsed2):
-                        _add_flat(node, "json-ld"); hits += 1
-        hits and _log_schema(f"heuristic nested json-ld nodes found={hits}")
+                    for item in _walk_jsonld(parsed2):
+                        _add_flat(item, "json-ld")
+                        hits += 1
+        if hits:
+            _log_schema(f"heuristic nested json-ld nodes found={hits}")
     except Exception as e:
         _log_schema(f"heuristic json-ld error: {e!r}")
 
@@ -676,7 +699,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                 return {}
         def _extract_html5lib() -> dict[str, Any]:
             try:
-                from extruct.utils import parse_html as _parse_html
+                from extruct.utils import parse_html as _parse_html  # type: ignore
                 tree = _parse_html(html_text, treebuilder="html5lib")
                 data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
                 _log_schema("extruct:html5lib ok")
@@ -690,7 +713,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         for syntax in syntaxes:
             items = res.get(syntax) or []
             for it in items:
-                isinstance(it, dict) and _add_flat(it, syntax)
+                if isinstance(it, dict):
+                    _add_flat(it, syntax)
             if items:
                 _log_schema(f"extruct:{syntax} -> {len(items)} items")
                 
@@ -698,8 +722,14 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     soup_md = BeautifulSoup(html_text, "html.parser")
     have_micro = any(isinstance(o, dict) and o.get("_extracted_via") == "microdata" for o in collected)
     have_rdfa  = any(isinstance(o, dict) and o.get("_extracted_via") == "rdfa"      for o in collected)
-    not have_micro and [_add_flat(o, "microdata") for o in _microdata_bs(soup_md)] and _log_schema("fallback: microdata added")
-    not have_rdfa  and [_add_flat(o, "rdfa")      for o in _rdfa_bs(soup_md)]      and _log_schema("fallback: rdfa added")
+    if not have_micro:
+        for item in _microdata_bs(soup_md):
+            _add_flat(item, "microdata")
+        _log_schema("fallback: microdata added")
+    if not have_rdfa:
+        for item in _rdfa_bs(soup_md):
+            _add_flat(item, "rdfa")
+        _log_schema("fallback: rdfa added")
 
 
     # --- 3) Issue summary (explicit; no Pylance “unused expression”) ----------
@@ -727,7 +757,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     out: list[list[str]] = []
     for script in soup.find_all("script", {"type": "application/ld+json"}):
         raw = script.get_text(strip=True) or ""
-        raw and out.append([raw])
+        if raw:
+            out.append([raw])
     return out
 
 
@@ -791,16 +822,15 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
 
     async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
             async def _to_data_uri(img_url: str) -> str:
-                """Download *img_url* and return a data-URI.  
+                """Download *img_url* and return a data-URI.
                 Falls back to the original URL on error."""
                 try:
                     async with aiohttp.ClientSession() as _s:
                         async with _s.get(img_url, timeout=5) as _r:
                             if _r.status == 200:
                                 raw = await _r.read()
-                                # cut a 16×16 round icon
                                 with Image.open(BytesIO(raw)).convert("RGBA") as im:
-                                    im = im.resize((16, 16), Image.LANCZOS)
+                                    im = im.resize((16, 16), _LANCZOS)
                                     mask = Image.new("L", (16, 16), 0)
                                     ImageDraw.Draw(mask).ellipse((0, 0, 16, 16), fill=255)
                                     im.putalpha(mask)
@@ -811,62 +841,57 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
                 except Exception:
                     pass
                 return img_url
-            
+
             parsed = urlparse(page_url)
             domain = parsed.netloc
 
-            # ── site / brand name ────────────────────────────────────────────
+            site_name = ""
             og_site = soup.find("meta", property="og:site_name")
-            if og_site and og_site.get("content"):
-                site_name = og_site["content"].strip()
-            else:
-                # fallback: second-level domain, e.g. “example” from “www.example.com”
-                site_name = (domain.split(".")[-2].capitalize() if domain else "")
+            if isinstance(og_site, Tag):
+                site_name = _attr(og_site, "content").strip()
+            if not site_name and domain:
+                parts = domain.split(".")
+                site_name = parts[-2].capitalize() if len(parts) >= 2 else domain.capitalize()
 
-
-            # ── title (use empty string if <title> missing) ────────────────────────
             title_tag = soup.title
-            raw_title = (title_tag.string or "").strip() if title_tag else ""
+            raw_title = ""
+            if isinstance(title_tag, Tag):
+                raw_title = (title_tag.string or "").strip()
 
-            # ── truncate by pixel width (~600 px ≈ 7.2 px per glyph) ────────────
             _MAX_PX = 600
-            _CHAR_LIMIT = int(_MAX_PX / _MEAN_PX)          # ≈ 83 chars
+            _CHAR_LIMIT = int(_MAX_PX / _MEAN_PX)
             title = (
                 raw_title[: _CHAR_LIMIT - 1].rstrip() + "…"
                 if len(raw_title) > _CHAR_LIMIT
                 else raw_title
             )
 
-            # breadcrumb:  example.com › section › page
             path = unquote(parsed.path.strip("/")).replace("/", " › ")
             breadcrumb = f"{domain} › {path}" if path else domain
 
-            # ----- description (truncate 160 chars, add ellipsis) ------------------
             desc_tag = (
-                soup.find("meta", attrs={"name": "description"}) or
-                soup.find("meta", property="og:description")
-                )
-            raw_desc = (desc_tag["content"]
-                if desc_tag and desc_tag.has_attr("content") else "").strip()
+                soup.find("meta", attrs={"name": "description"})
+                or soup.find("meta", property="og:description")
+            )
+            raw_desc = ""
+            if isinstance(desc_tag, Tag):
+                raw_desc = _attr(desc_tag, "content").strip()
             description = (raw_desc[:157] + "…") if len(raw_desc) > 160 else raw_desc
 
-            favicon_tag = soup.find("link", rel=lambda v: v and "icon" in v.lower())
-
-            if favicon_tag and favicon_tag.has_attr("href"):
-                raw_icon = favicon_tag["href"]
-                favicon = urljoin(page_url, raw_icon)               # make absolute
-            else:
-                # Google-style fallback service (always https, 48 px)
-                favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+            favicon_tag = soup.find("link", rel=lambda val: isinstance(val, str) and "icon" in val.lower())
+            favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+            if isinstance(favicon_tag, Tag):
+                href_val = _attr(favicon_tag, "href").strip()
+                if href_val:
+                    favicon = urljoin(page_url, href_val)
 
             return {
-                "title":       title,
-                # truncate to 160 chars, add ellipsis the Google way
+                "title": title,
                 "description": (description[:157] + "…") if len(description) > 160 else description,
-                "url":         page_url,
-                "site_name":   site_name,
-                "favicon":     await _to_data_uri(favicon),
-                "breadcrumb":  breadcrumb,
+                "url": page_url,
+                "site_name": site_name,
+                "favicon": await _to_data_uri(favicon),
+                "breadcrumb": breadcrumb,
             }
 
     # costruisce il risultato finale
