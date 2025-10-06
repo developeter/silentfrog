@@ -1,0 +1,42 @@
+﻿from __future__ import annotations
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
+from . import seo_crawler
+
+__all__ = ["CrawlResult", "ImageAnalysis", "analyse", "analyse_images"]
+
+
+@dataclass(frozen=True)
+class CrawlResult:
+    payload: Dict[str, Any]
+
+    def as_dict(self) -> Dict[str, Any]:
+        return dict(self.payload)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.payload[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.payload.get(key, default)
+
+
+@dataclass(frozen=True)
+class ImageAnalysis:
+    rows: List[List[str]]
+
+    def as_rows(self) -> List[List[str]]:
+        return [list(row) for row in self.rows]
+
+    def __iter__(self):
+        yield from self.rows
+
+
+async def analyse(url: str, timeout: int = 10) -> CrawlResult:
+    data = await seo_crawler.analyse(url, timeout)
+    return CrawlResult(payload=data)
+
+
+async def analyse_images(base: str, rows: List[List[str]], timeout: int = 10) -> ImageAnalysis:
+    data = await seo_crawler.analyse_images(base, rows, timeout=timeout)
+    return ImageAnalysis(rows=data)
