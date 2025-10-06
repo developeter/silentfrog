@@ -5,7 +5,6 @@ Motore asincrono per l’analisi SEO di una singola pagina.
 from __future__ import annotations
 from io import BytesIO
 from collections import Counter
-from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
 from bs4 import BeautifulSoup, Comment
@@ -17,11 +16,11 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 from base64 import b64encode
 from textwrap import shorten
+from .http_client import fetch_page, head_status, fetch_text
+from .crawler_utils import _attr, _hr_size
 
-import humanize  # type: ignore
 import asyncio
 import re
-import ssl
 import string
 import bs4
 import aiohttp  # type: ignore
@@ -70,62 +69,6 @@ for lang in ("english", "italian", "spanish", "french"):
         STOP.update(stopwords.words(lang))
 
 
-@dataclass
-class HttpResponse:
-    """Lightweight container returned by fetch_page()."""
-
-    def __init__(
-        self,
-        body: str,
-        status: int,
-        url: str,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.body = body
-        self.status = status
-        self.url = url
-        self.headers = headers or {}
-
-# helper: ritorna sempre str ed evita errori di typing con Pylance
-def _attr(tag: Any, key: str) -> str:   # noqa: ANN401 (bs4 non ha stub preciso)
-    val = tag.get(key)
-    return str(val) if val is not None else ""
-
-# humanize produce "14 Bytes": converte in "14 B" per i test
-def _hr_size(num_bytes: int) -> str:
-    """Restituisce una stringa breve (es. 14 B, 16.2 KB, 2.1 MB)."""
-    s = humanize.naturalsize(num_bytes, binary=True)
-    return s.replace("Bytes", "B").replace("Byte", "B")
-
-
-async def _fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
-    try:
-        async with session.get(
-            url,
-            timeout=ClientTimeout(total=timeout),
-            allow_redirects=True,
-        ) as r:
-            text = await r.text("utf-8", errors="ignore")
-            return HttpResponse(
-                body=text,
-                status=r.status,
-                url=str(r.url),
-                headers=dict(r.headers),
-            )
-    except Exception:
-        return HttpResponse("", 0, url)
-
-
-async def fetch_page(url: str, timeout: int = 10) -> HttpResponse:
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
-        headers = {"User-Agent": "SilentFrog/1.0 (+https://example.com)"}
-        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-
-        async with aiohttp.ClientSession(headers=headers, connector=connector) as sess:
-            return await _fetch(sess, url, timeout)
-
-
 async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
     try:
         async with session.get(url, timeout=ClientTimeout(total=timeout)) as r:
@@ -144,26 +87,13 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
 
 
 async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
-    try:
-        async with session.head(url, timeout=ClientTimeout(total=timeout)) as r:
-            return r.status
-    except Exception:
-        return 0
+    return await head_status(session, url, timeout)
 
 # ── robots.txt helper ───────────────────────────────────────────────────
 async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
-    """Return robots.txt text or None on network failure."""
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(
-                robots_url,
-                timeout=ClientTimeout(total=timeout),
-            ) as r:
-                return await r.text()
-    except Exception:
-        return None
+    return await fetch_text(robots_url, timeout)
 
 
 async def _parse_robots(url: str, timeout: int = 5) -> dict[str, list[tuple[str, str]]]:
