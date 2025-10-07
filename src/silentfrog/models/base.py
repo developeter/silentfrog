@@ -76,10 +76,19 @@ class GenericModel(_BaseModel):
             cell = row[column].strip()
             size_val = _size_to_bytes(cell)
             if size_val is not None:
-                return size_val
-            if cell.replace(".", "", 1).isdigit():
-                return float(cell)
-            return cell.lower()
+                return (0, size_val)
+            try:
+                num_val = float(cell)
+            except ValueError:
+                try:
+                    num_val = float(cell.replace(',', '.'))
+                except ValueError:
+                    num_val = None
+            else:
+                return (0, num_val)
+            if num_val is not None:
+                return (0, num_val)
+            return (1, cell.lower())
 
         try:
             self.layoutAboutToBeChanged.emit()
