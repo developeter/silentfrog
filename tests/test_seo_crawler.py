@@ -1,7 +1,7 @@
 import pytest
-import textwrap
 import warnings
 from aiohttp import web
+from pathlib import Path
 
 from silentfrog.seo_crawler import analyse, analyse_images
 
@@ -20,25 +20,9 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning"
 )
 
-HTML = textwrap.dedent(
-    """
-    <html><head>
-      <title>Example page</title>
-      <link rel="canonical" href="/" />
-      <link rel="alternate" hreflang="en" href="/en" />
-      <link rel="icon" href="/favicon.ico" />
-      <meta name="description" content="foo bar">
-      <meta name="robots" content="index, follow">
-      <meta property="og:site_name" content="TestSite" />
-      <script type="application/ld+json">{"@context":"https://schema.org"}</script>
-    </head><body>
-      <h1>Titolo</h1>
-      <img src="/logo.png" alt="logo">
-      <a href="https://ext.com" rel="nofollow">ext</a>
-      <p>Hello world hello analytics keyword focus</p>
-    </body></html>
-    """
-).strip()
+FIXTURES = Path(__file__).resolve().parents[1] / "docs" / "tests" / "fixtures"
+HTML = (FIXTURES / "example_page.html").read_text(encoding="utf-8")
+ROBOTS_TEXT = (FIXTURES / "robots.txt").read_text(encoding="utf-8")
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -61,8 +45,7 @@ async def local_server(aiohttp_server):
         return web.Response(body=PNG_BYTES, content_type="image/x-icon")
 
     async def _robots(_):
-        body = "User-agent: *\nDisallow: /tmp\nAllow: /\n"
-        return web.Response(text=body, content_type="text/plain")
+        return web.Response(text=ROBOTS_TEXT, content_type="text/plain")
 
     app = web.Application()
     app.router.add_route("GET", "/", _html)

@@ -38,6 +38,9 @@ $ poetry env use $(which python3.12)    # or python3.11
 # install (pre‑built wheels, no compile step)
 $ poetry install --sync
 
+# run tests
+$ poetry run pytest
+
 # launch GUI
 $ poetry run silentfrog
 ```
