@@ -18,6 +18,7 @@ from base64 import b64encode
 from textwrap import shorten
 from .http_client import fetch_page, head_status, fetch_text
 from .crawler_utils import _attr, _hr_size
+from .crawl_types import CrawlPayload
 
 import asyncio
 import re
@@ -705,7 +706,7 @@ def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:
 
 
 # --------------------------------------------------------------------- #
-async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
+async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
     resp = await fetch_page(url, timeout)
     soup = BeautifulSoup(resp.body, "html.parser")
     schema_rows = _extract_schema_all(resp.body, resp.url)
@@ -825,15 +826,15 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
             }
 
     # costruisce il risultato finale
-    return {
-        "meta":     _extract_meta(soup),
-        "headers":  _extract_headers(soup),
-        "images":   _extract_images(resp.url, soup),
-        "links":    links_rows,
-        "schema":   schema_rows,
+    raw_payload = {
+        "meta": _extract_meta(soup),
+        "headers": _extract_headers(soup),
+        "images": _extract_images(resp.url, soup),
+        "links": links_rows,
+        "schema": schema_rows,
         "canonical": {
             "target": canonical_url,
-            "self":   is_self,
+            "self": is_self,
             "multiple": many_canon,
             "status": canon_status,
         },
@@ -843,17 +844,19 @@ async def analyse(url: str, timeout: int = 10) -> dict[str, Any]:
             "final_status": final_status,
             "loop": is_loop,
         },
-        "robots":  await _parse_robots(resp.url, timeout=timeout),   # full UA map
-        "meta_robots":  resp.headers.get("X-Robots-Tag", "") or
-                        next((m[1] for m in _extract_meta(soup)
-                            if m[0].lower() == "robots"), ""),
+        "robots": await _parse_robots(resp.url, timeout=timeout),  # full UA map
+        "meta_robots": resp.headers.get("X-Robots-Tag", "")
+        or next(
+            (m[1] for m in _extract_meta(soup) if m[0].lower() == "robots"), ""
+        ),
         "hreflang": hreflang_rows,
         "ai_crawl": ai_rows,
-        "serp":      await _make_serp_snippet(soup, resp.url),
+        "serp": await _make_serp_snippet(soup, resp.url),
         "serp_audit": title_audit,
         "keywords": _extract_keywords(plain),
-  
     }
+
+    return CrawlPayload.from_raw(raw_payload)
 
 
 async def analyse_images(base: str, rows: list[list[str]], timeout=10):

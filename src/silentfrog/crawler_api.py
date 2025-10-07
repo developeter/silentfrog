@@ -3,16 +3,20 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from . import seo_crawler
+from .crawl_types import CrawlPayload
 
 __all__ = ["CrawlResult", "ImageAnalysis", "analyse", "analyse_images"]
 
 
 @dataclass(frozen=True)
 class CrawlResult:
-    payload: Dict[str, Any]
+    payload: CrawlPayload
 
     def as_dict(self) -> Dict[str, Any]:
-        return dict(self.payload)
+        return self.payload.to_mapping()
+
+    def as_payload(self) -> CrawlPayload:
+        return self.payload
 
     def __getitem__(self, key: str) -> Any:
         return self.payload[key]

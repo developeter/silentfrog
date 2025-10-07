@@ -5,12 +5,14 @@ from typing import List
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
-from .base import GenericModel, BR_GREEN, BR_YELLOW, BR_RED
+from ..theme import StatusBrushPalette, status_brushes
+from .base import GenericModel
 
 
 class HreflangModel(GenericModel):
     def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
         super().__init__(headers, rows)
+        self._brushes: StatusBrushPalette = status_brushes()
 
     def data(  # type: ignore[override]
         self,
@@ -28,12 +30,16 @@ class HreflangModel(GenericModel):
                 except Exception:
                     code = 0
                 if 200 <= code < 300:
-                    return BR_GREEN
+                    return self._brushes.good
                 if 300 <= code < 400:
-                    return BR_YELLOW
-                return BR_RED
+                    return self._brushes.warn
+                return self._brushes.bad
             if column == 3:
-                return BR_GREEN if str(row[3]).strip().lower().startswith("y") else BR_RED
+                return self._brushes.good if str(row[3]).strip().lower().startswith("y") else self._brushes.bad
             if column == 4:
-                return BR_GREEN if str(row[4]).strip().lower().startswith("y") else BR_YELLOW
+                return (
+                    self._brushes.good
+                    if str(row[4]).strip().lower().startswith("y")
+                    else self._brushes.warn
+                )
         return None

@@ -1,16 +1,19 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
 import re
 from typing import List
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
-from .base import GenericModel, BR_GREEN, BR_YELLOW, BR_RED
+from ..theme import StatusBrushPalette, status_brushes
+from .base import GenericModel
 
 
 class RedirectModel(GenericModel):
     def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
         super().__init__(headers, rows)
+        self._brushes: StatusBrushPalette = status_brushes()
 
     def data(  # type: ignore[override]
         self,
@@ -28,20 +31,20 @@ class RedirectModel(GenericModel):
                 except Exception:
                     hops = 0
                 if hops == 0:
-                    return BR_GREEN
+                    return self._brushes.good
                 if hops <= 2:
-                    return BR_YELLOW
-                return BR_RED
+                    return self._brushes.warn
+                return self._brushes.bad
             if key == "final status":
                 match = re.search(r"\d{3}", value)
                 code = int(match.group(0)) if match else 0
                 if 200 <= code < 300:
-                    return BR_GREEN
+                    return self._brushes.good
                 if 300 <= code < 400:
-                    return BR_YELLOW
-                return BR_RED
+                    return self._brushes.warn
+                return self._brushes.bad
             if key == "loop detected":
-                return BR_RED if value.lower().startswith("y") else BR_GREEN
+                return self._brushes.bad if value.lower().startswith("y") else self._brushes.good
             if key == "redirect chain":
-                return BR_YELLOW if "→" in value or "->" in value else BR_GREEN
+                return self._brushes.warn if "" in value or "->" in value else self._brushes.good
         return None

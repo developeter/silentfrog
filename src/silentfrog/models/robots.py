@@ -4,12 +4,14 @@ from typing import List
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
-from .base import GenericModel, BR_GREEN, BR_RED, BR_YELLOW
+from ..theme import StatusBrushPalette, status_brushes
+from .base import GenericModel
 
 
 class RobotsModel(GenericModel):
     def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
         super().__init__(headers, rows)
+        self._brushes: StatusBrushPalette = status_brushes()
 
     def data(  # type: ignore[override]
         self,
@@ -22,9 +24,17 @@ class RobotsModel(GenericModel):
             key = (self._rows[index.row()][0] or "").lower()
             value = (self._rows[index.row()][1] or "").lower()
             if key.startswith("meta"):
-                return BR_RED if "noindex" in value else (BR_YELLOW if "nofollow" in value else BR_GREEN)
+                if "noindex" in value:
+                    return self._brushes.bad
+                if "nofollow" in value:
+                    return self._brushes.warn
+                return self._brushes.good
             if key.startswith("x-robots"):
-                return BR_RED if "noindex" in value else (BR_YELLOW if "nofollow" in value else BR_GREEN)
+                if "noindex" in value:
+                    return self._brushes.bad
+                if "nofollow" in value:
+                    return self._brushes.warn
+                return self._brushes.good
             if key.startswith("disallow"):
-                return BR_RED if value.strip() not in ("", "/") else BR_YELLOW
+                return self._brushes.bad if value.strip() not in ("", "/") else self._brushes.warn
         return None

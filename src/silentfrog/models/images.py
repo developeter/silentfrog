@@ -5,12 +5,14 @@ from typing import List
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
-from .base import GenericModel, BR_GREEN, BR_YELLOW, BR_RED
+from ..theme import StatusBrushPalette, status_brushes
+from .base import GenericModel
 
 
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
         super().__init__(["Src", "Alt", "Title", "W", "H", "Peso"], rows)
+        self._brushes: StatusBrushPalette = status_brushes()
 
     @staticmethod
     def _filled(value: object) -> bool:
@@ -37,20 +39,18 @@ class ImagesModel(GenericModel):
         }.get(unit, 1)
         return int(number * multiplier)
 
-    @staticmethod
-    def _color_required(value: object):
-        return BR_GREEN if ImagesModel._filled(value) else BR_YELLOW
+    def _color_required(self, value: object):
+        return self._brushes.good if ImagesModel._filled(value) else self._brushes.warn
 
-    @staticmethod
-    def _color_size(value: object):
+    def _color_size(self, value: object):
         size = ImagesModel._bytes(value)
         if size < 0:
             return None
         if size > 500 * 1024:
-            return BR_RED
+            return self._brushes.bad
         if size > 100 * 1024:
-            return BR_YELLOW
-        return BR_GREEN
+            return self._brushes.warn
+        return self._brushes.good
 
     def data(  # type: ignore[override]
         self,
@@ -63,7 +63,7 @@ class ImagesModel(GenericModel):
             return None
         column = index.column()
         if column in (1, 2):
-            return ImagesModel._color_required(self._rows[index.row()][column])
+            return self._color_required(self._rows[index.row()][column])
         if column == 5:
-            return ImagesModel._color_size(self._rows[index.row()][column])
+            return self._color_size(self._rows[index.row()][column])
         return None

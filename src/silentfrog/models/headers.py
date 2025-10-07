@@ -4,7 +4,8 @@ from typing import List
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
-from .base import _BaseModel, BR_GREEN, BR_YELLOW
+from ..theme import StatusBrushPalette, status_brushes
+from .base import _BaseModel
 
 
 class HeaderModel(_BaseModel):
@@ -13,6 +14,7 @@ class HeaderModel(_BaseModel):
     def __init__(self, rows: List[List[str]]) -> None:
         super().__init__(rows)
         self._h1_count = sum(1 for row in rows if row and str(row[0]).strip().lower() == "h1")
+        self._brushes: StatusBrushPalette = status_brushes()
 
     def data(  # type: ignore[override]
         self,
@@ -24,5 +26,5 @@ class HeaderModel(_BaseModel):
         if role == Qt.ItemDataRole.BackgroundRole and index.column() in (0, 1):
             tag = (self._rows[index.row()][0] or "").strip().lower()
             if tag == "h1":
-                return BR_GREEN if self._h1_count == 1 else BR_YELLOW
+                return self._brushes.good if self._h1_count == 1 else self._brushes.warn
         return None

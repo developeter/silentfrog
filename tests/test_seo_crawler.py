@@ -77,26 +77,26 @@ async def local_server(aiohttp_server):
 
 @pytest.mark.asyncio
 async def test_analyse(local_server):
-    data = await analyse(local_server, timeout=5)
+    payload = await analyse(local_server, timeout=5)
 
     # Meta tab: description + robots row, meta robots string
-    assert any(row[0] == "description" for row in data["meta"])
-    assert any(row[0] == "robots" and "index" in row[1].lower() for row in data["meta"])
-    assert data["meta_robots"].lower() == "index, follow"
+    assert any(row[0] == "description" for row in payload.meta)
+    assert any(row[0] == "robots" and "index" in row[1].lower() for row in payload.meta)
+    assert payload.meta_robots.lower() == "index, follow"
 
     # Headers tab: one H1 with expected content
-    assert any(row[0] == "h1" and "Titolo" in row[1] for row in data["headers"])
+    assert any(row[0] == "h1" and "Titolo" in row[1] for row in payload.headers)
 
     # Images tab: absolute URL, alt preserved
-    assert data["images"][0][0].endswith("/logo.png")
-    assert data["images"][0][1] == "logo"
+    assert payload.images[0][0].endswith("/logo.png")
+    assert payload.images[0][1] == "logo"
 
     # Links tab: follow flag and HTTP status populated
-    assert data["links"][0][2] == "NoFollow"
-    assert data["links"][0][3].isdigit()
+    assert payload.links[0][2] == "NoFollow"
+    assert payload.links[0][3].isdigit()
 
     # Schema tab: at least one entry contains @context
-    first = data["schema"][0]
+    first = payload.schema[0]
     if isinstance(first, dict):
         assert "@context" in first
     elif isinstance(first, list) and first:
@@ -105,40 +105,40 @@ async def test_analyse(local_server):
         pytest.fail(f"Unexpected schema item type: {type(first)}")
 
     # Canonical tab: self-referencing to requested URL
-    canon = data["canonical"]
-    assert canon["self"] is True and canon["target"].rstrip("/") == local_server.rstrip("/")
+    canon = payload.canonical
+    assert canon.is_self is True and canon.target.rstrip("/") == local_server.rstrip("/")
 
     # Redirect tab: no hops, final status reported, chain starts with URL
-    redir = data["redirect"]
-    assert redir["hops"] == 0
-    assert redir["final_status"]
-    assert redir["chain"][0].rstrip("/") == local_server.rstrip("/")
+    redir = payload.redirect
+    assert redir.hops == 0
+    assert redir.final_status
+    assert redir.chain[0].rstrip("/") == local_server.rstrip("/")
 
     # Robots tab: parsed robots.txt directives available
-    robots_map = data["robots"]
+    robots_map = payload.robots
     assert "*" in robots_map
     assert ("Disallow", "/tmp") in robots_map["*"]
     assert ("Allow", "/") in robots_map["*"]
 
     # Hreflang tab: expected alternate link surfaced
-    langs = [row[0] for row in data["hreflang"]]
+    langs = [row[0] for row in payload.hreflang]
     assert "en" in langs
-    target = next(row[1] for row in data["hreflang"] if row[0] == "en")
+    target = next(row[1] for row in payload.hreflang if row[0] == "en")
     assert target.endswith("/en")
 
     # AI tab: GPTBot row shows allowed crawl (robots + meta)
-    assert data["ai_crawl"][0] == ["GPTBot", "Yes", "No", "Allowed"]
+    assert payload.ai_crawl[0] == ["GPTBot", "Yes", "No", "Allowed"]
 
     # SERP tab: preview and audit payloads populated
-    serp = data["serp"]
-    assert serp["title"]
-    expected_crumb = serp["url"].split("//", 1)[1].rstrip("/")
-    assert serp["breadcrumb"] == expected_crumb or serp["breadcrumb"].startswith(expected_crumb)
-    assert serp["site_name"] == "TestSite"
-    assert serp["favicon"] and serp["favicon"].startswith("http")
+    serp = payload.serp
+    assert serp.title
+    expected_crumb = serp.url.split("//", 1)[1].rstrip("/")
+    assert serp.breadcrumb == expected_crumb or serp.breadcrumb.startswith(expected_crumb)
+    assert serp.site_name == "TestSite"
+    assert serp.favicon and serp.favicon.startswith("http")
 
-    audit = data["serp_audit"]
-    assert set(audit) == {
+    audit = payload.serp_audit
+    assert {
         "too_long",
         "too_short",
         "px_over",
@@ -147,13 +147,13 @@ async def test_analyse(local_server):
         "missing",
         "px_len",
         "char_len",
-    }
-    assert audit["char_len"].isdigit()
-    assert audit["px_len"].isdigit()
-    assert audit["missing"] == "No"
+    } == set(audit.to_dict())
+    assert audit.char_len.isdigit()
+    assert audit.px_len.isdigit()
+    assert audit.missing == "No"
 
     # Keywords tab: extracted tokens include hello (appears twice in body)
-    assert any(row[0] == "hello" for row in data["keywords"] if row[0])
+    assert any(row[0] == "hello" for row in payload.keywords if row[0])
 
 
 @pytest.mark.asyncio

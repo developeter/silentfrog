@@ -15,7 +15,7 @@ def run_crawl(
     def _target() -> None:
         try:
             data = asyncio.run(analyse(url, timeout))
-            on_success(data)
+            on_success(data.to_mapping())
         except Exception as exc:  # noqa: BLE001
             on_error(str(exc))
 

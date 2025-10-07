@@ -1,4 +1,4 @@
-﻿from .base import GenericModel, _BaseModel, BR_GREEN, BR_YELLOW, BR_RED
+from .base import GenericModel, _BaseModel
 from .meta import MetaModel
 from .images import ImagesModel
 from .robots import RobotsModel
@@ -12,9 +12,6 @@ from .links import LinksModel
 __all__ = [
     "GenericModel",
     "_BaseModel",
-    "BR_GREEN",
-    "BR_YELLOW",
-    "BR_RED",
     "MetaModel",
     "ImagesModel",
     "RobotsModel",

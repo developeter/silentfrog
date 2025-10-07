@@ -1,12 +1,8 @@
 from __future__ import annotations
 from typing import Any, List
 
-from PyQt5 import QtCore, QtGui
+from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
-
-BR_GREEN = QtGui.QBrush(QtGui.QColor(0, 180, 0, 60))
-BR_YELLOW = QtGui.QBrush(QtGui.QColor(255, 200, 0, 60))
-BR_RED = QtGui.QBrush(QtGui.QColor(200, 0, 0, 60))
 
 
 class _BaseModel(QtCore.QAbstractTableModel):
@@ -100,5 +96,5 @@ class GenericModel(_BaseModel):
             self.layoutChanged.emit()
 
 
-__all__ = ["_BaseModel", "GenericModel", "BR_GREEN", "BR_YELLOW", "BR_RED"]
+__all__ = ["_BaseModel", "GenericModel"]
 
