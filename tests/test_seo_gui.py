@@ -1,11 +1,239 @@
-import pytest
-from PyQt5 import QtWidgets
-from silentfrog.seo_gui import WebpageSeoWindow
+from __future__ import annotations
 
-def test_seo_window_tabs_and_sort(qtbot):
-    """Window opens, has 12 tabs"""
+import re
+from pathlib import Path
+from typing import Dict, Tuple, Type
+
+import pytest
+from PyQt5 import QtGui, QtWidgets
+
+from silentfrog.seo_gui import WebpageSeoWindow
+from silentfrog.tabs import (
+    AiTab,
+    CanonicalTab,
+    HeadersTab,
+    ImagesTab,
+    HreflangTab,
+    KeywordsTab,
+    LinksTab,
+    MetaTab,
+    RedirectTab,
+    RobotsTab,
+    SchemaTab,
+    SerpTab,
+)
+
+SNAPSHOT_DIR = Path(__file__).with_name("snapshots")
+SERP_SNAPSHOT = SNAPSHOT_DIR / "serp_preview.html"
+
+
+def _normalize_html(html: str) -> str:
+    cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", html, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<head>.*?</head>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = cleaned.replace("\xa0", "&nbsp;")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
+    palette = widget.palette()
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(value, value, value))
+    widget.setPalette(palette)
+
+
+def test_seo_window_exposes_expected_tabs(qtbot):
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
     win.show()
-    assert isinstance(win, QtWidgets.QWidget)
+
     assert win.tabs.count() == 12
+    labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
+    assert labels == [
+        "Meta tag",
+        "Header H1-H6",
+        "Images",
+        "Link",
+        "Redirect",
+        "Canonical",
+        "Robots",
+        "Hreflang",
+        "Schema.org",
+        "Keywords",
+        "AI crawl",
+        "SERP",
+    ]
+
+
+TABLE_TAB_CASES: Tuple[
+    Tuple[Type[QtWidgets.QWidget], Tuple[object, ...], Dict[int, QtWidgets.QHeaderView.ResizeMode]],
+    ...,
+] = (
+    (MetaTab, ([["description", "Example description", "150"]],), {}),
+    (HeadersTab, ([["h1", "Heading"]],), {}),
+    (
+        ImagesTab,
+        ([["https://example.com/img.png", "Alt", "Title", "640", "480", "18 KB"]],),
+        {0: QtWidgets.QHeaderView.Interactive},
+    ),
+    (
+        LinksTab,
+        ([["https://example.com", "Example", "Follow", "200"]],),
+        {0: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
+        RedirectTab,
+        (
+            {
+                "chain": ["https://example.com", "https://example.com/about"],
+                "hops": 2,
+                "final_status": "301",
+                "loop": False,
+            },
+        ),
+        {1: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
+        CanonicalTab,
+        ({"target": "https://example.com", "self": True, "multiple": False, "status": "200"},),
+        {},
+    ),
+    (
+        RobotsTab,
+        ("noindex", {"*": [("Allow", "/"), ("Disallow", "/tmp")]}),
+        {1: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
+        HreflangTab,
+        ([["en", "https://example.com", "200", "Yes", "Yes"]],),
+        {1: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
+        AiTab,
+        ([["Crawler", "Yes", "No", "Allowed"]],),
+        {
+            0: QtWidgets.QHeaderView.ResizeToContents,
+            3: QtWidgets.QHeaderView.ResizeToContents,
+        },
+    ),
+    (KeywordsTab, ([["python", "4"]],), {}),
+)
+
+
+@pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
+def test_table_tab_update_sets_model_and_resizing(
+    tab_cls: Type[QtWidgets.QWidget],
+    args: Tuple[object, ...],
+    resize_modes: Dict[int, QtWidgets.QHeaderView.ResizeMode],
+    qtbot,
+) -> None:
+    tab = tab_cls()
+    qtbot.addWidget(tab)
+    tab.update(*args)
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() > 0
+    assert tab.view.isSortingEnabled()
+
+    header = tab.view.horizontalHeader()
+    for section, expected_mode in resize_modes.items():
+        assert header.sectionResizeMode(section) == expected_mode
+
+
+def test_robots_tab_appends_empty_state(qtbot):
+    tab = RobotsTab()
+    qtbot.addWidget(tab)
+    tab.update("", {})
+
+    model = tab.view.model()
+    assert model is not None
+    rows = [
+        (model.index(row, 0).data(), model.index(row, 1).data())
+        for row in range(model.rowCount())
+    ]
+    assert ("robots.txt", "Not fetched or empty") in rows
+
+
+def test_images_tab_merges_worker_results(qtbot):
+    tab = ImagesTab()
+    qtbot.addWidget(tab)
+    initial_rows = [["https://example.com/img.png", "Alt", "Title", "", "", ""]]
+    tab.update(initial_rows)
+
+    worker_rows = [["https://example.com/img.png", 640, 480, "18 KB"]]
+    tab.update(worker_rows)
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 3)) == "640"
+    assert model.data(model.index(0, 5)) == "18 KB"
+    assert tab.rows()[0][3] == "640"
+    assert tab.view.horizontalHeader().sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+
+
+def test_schema_tab_dark_palette(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    _set_base(tab, 16)
+    items = [{"@context": "https://schema.org", "_extracted_via": "json-ld"}]
+    tab.update(items)
+
+    assert "background:#1e1e1e; color:#f0f0f0;" in tab.styleSheet()
+    html = tab.toHtml()
+    assert "background-color:#2a2a2a;" in html
+    assert "color:#f0f0f0;" in html
+
+
+def test_schema_tab_light_palette(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    _set_base(tab, 255)
+    items = [{"@context": "https://schema.org", "_extracted_via": "json-ld"}]
+    tab.update(items)
+
+    assert "background:#ffffff; color:#202124;" in tab.styleSheet()
+    html = tab.toHtml()
+    assert "background-color:#f7f7f7;" in html
+    assert "color:#202124;" in html
+
+
+def test_schema_tab_handles_missing_items(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    tab.update([])
+
+    assert "Schema.org not found" in tab.toHtml()
+
+
+def test_serp_tab_snapshot(qtbot):
+    tab = SerpTab()
+    qtbot.addWidget(tab)
+    serp = {
+        "title": "Example Title",
+        "description": "Example description for preview.",
+        "url": "https://example.com/page",
+        "site_name": "Example",
+        "breadcrumb": "example.com > page",
+        "favicon": "https://example.com/favicon.png",
+    }
+    audit = {
+        "char_len": "20",
+        "px_len": "144",
+        "too_long": "No",
+        "too_short": "No",
+        "px_over": "No",
+        "px_under": "No",
+        "equals_h1": "No",
+        "missing": "No",
+    }
+    tab.update(serp, audit)
+
+    assert tab.preview.styleSheet() == "background:#ffffff;color:#202124;border:1px solid #d0d0d0;"
+    model = tab.table.model()
+    assert model is not None
+    assert model.rowCount() == 8
+    assert tab.table.horizontalHeader().sectionResizeMode(1) == QtWidgets.QHeaderView.ResizeToContents
+
+    normalized_html = _normalize_html(tab.preview.toHtml())
+    expected_html = SERP_SNAPSHOT.read_text(encoding="utf-8").strip()
+    assert normalized_html == expected_html

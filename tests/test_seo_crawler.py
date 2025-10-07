@@ -2,6 +2,7 @@ import pytest
 import textwrap
 import warnings
 from aiohttp import web
+
 from silentfrog.seo_crawler import analyse, analyse_images
 
 # ------------------------------------------------------------------
@@ -14,154 +15,157 @@ warnings.filterwarnings(
     module=r"pyRdfa\.options",
 )
 
-
-# ------------------------------------------------------------------
-# Silence pyRdfa's deprecated `datetime.utcnow()` once for this module
-# ------------------------------------------------------------------
+# Silence pyRdfa's deprecated datetime.utcnow() once for this module
 pytestmark = pytest.mark.filterwarnings(
     "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning"
 )
 
-# Added canonical & hreflang so new helpers return data
-HTML = textwrap.dedent("""
-<html><head>
-  <title>Example page</title>
-  <link rel="canonical" href="/" />
-  <link rel="alternate" hreflang="en" href="/en" />
-  <link rel="icon" href="/favicon.ico" />                     
-  <meta name="description" content="foo bar">
-  <meta property="og:site_name" content="TestSite" />
-  <script type="application/ld+json">{"@context":"https://schema.org"}</script>
-</head><body>
-  <h1>Titolo</h1>
-  <img src="/logo.png" alt="logo">
-  <a href="https://ext.com" rel="nofollow">ext</a>
-  <p>Hello world</p>
-</body></html>
-""")
+HTML = textwrap.dedent(
+    """
+    <html><head>
+      <title>Example page</title>
+      <link rel="canonical" href="/" />
+      <link rel="alternate" hreflang="en" href="/en" />
+      <link rel="icon" href="/favicon.ico" />
+      <meta name="description" content="foo bar">
+      <meta name="robots" content="index, follow">
+      <meta property="og:site_name" content="TestSite" />
+      <script type="application/ld+json">{"@context":"https://schema.org"}</script>
+    </head><body>
+      <h1>Titolo</h1>
+      <img src="/logo.png" alt="logo">
+      <a href="https://ext.com" rel="nofollow">ext</a>
+      <p>Hello world hello analytics keyword focus</p>
+    </body></html>
+    """
+).strip()
 
-# ------------Spin up a mini site that serves the HTML------------- #
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00"
+    b"\x00\x00\x04\x00\x01\x0b\xe7\x02\xb5\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 @pytest.fixture
 async def local_server(aiohttp_server):
-    """
-    Fire up a minimal aiohttp server that replies to GET "/" with our fixed HTML.
-    """
-    async def handler(_):
-        return web.Response(text=HTML, content_type="text/html")
+    """Spin up a minimal aiohttp server that serves the static HTML page."""
 
-    app = web.Application()
     async def _html(_):
         return web.Response(text=HTML, content_type="text/html")
 
     async def _png(_):
-        return web.Response(body=b"x", content_type="image/png")
+        return web.Response(body=PNG_BYTES, content_type="image/png")
 
     async def _ico(_):
-        return web.Response(body=b"x", content_type="image/x-icon")
-    
-    app.router.add_get("/", _html)
-    app.router.add_get("/assets/icon.png", _png)
-    app.router.add_get("/assets/icon.ico", _ico)    
-    
-#   app.router.add_get("/", handler)
-#   app.router.add_get("/assets/icon.png",   lambda r: web.Response(body=b"x", content_type="image/png"))
-#   app.router.add_get("/assets/icon.ico", lambda r: web.Response(body=b"x", content_type="image/x-icon"))
-    
-    server = await aiohttp_server(app) 
+        return web.Response(body=PNG_BYTES, content_type="image/x-icon")
+
+    async def _robots(_):
+        body = "User-agent: *\nDisallow: /tmp\nAllow: /\n"
+        return web.Response(text=body, content_type="text/plain")
+
+    app = web.Application()
+    app.router.add_route("GET", "/", _html)
+    app.router.add_route("HEAD", "/", _html)
+    app.router.add_get("/logo.png", _png)
+    app.router.add_get("/favicon.ico", _ico)
+    app.router.add_get("/robots.txt", _robots)
+
+    server = await aiohttp_server(app)
     return str(server.make_url("/"))
 
 
-# ------------------------------------------------------------------ #
 @pytest.mark.asyncio
 async def test_analyse(local_server):
-    """
-    Verify that analyse() returns a dict containing:
-      - at least one meta tag named "description"
-      - at least one header "h1"
-      - images[0][0] ends with "/logo.png"
-      - links[0][2] == "NoFollow"
-      - schema[0][0] contains '@context'
-    """
     data = await analyse(local_server, timeout=5)
 
-    # 1) meta contains a row whose first column is "description"
+    # Meta tab: description + robots row, meta robots string
     assert any(row[0] == "description" for row in data["meta"])
+    assert any(row[0] == "robots" and "index" in row[1].lower() for row in data["meta"])
+    assert data["meta_robots"].lower() == "index, follow"
 
-    # 2) headers contains at least one ["h1", ...]
-    assert any(row[0] == "h1" for row in data["headers"])
+    # Headers tab: one H1 with expected content
+    assert any(row[0] == "h1" and "Titolo" in row[1] for row in data["headers"])
 
-    # 3) images => first column is a full URL ending in "/logo.png"
-    #    (depending on aiohttp_server port, it will be "http://127.0.0.1:<port>/logo.png")
+    # Images tab: absolute URL, alt preserved
     assert data["images"][0][0].endswith("/logo.png")
+    assert data["images"][0][1] == "logo"
 
-    # 4) links => the third column (Follow / NoFollow) should be "NoFollow"
+    # Links tab: follow flag and HTTP status populated
     assert data["links"][0][2] == "NoFollow"
+    assert data["links"][0][3].isdigit()
 
-    # 5) schema => first row is a one‐element list [raw_jsonld], which must contain "@context"
+    # Schema tab: at least one entry contains @context
     first = data["schema"][0]
     if isinstance(first, dict):
-    # Extruct returned a dict for JSON-LD, microdata, etc.
-      assert "@context" in first
+        assert "@context" in first
     elif isinstance(first, list) and first:
-      # fallback: one-element list containing raw JSON-LD string
-      assert "@context" in first[0]
+        assert "@context" in first[0]
     else:
-      pytest.fail(f"Unexpected schema item type: {type(first)}")
+        pytest.fail(f"Unexpected schema item type: {type(first)}")
 
-   # 6) canonical dict has expected keys and self-referencing Yes
+    # Canonical tab: self-referencing to requested URL
     canon = data["canonical"]
-    assert canon["self"] is True and "status" in canon
+    assert canon["self"] is True and canon["target"].rstrip("/") == local_server.rstrip("/")
 
-    # 7) redirect dict present (we didn't redirect, hops == 0)
+    # Redirect tab: no hops, final status reported, chain starts with URL
     redir = data["redirect"]
-    assert redir["hops"] == 0 and redir["final_status"]
+    assert redir["hops"] == 0
+    assert redir["final_status"]
+    assert redir["chain"][0].rstrip("/") == local_server.rstrip("/")
 
-    # 8) hreflang list contains our "en"
+    # Robots tab: parsed robots.txt directives available
+    robots_map = data["robots"]
+    assert "*" in robots_map
+    assert ("Disallow", "/tmp") in robots_map["*"]
+    assert ("Allow", "/") in robots_map["*"]
+
+    # Hreflang tab: expected alternate link surfaced
     langs = [row[0] for row in data["hreflang"]]
     assert "en" in langs
+    target = next(row[1] for row in data["hreflang"] if row[0] == "en")
+    assert target.endswith("/en")
 
-    # 9) ai_crawl returns three rows (GPTBot, Google-Extended, Gemini)
-    assert len(data["ai_crawl"]) == 3
+    # AI tab: GPTBot row shows allowed crawl (robots + meta)
+    assert data["ai_crawl"][0] == ["GPTBot", "Yes", "No", "Allowed"]
 
-    # 10) serp preview dict must include a non-empty favicon
+    # SERP tab: preview and audit payloads populated
     serp = data["serp"]
     assert serp["title"]
-    assert serp["breadcrumb"]
-    assert serp["favicon"]  
+    expected_crumb = serp["url"].split("//", 1)[1].rstrip("/")
+    assert serp["breadcrumb"] == expected_crumb or serp["breadcrumb"].startswith(expected_crumb)
+    assert serp["site_name"] == "TestSite"
+    assert serp["favicon"] and serp["favicon"].startswith("http")
 
-    # 11) keywords extraction returns non-empty list
-    assert data["keywords"]
+    audit = data["serp_audit"]
+    assert set(audit) == {
+        "too_long",
+        "too_short",
+        "px_over",
+        "px_under",
+        "equals_h1",
+        "missing",
+        "px_len",
+        "char_len",
+    }
+    assert audit["char_len"].isdigit()
+    assert audit["px_len"].isdigit()
+    assert audit["missing"] == "No"
 
-# ------------------------------------------------------------------ #
+    # Keywords tab: extracted tokens include hello (appears twice in body)
+    assert any(row[0] == "hello" for row in data["keywords"] if row[0])
+
+
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):
-    """
-    Verify that analyse_images() correctly fetches width/height/size.
-    We supply one image row with src="/logo.png", alt="", title="".
-    The function should return a list of tuples; the first tuple's URL endswith "/logo.png",
-    and width, height are digits, and humanized size ends with 'B' or 'KB' etc.
-    """
-    # Our input "rows" (the crawl saw exactly one <img src="/logo.png">)
     input_rows = [["/logo.png", "", "", ""]]
-
-    # Call analyse_images(...) with that single row
     out = await analyse_images(local_server, input_rows, timeout=5)
 
-    # out must be a non‐empty list of 4‐tuples
     assert isinstance(out, list)
     assert len(out) == 1
 
     url, width, height, hr_size = out[0]
-
-    # 1) the URL returned should end with "/logo.png"
     assert url.endswith("/logo.png")
-
-    # 2) width and height must be integer strings or integers
-    #    (Our test HTML <img> is a 1×1 image by default in aiohttp test, 
-    #     but we only require that they be digits)
     assert isinstance(width, int) or (isinstance(width, str) and width.isdigit())
     assert isinstance(height, int) or (isinstance(height, str) and height.isdigit())
-
-    # 3) humanized size (hr_size) should be a string ending in 'B' (like "14 B", "0 B", "1 KB" etc)
-    assert isinstance(hr_size, str)
-    assert hr_size.endswith("B")
+    assert isinstance(hr_size, str) and hr_size.endswith("B")
