@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +7,8 @@ import sys
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from .crawl_types import CrawlPayload
+from .exporters import export_page_analysis
 from .tabs import (
     MetaTab,
     HeadersTab,
@@ -41,10 +44,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Analisi webpage SEO – Silentfrog")
+        self.setWindowTitle("Analisi webpage SEO - Silentfrog")
         self.resize(950, 620)
         icon_path = Path(__file__).with_name("assets").joinpath("icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
+        self._latest_payload: CrawlPayload | None = None
 
         self._build_ui()
 
@@ -107,8 +111,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.serp_tab, "SERP")
 
         controls = QtWidgets.QHBoxLayout()
-        self.btn_export = QtWidgets.QPushButton("Esporta Excel (TBD)")
+        self.btn_export = QtWidgets.QPushButton("Esporta Excel")
         self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self._export_excel)
         controls.addWidget(self.btn_export)
 
         self.btn_img_dl = QtWidgets.QPushButton("Analizza immagini")
@@ -130,9 +135,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "URL mancante", "Inserisci un URL.")
             return
 
+        self._latest_payload = None
         self.btn_go.setEnabled(False)
         self.bar.setRange(0, 0)
         self.bar.setVisible(True)
+        self.btn_export.setEnabled(False)
 
         run_crawl(
             url,
@@ -158,7 +165,18 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _populate_tables(self, data: dict[str, Any]) -> None:
         if "img_update" in data:
             self.images_tab.update(data["img_update"])
+            if self._latest_payload:
+                self._latest_payload = replace(
+                    self._latest_payload,
+                    images=self.images_tab.rows(),
+                )
             return
+
+        try:
+            self._latest_payload = CrawlPayload.from_raw(data)
+        except ValueError as exc:
+            log.warning("Unable to parse crawl payload: %s", exc)
+            self._latest_payload = None
 
         self.meta_tab.update(data.get("meta", []))
         self.headers_tab.update(data.get("headers", []))
@@ -175,7 +193,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         self.bar.setRange(0, 1)
         self.bar.setValue(1)
-        self.btn_export.setEnabled(True)
+        self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
@@ -197,6 +215,46 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _show_error(self, msg: str) -> None:
         QtWidgets.QMessageBox.warning(self, "Errore", msg)
         self._reset_ui()
+
+    def _export_excel(self) -> None:
+        if not self._latest_payload:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Nessun dato",
+                "Esegui prima un'analisi per esportare i risultati.",
+            )
+            return
+
+        suggested = Path.home() / "silentfrog_report.xlsx"
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Esporta report",
+            str(suggested),
+            "Excel files (*.xlsx)",
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".xlsx"):
+            file_path = f"{file_path}.xlsx"
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            export_page_analysis(self._latest_payload, Path(file_path))
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Failed to export Excel")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Esportazione fallita",
+                f"Impossibile esportare il report.\nDettagli: {exc}",
+            )
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Esportazione completata",
+                "Report esportato correttamente.",
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
 
 
 if __name__ == "__main__":

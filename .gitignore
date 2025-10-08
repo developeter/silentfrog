@@ -2,3 +2,4 @@ src/silentfrog/__pycache__/redirect_gui.cpython-312.pyc
 tests/__pycache__/
 src/silentfrog/__pycache__/__init__.cpython-312.pyc
 src/silentfrog/__pycache__/
+*.pyc

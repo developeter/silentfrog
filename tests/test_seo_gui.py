@@ -7,6 +7,7 @@ from typing import Dict, Tuple, Type
 import pytest
 from PyQt5 import QtGui, QtWidgets
 
+from silentfrog.crawl_types import CrawlPayload
 from silentfrog.seo_gui import WebpageSeoWindow
 from silentfrog.tabs import (
     AiTab,
@@ -39,6 +40,52 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
     palette = widget.palette()
     palette.setColor(QtGui.QPalette.Base, QtGui.QColor(value, value, value))
     widget.setPalette(palette)
+
+
+def _sample_payload() -> CrawlPayload:
+    raw = {
+        "meta": [["description", "Foo", "120"], ["robots", "index, follow", "12"]],
+        "headers": [["h1", "Title"]],
+        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB"]],
+        "links": [["https://example.com", "Example", "Follow", "200"]],
+        "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
+        "canonical": {
+            "target": "https://example.com",
+            "self": True,
+            "multiple": False,
+            "status": "200",
+        },
+        "redirect": {
+            "chain": ["https://example.com"],
+            "hops": 0,
+            "final_status": "200",
+            "loop": False,
+        },
+        "robots": {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
+        "meta_robots": "index, follow",
+        "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
+        "ai_crawl": [["GPTBot", "Yes", "No", "Allowed"]],
+        "serp": {
+            "title": "Example Title",
+            "description": "Example description",
+            "url": "https://example.com",
+            "site_name": "Example",
+            "breadcrumb": "example.com > page",
+            "favicon": "data:image/png;base64,abc",
+        },
+        "serp_audit": {
+            "too_long": "No",
+            "too_short": "No",
+            "px_over": "No",
+            "px_under": "No",
+            "equals_h1": "No",
+            "missing": "No",
+            "px_len": "100",
+            "char_len": "10",
+        },
+        "keywords": [["keyword", "5"]],
+    }
+    return CrawlPayload.from_raw(raw)
 
 
 def test_seo_window_exposes_expected_tabs(qtbot):
@@ -237,3 +284,71 @@ def test_serp_tab_snapshot(qtbot):
     normalized_html = _normalize_html(tab.preview.toHtml())
     expected_html = SERP_SNAPSHOT.read_text(encoding="utf-8").strip()
     assert normalized_html == expected_html
+
+
+def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = _sample_payload()  # type: ignore[attr-defined]
+    win.btn_export.setEnabled(True)
+
+    target = tmp_path / "report"
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(target), ""),
+    )
+
+    captured: Dict[str, object] = {}
+
+    def fake_export(payload: CrawlPayload, path: Path) -> None:
+        captured["payload"] = payload
+        captured["path"] = path
+
+    monkeypatch.setattr("silentfrog.seo_gui.export_page_analysis", fake_export)
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *args, **kwargs: None)
+    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args, **kwargs: None)
+
+    win._export_excel()
+
+    assert captured["payload"] is win._latest_payload
+    assert Path(captured["path"]) == target.with_suffix(".xlsx")
+    assert QtWidgets.QApplication.overrideCursor() is None
+
+
+def test_export_excel_without_payload_shows_warning(qtbot, monkeypatch):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = None  # type: ignore[attr-defined]
+
+    flagged = {}
+
+    def fake_info(*args, **kwargs):
+        flagged["called"] = True
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", fake_info)
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))
+
+    win._export_excel()
+
+    assert flagged.get("called") is True
+
+
+def test_image_analysis_updates_payload_rows(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    payload = _sample_payload()
+    win._populate_tables(payload.to_mapping())
+
+    update_rows = [[payload.images[0][0], 640, 320, "42 KB"]]
+    win._populate_tables({"img_update": update_rows})
+
+    assert win._latest_payload is not None
+    image_row = win._latest_payload.images[0]
+    assert image_row[0] == payload.images[0][0]
+    assert image_row[1] == "Alt"
+    assert image_row[2] == "Title"
+    assert image_row[3] == "640"
+    assert image_row[4] == "320"
+    assert image_row[5] == "42 KB"
