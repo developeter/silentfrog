@@ -345,9 +345,17 @@ async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, 
 # --------------------------------------------------------------------- #
 def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
+    title_tag = soup.find("title")
+    if isinstance(title_tag, Tag):
+        title_text = (title_tag.string or "").strip()
+        out.append(["title", title_text, str(len(title_text))])
+
     for tag in soup.find_all("meta"):
-        name = _attr(tag, "name") or _attr(tag, "property")
+        name = _attr(tag, "name") or _attr(tag, "property") or _attr(tag, "http-equiv")
         content = _attr(tag, "content")
+        if not name and tag.has_attr("charset"):
+            name = "charset"
+            content = tag.get("charset", "")
         out.append([name, content, str(len(content))])
     return out
 
@@ -363,12 +371,17 @@ def _extract_headers(soup: BeautifulSoup) -> list[list[str]]:
 
 def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
     rows: list[list[str]] = []
-    for tag in soup.find_all("img"):
-        img = cast(bs4.element.Tag, tag)          # typing safe
-        src   = urljoin(base, _attr(img, "src"))
-        alt   = _attr(img, "alt")
+    for idx, tag in enumerate(soup.find_all("img")):
+        img = cast(bs4.element.Tag, tag)  # typing safe
+        src = urljoin(base, _attr(img, "src"))
+        alt = _attr(img, "alt")
         title = _attr(img, "title")
-        rows.append([src, alt, title, "", "", ""])   # peso/size TBD
+        loading_attr = (_attr(img, "loading") or "").lower()
+        has_lazy = loading_attr == "lazy"
+        width_attr = _attr(img, "width")
+        height_attr = _attr(img, "height")
+        has_dimensions = bool(width_attr and height_attr)
+        rows.append([src, alt, title, "", "", "", "1" if has_lazy else "0", "1" if has_dimensions else "0"])
     return rows
 
 

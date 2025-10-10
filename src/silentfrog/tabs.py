@@ -61,8 +61,8 @@ class HeadersTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
 
-    def update(self, rows: List[List[str]]) -> None:
-        self.set_model(HeaderModel(rows))
+    def update(self, rows: List[List[str]], title: str | None = None) -> None:
+        self.set_model(HeaderModel(rows, title))
 
 
 class ImagesTab(TableTab):
@@ -80,7 +80,8 @@ class ImagesTab(TableTab):
                 human = result[3] if len(result) > 3 else base_row[5]
                 alt = base_row[1] if len(base_row) > 1 else ""
                 title = base_row[2] if len(base_row) > 2 else ""
-                merged.append([url, alt, title, width, height, human])
+                extra = base_row[6:] if len(base_row) > 6 else []
+                merged.append([url, alt, title, width, height, human, *extra])
             rows = merged
         else:
             rows = [list(row) for row in rows]

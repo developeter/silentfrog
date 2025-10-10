@@ -10,9 +10,15 @@ from silentfrog.exporters import export_page_analysis
 
 def _sample_payload() -> CrawlPayload:
     raw = {
-        "meta": [["description", "Foo", "123"], ["robots", "index, follow", "12"]],
+        "meta": [
+            ["title", "Example Optimized Marketing Title", "35"],
+            ["description", "Foo", "123"],
+            ["robots", "index, follow", "12"],
+            ["viewport", "width=device-width, initial-scale=1", "40"],
+            ["charset", "utf-8", "5"],
+        ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB"]],
+        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB", "1", "1"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
         "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
         "canonical": {
@@ -68,9 +74,12 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert "SERP Preview" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
-        assert meta_sheet["A2"].value == "description"
-        assert meta_sheet["B2"].value == "Foo"
+        assert meta_sheet["A2"].value == "title"
+        assert meta_sheet["B2"].value == "Example Optimized Marketing Title"
         assert meta_sheet["C2"].fill.start_color.rgb == "FFD1E7DD"
+        assert meta_sheet["A3"].value == "description"
+        assert meta_sheet["B3"].value == "Foo"
+        assert meta_sheet["C3"].fill.start_color.rgb == "FFFFF3CD"
 
         links_sheet = workbook["Links"]
         assert links_sheet["D2"].fill.start_color.rgb == "FFD1E7DD"

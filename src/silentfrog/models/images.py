@@ -1,4 +1,5 @@
-﻿from __future__ import annotations
+
+from __future__ import annotations
 import re
 from typing import List
 
@@ -11,8 +12,15 @@ from .base import GenericModel
 
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
-        super().__init__(["Src", "Alt", "Title", "W", "H", "Peso"], rows)
+        display_rows = [row[:6] for row in rows]
+        super().__init__(["Src", "Alt", "Title", "W", "H", "Peso"], display_rows)
         self._brushes: StatusBrushPalette = status_brushes()
+        self._lazy_rows = {
+            idx for idx, row in enumerate(rows) if len(row) > 6 and str(row[6]) == "1"
+        }
+        self._dimension_rows = {
+            idx for idx, row in enumerate(rows) if len(row) > 7 and str(row[7]) == "1"
+        }
 
     @staticmethod
     def _filled(value: object) -> bool:
@@ -61,9 +69,14 @@ class ImagesModel(GenericModel):
             return super().data(index, role)
         if role != Qt.ItemDataRole.BackgroundRole:
             return None
+        row = index.row()
         column = index.column()
         if column in (1, 2):
-            return self._color_required(self._rows[index.row()][column])
+            return self._color_required(self._rows[row][column])
         if column == 5:
-            return self._color_size(self._rows[index.row()][column])
+            return self._color_size(self._rows[row][column])
+        if column == 0 and row > 0 and row not in self._lazy_rows:
+            return self._brushes.warn
+        if column in (3, 4) and row not in self._dimension_rows:
+            return self._brushes.warn
         return None

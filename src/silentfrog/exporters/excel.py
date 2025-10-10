@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Callable, List, Sequence
 
@@ -10,12 +12,29 @@ from ..crawl_types import CrawlPayload
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
 
+_PIXELS_PER_CHAR = 7.2
+_TITLE_MIN, _TITLE_MAX = 200, 600
+_DESCRIPTION_MIN, _DESCRIPTION_MAX = 400, 920
+_WARN_MARGIN = 40
+
 
 class _Formats:
     def __init__(self, workbook: xlsxwriter.Workbook) -> None:
         self.good = workbook.add_format({"bg_color": "#D1E7DD"})
         self.warn = workbook.add_format({"bg_color": "#FFF3CD"})
         self.bad = workbook.add_format({"bg_color": "#F8D7DA"})
+
+
+def _pixel_brush(formats: _Formats, pixels: float, min_px: int, max_px: int):
+    if pixels <= 0:
+        return formats.bad
+    if pixels < min_px - _WARN_MARGIN or pixels > max_px + _WARN_MARGIN:
+        return formats.bad
+    if pixels < min_px or pixels > max_px:
+        return formats.warn
+    if pixels < min_px + _WARN_MARGIN or pixels > max_px - _WARN_MARGIN:
+        return formats.warn
+    return formats.good
 
 
 def _write_sheet(
@@ -34,7 +53,7 @@ def _write_sheet(
     has_rows = False
     for row_idx, row in enumerate(rows, start=1):
         has_rows = True
-        for col_idx, cell in enumerate(row):
+        for col_idx, cell in enumerate(row[: len(headers)]):
             fmt = formatter(row_idx - 1, col_idx, cell) if formatter else None
             worksheet.write(row_idx, col_idx, cell, fmt)
 
@@ -86,24 +105,55 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _Formats(workbook)
 
-        meta_rows = _stringify_rows(payload.meta)
+        raw_meta = [list(row) for row in payload.meta]
+        names = [(row[0] or "").lower() for row in raw_meta]
+        counts = Counter(name for name in names if name)
+        duplicate_rows = {idx for idx, name in enumerate(names) if name and counts[name] > 1}
+        empty_rows = {idx for idx, row in enumerate(raw_meta) if not str(row[1]).strip()}
+
+        meta_rows = _stringify_rows(raw_meta)
+
+        viewport_state: dict[int, str] = {idx: "good" for idx, name in enumerate(names) if name == "viewport"}
+        if "viewport" not in names:
+            viewport_state[len(meta_rows)] = "warn"
+            meta_rows.append(["viewport", "", "0"])
+            names.append("viewport")
+
+        charset_state: dict[int, str] = {}
+        charset_indices = [idx for idx, name in enumerate(names) if name == "charset"]
+        if charset_indices:
+            for idx in charset_indices:
+                charset_state[idx] = "good" if idx <= 5 else "warn"
+        else:
+            charset_state[len(meta_rows)] = "warn"
+            meta_rows.append(["charset", "", "0"])
+            names.append("charset")
 
         def _meta_formatter(row_idx: int, col_idx: int, value: str):
-            if row_idx >= len(payload.meta) or col_idx != 2:
-                return None
-            name = str(payload.meta[row_idx][0]).lower()
-            if name == "description":
-                length = _parse_int(payload.meta[row_idx][2])
-                if length is None:
-                    return formats.bad
-                return formats.good if 120 <= length <= 160 else formats.bad
-            if name == "robots":
-                content = str(payload.meta[row_idx][1] or "").lower()
+            name = names[row_idx] if row_idx < len(names) else ""
+            if row_idx in duplicate_rows and col_idx == 0:
+                return formats.bad
+            if row_idx in empty_rows and col_idx == 1:
+                return formats.bad
+            if name == "title" and col_idx == 2:
+                length = _parse_int(meta_rows[row_idx][2]) or 0
+                pixels = length * _PIXELS_PER_CHAR
+                return _pixel_brush(formats, pixels, _TITLE_MIN, _TITLE_MAX)
+            if name == "description" and col_idx == 2:
+                length = _parse_int(meta_rows[row_idx][2]) or 0
+                pixels = length * _PIXELS_PER_CHAR
+                return _pixel_brush(formats, pixels, _DESCRIPTION_MIN, _DESCRIPTION_MAX)
+            if name == "robots" and col_idx == 1:
+                content = meta_rows[row_idx][1].lower()
                 if "noindex" in content:
                     return formats.bad
                 if "nofollow" in content:
                     return formats.warn
                 return formats.good
+            if name == "viewport" and col_idx == 0:
+                return formats.warn if viewport_state.get(row_idx) == "warn" else formats.good
+            if name == "charset" and col_idx == 0:
+                return formats.warn if charset_state.get(row_idx) == "warn" else formats.good
             return None
 
         _write_sheet(
@@ -118,10 +168,44 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         h1_count = sum(
             1 for row in payload.headers if row and str(row[0]).strip().lower() == "h1"
         )
+        empty_header_rows = {
+            idx for idx, row in enumerate(payload.headers) if len(row) > 1 and not str(row[1]).strip()
+        }
+
+        jump_rows = set()
+        prev_level = None
+        for idx, row in enumerate(payload.headers):
+            tag = str(row[0]).strip().lower() if row else ""
+            if tag.startswith("h") and len(tag) > 1 and tag[1:].isdigit():
+                level = int(tag[1:])
+                if prev_level is not None and abs(level - prev_level) > 1:
+                    jump_rows.add(idx)
+                prev_level = level
+
+        title_reference = next(
+            (row[1] for row in payload.meta if row and (row[0] or "").lower() == "title"),
+            "",
+        ).strip().lower()
+        title_warn_rows = set()
+        if title_reference:
+            for idx, row in enumerate(payload.headers):
+                tag = str(row[0]).strip().lower() if row else ""
+                if tag == "h1":
+                    text = str(row[1]).strip().lower() if len(row) > 1 else ""
+                    if text:
+                        ratio = SequenceMatcher(None, text, title_reference).ratio()
+                        if ratio >= 0.9:
+                            title_warn_rows.add(idx)
 
         def _headers_formatter(row_idx: int, col_idx: int, value: str):
             if row_idx >= len(payload.headers) or col_idx not in (0, 1):
                 return None
+            if row_idx in empty_header_rows:
+                return formats.bad
+            if row_idx in jump_rows and col_idx == 0:
+                return formats.warn
+            if row_idx in title_warn_rows and col_idx == 1:
+                return formats.warn
             tag = str(payload.headers[row_idx][0]).strip().lower()
             if tag == "h1":
                 return formats.good if h1_count == 1 else formats.warn
@@ -136,18 +220,20 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         )
 
         images_rows = _stringify_rows(payload.images)
+        lazy_rows = {
+            idx for idx, row in enumerate(payload.images) if len(row) > 6 and str(row[6]) == "1"
+        }
+        dimension_rows = {
+            idx for idx, row in enumerate(payload.images) if len(row) > 7 and str(row[7]) == "1"
+        }
 
         def _images_formatter(row_idx: int, col_idx: int, value: str):
             if row_idx >= len(payload.images):
                 return None
             if col_idx in (1, 2):
-                return (
-                    formats.good
-                    if str(payload.images[row_idx][col_idx]).strip()
-                    else formats.warn
-                )
+                return formats.good if str(images_rows[row_idx][col_idx]).strip() else formats.warn
             if col_idx == 5:
-                size = _parse_size(str(payload.images[row_idx][col_idx]))
+                size = _parse_size(images_rows[row_idx][col_idx])
                 if size < 0:
                     return None
                 if size > 500 * 1024:
@@ -155,6 +241,10 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
                 if size > 100 * 1024:
                     return formats.warn
                 return formats.good
+            if col_idx == 0 and row_idx > 0 and row_idx not in lazy_rows:
+                return formats.warn
+            if col_idx in (3, 4) and row_idx not in dimension_rows:
+                return formats.warn
             return None
 
         _write_sheet(

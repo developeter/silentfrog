@@ -178,8 +178,10 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             log.warning("Unable to parse crawl payload: %s", exc)
             self._latest_payload = None
 
-        self.meta_tab.update(data.get("meta", []))
-        self.headers_tab.update(data.get("headers", []))
+        meta_rows = data.get("meta", [])
+        self.meta_tab.update(meta_rows)
+        title_text = next((row[1] for row in meta_rows if row and (row[0] or "").lower() == "title"), "")
+        self.headers_tab.update(data.get("headers", []), title_text)
         self.images_tab.update(data.get("images", []))
         self.links_tab.update(data.get("links", []))
         self.redirect_tab.update(data.get("redirect", {}))
@@ -195,6 +197,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setValue(1)
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
+        self._reset_ui()
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
         url = index.sibling(index.row(), 0).data()

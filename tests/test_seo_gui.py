@@ -44,9 +44,15 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
 
 def _sample_payload() -> CrawlPayload:
     raw = {
-        "meta": [["description", "Foo", "120"], ["robots", "index, follow", "12"]],
+        "meta": [
+            ["title", "Example Title", "13"],
+            ["description", "Foo", "120"],
+            ["robots", "index, follow", "12"],
+            ["viewport", "width=device-width, initial-scale=1", "40"],
+            ["charset", "utf-8", "5"],
+        ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB"]],
+        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB", "1", "1"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
         "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
         "canonical": {
@@ -352,3 +358,19 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[3] == "640"
     assert image_row[4] == "320"
     assert image_row[5] == "42 KB"
+    assert image_row[6] == "1"
+    assert image_row[7] == "1"
+
+
+def test_populate_tables_reenables_controls(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    payload = _sample_payload()
+
+    win.btn_go.setEnabled(False)
+    win.bar.setVisible(True)
+
+    win._populate_tables(payload.to_mapping())
+
+    assert win.btn_go.isEnabled()
+    assert not win.bar.isVisible()
