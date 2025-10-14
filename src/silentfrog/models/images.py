@@ -12,15 +12,24 @@ from .base import GenericModel
 
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
-        display_rows = [row[:6] for row in rows]
-        super().__init__(["Src", "Alt", "Title", "W", "H", "Peso"], display_rows)
+        normalized: List[List[str]] = []
+        self._lazy_rows: set[int] = set()
+        self._dimension_rows: set[int] = set()
+        for idx, row in enumerate(rows):
+            padded = (row + [""] * 8)[:8]
+            src, alt, title, mime, width, height, size, lazy = padded
+            lazy_text = str(lazy).strip().lower()
+            lazy_value = "Yes" if lazy_text in {"yes", "1", "true"} else "No"
+            normalized.append(
+                [src, alt, title, mime, width, height, size, lazy_value]
+            )
+            if lazy_value == "Yes":
+                self._lazy_rows.add(idx)
+            if str(width).strip() and str(height).strip():
+                self._dimension_rows.add(idx)
+
+        super().__init__(["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy"], normalized)
         self._brushes: StatusBrushPalette = status_brushes()
-        self._lazy_rows = {
-            idx for idx, row in enumerate(rows) if len(row) > 6 and str(row[6]) == "1"
-        }
-        self._dimension_rows = {
-            idx for idx, row in enumerate(rows) if len(row) > 7 and str(row[7]) == "1"
-        }
 
     @staticmethod
     def _filled(value: object) -> bool:
@@ -73,10 +82,14 @@ class ImagesModel(GenericModel):
         column = index.column()
         if column in (1, 2):
             return self._color_required(self._rows[row][column])
-        if column == 5:
+        if column == 3:
+            return None
+        if column == 6:
             return self._color_size(self._rows[row][column])
-        if column == 0 and row > 0 and row not in self._lazy_rows:
+        if column == 0 and row not in self._lazy_rows:
             return self._brushes.warn
-        if column in (3, 4) and row not in self._dimension_rows:
+        if column in (4, 5) and row not in self._dimension_rows:
+            return self._brushes.warn
+        if column == 7 and row not in self._lazy_rows:
             return self._brushes.warn
         return None

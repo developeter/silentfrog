@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ def _sample_payload() -> CrawlPayload:
             ["charset", "utf-8", "5"],
         ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB", "1", "1"]],
+        "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
         "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
         "canonical": {

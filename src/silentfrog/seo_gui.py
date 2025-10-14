@@ -134,12 +134,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         if not url:
             QtWidgets.QMessageBox.warning(self, "URL mancante", "Inserisci un URL.")
             return
-
-        self._latest_payload = None
-        self.btn_go.setEnabled(False)
-        self.bar.setRange(0, 0)
-        self.bar.setVisible(True)
-        self.btn_export.setEnabled(False)
+        self._prepare_for_analysis()
 
         run_crawl(
             url,
@@ -163,41 +158,32 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         )
 
     def _populate_tables(self, data: dict[str, Any]) -> None:
-        if "img_update" in data:
-            self.images_tab.update(data["img_update"])
-            if self._latest_payload:
-                self._latest_payload = replace(
-                    self._latest_payload,
-                    images=self.images_tab.rows(),
-                )
+        if self._handle_image_update(data):
             return
 
-        try:
-            self._latest_payload = CrawlPayload.from_raw(data)
-        except ValueError as exc:
-            log.warning("Unable to parse crawl payload: %s", exc)
-            self._latest_payload = None
+        self._latest_payload = self._load_payload(data)
 
         meta_rows = data.get("meta", [])
         self.meta_tab.update(meta_rows)
-        title_text = next((row[1] for row in meta_rows if row and (row[0] or "").lower() == "title"), "")
-        self.headers_tab.update(data.get("headers", []), title_text)
-        self.images_tab.update(data.get("images", []))
-        self.links_tab.update(data.get("links", []))
-        self.redirect_tab.update(data.get("redirect", {}))
-        self.canonical_tab.update(data.get("canonical", {}))
-        self.robots_tab.update(data.get("meta_robots", ""), data.get("robots", {}))
-        self.hreflang_tab.update(data.get("hreflang", []))
-        self.keywords_tab.update(data.get("keywords", []))
-        self.ai_tab.update(data.get("ai_crawl", []))
-        self.schema_tab.update(data.get("schema", []))
-        self.serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
+        self.headers_tab.update(data.get("headers", []), self._title_from_meta(meta_rows))
+        self._update_content_tabs(data)
+        self._finalise_population()
 
-        self.bar.setRange(0, 1)
-        self.bar.setValue(1)
-        self.btn_export.setEnabled(self._latest_payload is not None)
-        self.btn_img_dl.setEnabled(True)
-        self._reset_ui()
+    def _clear_results(self) -> None:
+        self.meta_tab.clear()
+        self.headers_tab.update([], None)
+        self.images_tab.update([])
+        self.links_tab.update([])
+        self.redirect_tab.update({})
+        self.canonical_tab.update({})
+        self.robots_tab.update("", {})
+        self.hreflang_tab.update([])
+        self.keywords_tab.update([])
+        self.ai_tab.update([])
+        self.schema_tab.update([])
+        self.serp_tab.update({}, {})
+        self.btn_export.setEnabled(False)
+        self.btn_img_dl.setEnabled(False)
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
         url = index.sibling(index.row(), 0).data()
@@ -217,6 +203,61 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _show_error(self, msg: str) -> None:
         QtWidgets.QMessageBox.warning(self, "Errore", msg)
+        self._reset_ui()
+
+    def _prepare_for_analysis(self) -> None:
+        self._clear_results()
+        self._latest_payload = None
+        self.btn_go.setEnabled(False)
+        self.bar.setRange(0, 0)
+        self.bar.setVisible(True)
+        self.btn_export.setEnabled(False)
+
+    def _handle_image_update(self, data: dict[str, Any]) -> bool:
+        update = data.get("img_update")
+        if not update:
+            return False
+        self.images_tab.update(update)
+        if self._latest_payload:
+            self._latest_payload = replace(self._latest_payload, images=self.images_tab.rows())
+        return True
+
+    def _load_payload(self, data: dict[str, Any]) -> CrawlPayload | None:
+        try:
+            return CrawlPayload.from_raw(data)
+        except ValueError as exc:
+            log.warning("Unable to parse crawl payload: %s", exc)
+            return None
+
+    @staticmethod
+    def _title_from_meta(meta_rows: list[list[str]]) -> str:
+        for row in meta_rows:
+            name = (row[0] or "").lower() if row else ""
+            if name == "title" and len(row) > 1:
+                return row[1]
+        return ""
+
+    def _update_content_tabs(self, data: dict[str, Any]) -> None:
+        list_tabs = [
+            (self.images_tab.update, data.get("images", [])),
+            (self.links_tab.update, data.get("links", [])),
+            (self.hreflang_tab.update, data.get("hreflang", [])),
+            (self.keywords_tab.update, data.get("keywords", [])),
+            (self.ai_tab.update, data.get("ai_crawl", [])),
+            (self.schema_tab.update, data.get("schema", [])),
+        ]
+        for updater, payload in list_tabs:
+            updater(payload)
+        self.redirect_tab.update(data.get("redirect", {}))
+        self.canonical_tab.update(data.get("canonical", {}))
+        self.robots_tab.update(data.get("meta_robots", ""), data.get("robots", {}))
+        self.serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
+
+    def _finalise_population(self) -> None:
+        self.bar.setRange(0, 1)
+        self.bar.setValue(1)
+        self.btn_export.setEnabled(self._latest_payload is not None)
+        self.btn_img_dl.setEnabled(True)
         self._reset_ui()
 
     def _export_excel(self) -> None:

@@ -55,7 +55,9 @@ def test_extract_headers_picks_h1(soup: BeautifulSoup) -> None:
 
 def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> None:
     images = crawler._extract_images(base_url, soup)
-    assert images == [["https://example.com/images/logo.png", "Logo", "Logo title", "", "", ""]]
+    assert images == [
+        ["https://example.com/images/logo.png", "Logo", "Logo title", "image/png", "", "", "", "No"]
+    ]
 
 
 def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup) -> None:
@@ -95,6 +97,44 @@ def test_schema_extraction_yields_jsonld(sample_html: str) -> None:
     assert isinstance(first, dict)
     assert first["@context"] == "https://schema.org"
     assert first["_extracted_via"] == "json-ld"
+
+
+def test_schema_validation_flags_breadcrumb_and_product() -> None:
+    html = textwrap.dedent(
+        """
+        <html>
+          <head>
+            <script type="application/ld+json">
+            {"@context":"https://schema.org","@type":"BreadcrumbList",
+             "itemListElement":[{"@type":"ListItem","name":"Home"}]}
+            </script>
+            <script type="application/ld+json">
+            {"@context":"https://schema.org","@type":"Product","name":"Widget",
+             "description":"Widget desc","image":"https://example.com/widget.jpg",
+             "offers":{"@type":"Offer"}}
+            </script>
+          </head>
+          <body></body>
+        </html>
+        """
+    )
+    schema = crawler._extract_schema_all(html, "https://example.com")
+    breadcrumb = next(
+        item for item in schema if isinstance(item, dict) and item.get("@type") == "BreadcrumbList"
+    )
+    assert breadcrumb.get("_schema_errors"), "breadcrumb block should expose schema errors"
+    assert "itemListElement[1] missing position" in breadcrumb["_schema_errors"]
+    assert "itemListElement[1] missing item url" in breadcrumb["_schema_errors"]
+
+    product = next(item for item in schema if isinstance(item, dict) and item.get("@type") == "Product")
+    assert product.get("_schema_errors"), "product block should expose schema errors"
+    assert "missing offers.price" in product["_schema_errors"]
+    assert "missing offers.priceCurrency" in product["_schema_errors"]
+
+    issues_entry = next(item for item in schema if isinstance(item, dict) and "_schema_issues" in item)
+    summary = "\n".join(issues_entry["_schema_issues"])
+    assert "itemListElement[1] missing position" in summary
+    assert "missing offers.priceCurrency" in summary
 
 
 def test_ai_crawl_matrix_respects_meta_and_robots() -> None:

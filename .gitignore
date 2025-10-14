@@ -3,3 +3,5 @@ tests/__pycache__/
 src/silentfrog/__pycache__/__init__.cpython-312.pyc
 src/silentfrog/__pycache__/
 *.pyc
+src/silentfrog/assets/icon1.png
+src/silentfrog/assets/icon-old.png

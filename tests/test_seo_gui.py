@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, Tuple, Type
+from typing import Any, Dict, Tuple, Type
 
 import pytest
 from PyQt5 import QtGui, QtWidgets
@@ -42,6 +42,11 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
     widget.setPalette(palette)
 
 
+def _row_count(view: QtWidgets.QTableView) -> int:
+    model = view.model()
+    assert model is not None
+    return model.rowCount()
+
 def _sample_payload() -> CrawlPayload:
     raw = {
         "meta": [
@@ -52,7 +57,7 @@ def _sample_payload() -> CrawlPayload:
             ["charset", "utf-8", "5"],
         ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "100", "200", "10 KB", "1", "1"]],
+        "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
         "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
         "canonical": {
@@ -189,6 +194,7 @@ def test_table_tab_update_sets_model_and_resizing(
     assert tab.view.isSortingEnabled()
 
     header = tab.view.horizontalHeader()
+    assert isinstance(header, QtWidgets.QHeaderView)
     for section, expected_mode in resize_modes.items():
         assert header.sectionResizeMode(section) == expected_mode
 
@@ -210,18 +216,24 @@ def test_robots_tab_appends_empty_state(qtbot):
 def test_images_tab_merges_worker_results(qtbot):
     tab = ImagesTab()
     qtbot.addWidget(tab)
-    initial_rows = [["https://example.com/img.png", "Alt", "Title", "", "", ""]]
+    initial_rows = [
+        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "No"]
+    ]
     tab.update(initial_rows)
 
-    worker_rows = [["https://example.com/img.png", 640, 480, "18 KB"]]
+    worker_rows = [["https://example.com/img.png", 640, 480, "18 KB", "image/png"]]
     tab.update(worker_rows)
 
     model = tab.view.model()
     assert model is not None
-    assert model.data(model.index(0, 3)) == "640"
-    assert model.data(model.index(0, 5)) == "18 KB"
-    assert tab.rows()[0][3] == "640"
-    assert tab.view.horizontalHeader().sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+    assert model.data(model.index(0, 3)) == "image/png"
+    assert model.data(model.index(0, 4)) == "640"
+    assert model.data(model.index(0, 6)) == "18 KB"
+    assert tab.rows()[0][4] == "640"
+    assert tab.rows()[0][6] == "18 KB"
+    header = tab.view.horizontalHeader()
+    assert isinstance(header, QtWidgets.QHeaderView)
+    assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
 
 
 def test_schema_tab_dark_palette(qtbot):
@@ -258,6 +270,35 @@ def test_schema_tab_handles_missing_items(qtbot):
     assert "Schema.org not found" in tab.toHtml()
 
 
+def test_schema_tab_displays_block_errors(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    items = [
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "_extracted_via": "json-ld",
+            "itemListElement": [{"@type": "ListItem", "name": "Home"}],
+            "_schema_errors": [
+                "itemListElement[1] missing position",
+                "itemListElement[1] missing item url",
+            ],
+        },
+        {
+            "_schema_issues": [
+                "Block #1 (BreadcrumbList) via json-ld: itemListElement[1] missing position",
+                "Block #1 (BreadcrumbList) via json-ld: itemListElement[1] missing item url",
+            ]
+        },
+    ]
+
+    tab.update(items)
+    html = tab.toHtml()
+    assert "Block #1 (BreadcrumbList) via json-ld" in html
+    assert "itemListElement[1] missing position" in html
+    assert "<ul" in html
+
+
 def test_serp_tab_snapshot(qtbot):
     tab = SerpTab()
     qtbot.addWidget(tab)
@@ -285,14 +326,16 @@ def test_serp_tab_snapshot(qtbot):
     model = tab.table.model()
     assert model is not None
     assert model.rowCount() == 8
-    assert tab.table.horizontalHeader().sectionResizeMode(1) == QtWidgets.QHeaderView.ResizeToContents
+    header = tab.table.horizontalHeader()
+    assert isinstance(header, QtWidgets.QHeaderView)
+    assert header.sectionResizeMode(1) == QtWidgets.QHeaderView.ResizeToContents
 
     normalized_html = _normalize_html(tab.preview.toHtml())
     expected_html = SERP_SNAPSHOT.read_text(encoding="utf-8").strip()
     assert normalized_html == expected_html
 
 
-def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path):
+def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path: Path):
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
     win._latest_payload = _sample_payload()  # type: ignore[attr-defined]
@@ -305,7 +348,7 @@ def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path):
         lambda *args, **kwargs: (str(target), ""),
     )
 
-    captured: Dict[str, object] = {}
+    captured: Dict[str, Any] = {}
 
     def fake_export(payload: CrawlPayload, path: Path) -> None:
         captured["payload"] = payload
@@ -317,8 +360,12 @@ def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path):
 
     win._export_excel()
 
-    assert captured["payload"] is win._latest_payload
-    assert Path(captured["path"]) == target.with_suffix(".xlsx")
+    payload_value = captured.get("payload")
+    path_value = captured.get("path")
+    assert isinstance(payload_value, CrawlPayload)
+    assert isinstance(path_value, Path)
+    assert payload_value is win._latest_payload
+    assert path_value == target.with_suffix(".xlsx")
     assert QtWidgets.QApplication.overrideCursor() is None
 
 
@@ -347,7 +394,7 @@ def test_image_analysis_updates_payload_rows(qtbot):
     payload = _sample_payload()
     win._populate_tables(payload.to_mapping())
 
-    update_rows = [[payload.images[0][0], 640, 320, "42 KB"]]
+    update_rows = [[payload.images[0][0], 640, 320, "42 KB", "image/png"]]
     win._populate_tables({"img_update": update_rows})
 
     assert win._latest_payload is not None
@@ -355,11 +402,11 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[0] == payload.images[0][0]
     assert image_row[1] == "Alt"
     assert image_row[2] == "Title"
-    assert image_row[3] == "640"
-    assert image_row[4] == "320"
-    assert image_row[5] == "42 KB"
-    assert image_row[6] == "1"
-    assert image_row[7] == "1"
+    assert image_row[3] == "image/png"
+    assert image_row[4] == "640"
+    assert image_row[5] == "320"
+    assert image_row[6] == "42 KB"
+    assert image_row[7] == "Yes"
 
 
 def test_populate_tables_reenables_controls(qtbot):
@@ -374,3 +421,21 @@ def test_populate_tables_reenables_controls(qtbot):
 
     assert win.btn_go.isEnabled()
     assert not win.bar.isVisible()
+
+
+def test_clear_results_resets_tabs(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    payload = _sample_payload()
+
+    win._populate_tables(payload.to_mapping())
+
+    assert _row_count(win.meta_tab.view) > 0
+
+    win._clear_results()
+
+    assert _row_count(win.meta_tab.view) == 0
+    assert _row_count(win.headers_tab.view) == 0
+    assert _row_count(win.images_tab.view) == 0
+    assert _row_count(win.links_tab.view) == 0
+    assert win.btn_export.isEnabled() is False

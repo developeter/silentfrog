@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
-from typing import Any, Dict, List
+from collections import Counter
+from dataclasses import dataclass
+from typing import Any, Dict, List, cast
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPalette
@@ -21,12 +23,13 @@ import json
 
 
 def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
-    return view.horizontalHeader()  # type: ignore[return-value]
+    return cast(QtWidgets.QHeaderView, view.horizontalHeader())
 
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
     base = widget.palette().color(QPalette.Base)
     return base.value() < 128
+
 
 class TableTab(QtWidgets.QWidget):
     def __init__(self, sorting: bool = True, parent: QtWidgets.QWidget | None = None) -> None:
@@ -56,6 +59,9 @@ class MetaTab(TableTab):
     def update(self, rows: List[List[str]]) -> None:
         self.set_model(MetaModel(rows))
 
+    def clear(self) -> None:
+        self.set_model(MetaModel([], add_placeholders=False))
+
 
 class HeadersTab(TableTab):
     def __init__(self) -> None:
@@ -71,17 +77,20 @@ class ImagesTab(TableTab):
         self._rows: List[List[str]] = []
 
     def update(self, rows: List[List[str]]) -> None:
-        if rows and len(rows[0]) <= 4 and self._rows:
+        if rows and len(rows[0]) == 5 and self._rows:
+            updates = {row[0]: row for row in rows}
             merged: List[List[str]] = []
-            for base_row, result in zip(self._rows, rows):
-                url = result[0] if result else base_row[0]
-                width = str(result[1]) if len(result) > 1 else str(base_row[3])
-                height = str(result[2]) if len(result) > 2 else str(base_row[4])
-                human = result[3] if len(result) > 3 else base_row[5]
-                alt = base_row[1] if len(base_row) > 1 else ""
-                title = base_row[2] if len(base_row) > 2 else ""
-                extra = base_row[6:] if len(base_row) > 6 else []
-                merged.append([url, alt, title, width, height, human, *extra])
+            for current in self._rows:
+                url = current[0]
+                update = updates.get(url)
+                if update:
+                    _, width, height, human, mime = update
+                    if mime and mime != "-":
+                        current[3] = mime
+                    current[4] = str(width) if width else current[4]
+                    current[5] = str(height) if height else current[5]
+                    current[6] = human or current[6]
+                merged.append(list(current))
             rows = merged
         else:
             rows = [list(row) for row in rows]
@@ -158,6 +167,13 @@ class KeywordsTab(TableTab):
         self.set_model(GenericModel(["Termine", "Freq"], rows))
 
 
+@dataclass
+class _SchemaBlock:
+    label: str
+    errors: List[str]
+    text: str
+
+
 class SchemaTab(QtWidgets.QTextEdit):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -176,27 +192,17 @@ class SchemaTab(QtWidgets.QTextEdit):
         pre_border = '#555555' if is_dark else '#cccccc'
         self.setStyleSheet(f"background:{base_bg}; color:{base_fg};")
 
-        blocks: List[str] = []
+        blocks: List[_SchemaBlock] = []
         issues: List[str] = []
-        counts = {"json-ld": 0, "microdata": 0, "rdfa": 0, "opengraph": 0, "json-ld-raw": 0}
-        for item in items:
+        counts: Counter[str] = Counter(
+            {"json-ld": 0, "microdata": 0, "rdfa": 0, "opengraph": 0, "json-ld-raw": 0}
+        )
+
+        for index, item in enumerate(items, start=1):
             if isinstance(item, dict) and "_schema_issues" in item:
-                issues.extend(item["_schema_issues"] or [])
+                issues.extend(str(issue) for issue in (item.get("_schema_issues") or []))
                 continue
-            if isinstance(item, dict):
-                via = str(item.get("_extracted_via", ""))
-                counts[via] = counts.get(via, 0) + 1
-                blocks.append(json.dumps(item, indent=2, ensure_ascii=False))
-            elif isinstance(item, list) and item:
-                raw = item[0]
-                try:
-                    parsed = json.loads(raw)
-                    blocks.append(json.dumps(parsed, indent=2, ensure_ascii=False))
-                except Exception:
-                    counts["json-ld-raw"] = counts.get("json-ld-raw", 0) + 1
-                    blocks.append(str(raw))
-            else:
-                blocks.append(str(item))
+            blocks.append(self._build_schema_block(index, item, counts))
 
         total = sum(counts.values())
         color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
@@ -208,13 +214,83 @@ class SchemaTab(QtWidgets.QTextEdit):
         )
         issue_html = ""
         if issues:
-            items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in sorted(set(issues)))
+            unique_issues = sorted({str(issue) for issue in issues})
+            items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in unique_issues)
             issue_html = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
-        pre_blocks = "".join(
-            f"<pre style='background:{pre_bg};color:{pre_fg};border:1px solid {pre_border};padding:6px;white-space:pre-wrap'>{_html.escape(block)}</pre>"
-            for block in blocks
+        block_html = "".join(
+            self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in blocks
         )
-        self.setHtml(header + issue_html + pre_blocks)
+        self.setHtml(header + issue_html + block_html)
+
+    @staticmethod
+    def _build_schema_block(index: int, item: Any, counts: Counter[str]) -> _SchemaBlock:
+        label = f"Block #{index}"
+        errors: List[str] = []
+        text = ""
+
+        if isinstance(item, dict):
+            via = str(item.get("_extracted_via", ""))
+            counts[via] += 1
+            type_hint = SchemaTab._extract_type(item.get("@type"))
+            label = SchemaTab._compose_label(label, type_hint, via)
+            errors = [str(err) for err in (item.get("_schema_errors") or [])]
+            cleaned = {key: value for key, value in item.items() if key not in {"_schema_errors"}}
+            text = json.dumps(cleaned, indent=2, ensure_ascii=False)
+            return _SchemaBlock(label, errors, text)
+
+        if isinstance(item, list) and item:
+            raw = item[0]
+            try:
+                parsed = json.loads(raw)
+                text = json.dumps(parsed, indent=2, ensure_ascii=False)
+            except Exception:
+                counts["json-ld-raw"] += 1
+                text = str(raw)
+                label = f"{label} (JSON-LD raw)"
+            return _SchemaBlock(label, errors, text)
+
+        text = str(item)
+        return _SchemaBlock(label, errors, text)
+
+    @staticmethod
+    def _compose_label(base: str, type_hint: str, via: str) -> str:
+        label = base
+        if type_hint:
+            label += f" ({type_hint})"
+        if via:
+            label += f" via {via}"
+        return label
+
+    @staticmethod
+    def _extract_type(raw: Any) -> str:
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, list):
+            for candidate in raw:
+                if isinstance(candidate, str):
+                    return candidate
+        return ""
+
+    @staticmethod
+    def _render_block(
+        block: _SchemaBlock,
+        base_fg: str,
+        pre_bg: str,
+        pre_fg: str,
+        pre_border: str,
+    ) -> str:
+        label_color = "#c62828" if block.errors else base_fg
+        error_section = ""
+        if block.errors:
+            error_items = "".join(f"<li>{_html.escape(err)}</li>" for err in block.errors)
+            error_section = f"<ul style='margin:4px 0 8px 18px;color:#c62828'>{error_items}</ul>"
+        return (
+            "<div style='margin-top:10px'>"
+            f"<div style='font-weight:bold;color:{label_color}'>{_html.escape(block.label)}</div>"
+            f"{error_section}"
+            f"<pre style='background:{pre_bg};color:{pre_fg};border:1px solid {pre_border};padding:6px;white-space:pre-wrap'>{_html.escape(block.text)}</pre>"
+            "</div>"
+        )
 
 class SerpTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:

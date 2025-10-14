@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 import warnings
 from aiohttp import web
 from pathlib import Path
@@ -141,14 +141,15 @@ async def test_analyse(local_server):
 
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):
-    input_rows = [["/logo.png", "", "", ""]]
+    input_rows = [["/logo.png", "", "", "-", "", "", "", "No"]]
     out = await analyse_images(local_server, input_rows, timeout=5)
 
     assert isinstance(out, list)
     assert len(out) == 1
 
-    url, width, height, hr_size = out[0]
+    url, width, height, hr_size, content_type = out[0]
     assert url.endswith("/logo.png")
-    assert isinstance(width, int) or (isinstance(width, str) and width.isdigit())
-    assert isinstance(height, int) or (isinstance(height, str) and height.isdigit())
+    assert isinstance(width, str) and width.isdigit()
+    assert isinstance(height, str) and height.isdigit()
     assert isinstance(hr_size, str) and hr_size.endswith("B")
+    assert content_type == "image/png"

@@ -1,5 +1,5 @@
 """
-Motore asincrono per l’analisi SEO di una singola pagina.
+Motore asincrono per l'analisi SEO di una singola pagina.
 
 """
 from __future__ import annotations
@@ -10,9 +10,9 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 from nltk.corpus import stopwords
 from aiohttp import ClientTimeout, ClientSession  # type: ignore
-from typing import Any, Dict, List, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, cast
 from PIL import Image, ImageDraw
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse, unquote
 from urllib.robotparser import RobotFileParser
 from base64 import b64encode
 from textwrap import shorten
@@ -36,16 +36,16 @@ NavigableString = bs4.element.NavigableString
 _RESAMPLING_BASE = getattr(Image, "Resampling", None)
 _LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS", getattr(Image, "LANCZOS", 1))
 
-# ─── Safe import of extruct (fallback if lxml is broken) ──────────────────────
+# --- Safe import of extruct (fallback if lxml is broken) ----------------------
 try:
     import extruct  # type: ignore
     from w3lib.html import get_base_url  # type: ignore
     USE_EXTRUCT = True
 except Exception:                       # ImportError, lxml errors, etc.
-    # extruct or lxml is unavailable → fall back to JSON-LD-only extractor
+    # extruct or lxml is unavailable -> fall back to JSON-LD-only extractor
     USE_EXTRUCT = False
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
  
 # ------------------------------------------------------------------------------
 # Schema debug logger (opt-in via SILENTFROG_DEBUG).  Defined unconditionally,
@@ -76,21 +76,49 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
             raw = await r.read()
 
         size_b = len(raw)
+        content_type = (r.headers.get("Content-Type") or "").split(";", 1)[0].lower()
         try:
-            w, h = Image.open(BytesIO(raw)).size
+            with Image.open(BytesIO(raw)) as im:
+                w, h = im.size
+                if not content_type and im.format:
+                    content_type = f"image/{im.format.lower()}"
         except Exception:                      # immagine non valida
             w, h = 0, 0
 
-        return url, w, h, _hr_size(size_b)
+        return url, w, h, _hr_size(size_b), content_type or "-"
     except Exception as exc:                   # es. connessione fallita
-        # mantieni “Errore” per il test e per la GUI
-        return "Errore", 0, 0, ""
+        # mantieni "Errore" per il test e per la GUI
+        return "Errore", 0, 0, "", "-"
 
 
 async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
     return await head_status(session, url, timeout)
 
-# ── robots.txt helper ───────────────────────────────────────────────────
+
+def _guess_image_mime(url: str) -> str:
+    if not url:
+        return "-"
+    if url.startswith("data:image/"):
+        prefix = url.split(",", 1)[0]
+        return prefix[5:]  # remove "data:"
+    parsed = urlparse(url)
+    ext = os.path.splitext(parsed.path.lower())[1].lstrip(".")
+    mapping = {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "avif": "image/avif",
+        "bmp": "image/bmp",
+        "ico": "image/x-icon",
+        "heic": "image/heic",
+        "heif": "image/heif",
+    }
+    return mapping.get(ext, "-") if ext else "-"
+
+# -- robots.txt helper ---------------------------------------------------
 async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
@@ -139,7 +167,7 @@ async def _parse_robots(url: str, timeout: int = 5) -> dict[str, list[tuple[str,
 
     return result
 
-# ── canonical helper ──────────────────────────────────────────────────────────
+# -- canonical helper ----------------------------------------------------------
 async def _check_canonical(
     page_url: str,
     soup: BeautifulSoup,
@@ -177,7 +205,7 @@ async def _check_canonical(
 
     return canonical_url, is_self, has_multiple, status
 
-# ── hreflang helper ────────────────────────────────────────────────────
+# -- hreflang helper ----------------------------------------------------
 _HREFLANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")   # e.g. en , fr-FR
 
 async def _extract_hreflang(
@@ -191,7 +219,7 @@ async def _extract_hreflang(
     """
     # 1) Collect tags
     rows: list[list[str]] = []
-    rels: dict[str, str] = {}          # lang → url
+    rels: dict[str, str] = {}          # lang -> url
     for tag in soup.find_all("link", rel="alternate", hreflang=True, href=True):
         lang_val = _attr(tag, "hreflang").strip()
         href_val = _attr(tag, "href").strip()
@@ -230,7 +258,7 @@ async def _extract_hreflang(
 
     return rows
 
-# ── AI-crawl helper ─────────────────────────────────────────────────────
+# -- AI-crawl helper -----------------------------------------------------
 _AI_AGENTS = {
     "GPTBot":      "gptbot",
     "Google-Extended": "google-extended",
@@ -265,7 +293,7 @@ def _ai_crawl_matrix(
     return out
 
 
-# ── SERP preview helper ────────────────────────────────────────────────
+# -- SERP preview helper ------------------------------------------------
 def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
     title = ""
     title_tag = soup.title
@@ -276,15 +304,110 @@ def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
     if isinstance(desc_tag, Tag):
         description = _attr(desc_tag, "content").strip()
     # Google shows ~155 chars on desktop
-    description = shorten(description, width=155, placeholder="…")
+    description = shorten(description, width=155, placeholder=ELLIPSIS)
     return {
         "title": title,
         "description": description,
-        "display_url": urlparse(page_url).netloc.replace("www.", "") + "/…",
+        "display_url": urlparse(page_url).netloc.replace("www.", "") + "/" + ELLIPSIS,
     }
 
-# ── Title audit helper ──────────────────────────────────────────────────
+# -- 
+
+def _update_link_statuses(rows: list[list[str]], statuses: Iterable[object]) -> None:
+    for row, status in zip(rows, statuses):
+        row[3] = str(status if isinstance(status, int) else 0)
+
+
+def _meta_robots_value(headers: Mapping[str, str], soup: BeautifulSoup) -> str:
+    header_value = headers.get("X-Robots-Tag", "")
+    if header_value:
+        return header_value
+    return next(
+        (
+            meta[1]
+            for meta in _extract_meta(soup)
+            if meta and (meta[0] or "").lower() == "robots"
+        ),
+        "",
+    )
+
+
+async def _to_data_uri(img_url: str) -> str:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(img_url, timeout=5) as response:
+                if response.status != 200:
+                    return img_url
+                raw = await response.read()
+                with Image.open(BytesIO(raw)).convert("RGBA") as image:
+                    image = image.resize((16, 16), _LANCZOS)
+                    mask = Image.new("L", (16, 16), 0)
+                    ImageDraw.Draw(mask).ellipse((0, 0, 16, 16), fill=255)
+                    image.putalpha(mask)
+                    buffer = BytesIO()
+                    image.save(buffer, format="PNG")
+                    raw = buffer.getvalue()
+                return f"data:image/png;base64,{b64encode(raw).decode()}"
+    except Exception:
+        return img_url
+
+
+async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
+    parsed = urlparse(page_url)
+    domain = parsed.netloc
+
+    site_name = ""
+    og_site = soup.find("meta", property="og:site_name")
+    if isinstance(og_site, Tag):
+        site_name = _attr(og_site, "content").strip()
+    if not site_name and domain:
+        parts = domain.split(".")
+        site_name = parts[-2].capitalize() if len(parts) >= 2 else domain.capitalize()
+
+    raw_title = ""
+    title_tag = soup.title
+    if isinstance(title_tag, Tag):
+        raw_title = (title_tag.string or "").strip()
+
+    max_px = 600
+    char_limit = int(max_px / _MEAN_PX)
+    title = (
+        raw_title[: char_limit - 1].rstrip() + ELLIPSIS
+        if len(raw_title) > char_limit
+        else raw_title
+    )
+
+    path_part = unquote(parsed.path.strip("/")).replace("/", " › ")
+    breadcrumb = f"{domain} › {path_part}" if path_part else domain
+
+    desc_tag = (
+        soup.find("meta", attrs={"name": "description"})
+        or soup.find("meta", property="og:description")
+    )
+    raw_desc = ""
+    if isinstance(desc_tag, Tag):
+        raw_desc = _attr(desc_tag, "content").strip()
+    description = (raw_desc[:157] + ELLIPSIS) if len(raw_desc) > 160 else raw_desc
+
+    favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+    favicon_tag = soup.find("link", rel=lambda val: isinstance(val, str) and "icon" in val.lower())
+    if isinstance(favicon_tag, Tag):
+        href_val = _attr(favicon_tag, "href").strip()
+        if href_val:
+            favicon = urljoin(page_url, href_val)
+
+    return {
+        "title": title,
+        "description": (description[:157] + ELLIPSIS) if len(description) > 160 else description,
+        "url": page_url,
+        "site_name": site_name,
+        "favicon": await _to_data_uri(favicon),
+        "breadcrumb": breadcrumb,
+    }
+
+# --- Title audit helper -------------------------------------------------
 _MEAN_PX = 7.2           # average desktop pixel width per glyph
+ELLIPSIS = "\u2026"
 
 def _title_audit(title: str, headers: list[list[str]]) -> dict[str, str]:
     """Return a dict with all title warning flags."""
@@ -304,14 +427,14 @@ def _title_audit(title: str, headers: list[list[str]]) -> dict[str, str]:
 
 
 
-# ── redirect-chain helper ───────────────────────────────────────────────
+# -- redirect-chain helper -----------------------------------------------
 async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
     """
     Follow HEAD requests (max 6 hops) and return:
-        • list of hop URLs  (including start & each Location)
-        • final_status      (string)
-        • hops              (int)
-        • is_loop           (bool)  True if any URL repeats
+        * list of hop URLs  (including start & each Location)
+        * final_status      (string)
+        * hops              (int)
+        * is_loop           (bool)  True if any URL repeats
     """
     max_hops = 6
     hop_urls: list[str] = [url]
@@ -378,10 +501,22 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
         title = _attr(img, "title")
         loading_attr = (_attr(img, "loading") or "").lower()
         has_lazy = loading_attr == "lazy"
+        mime = _guess_image_mime(src)
         width_attr = _attr(img, "width")
         height_attr = _attr(img, "height")
-        has_dimensions = bool(width_attr and height_attr)
-        rows.append([src, alt, title, "", "", "", "1" if has_lazy else "0", "1" if has_dimensions else "0"])
+        size_placeholder = ""
+        rows.append(
+            [
+                src,
+                alt,
+                title,
+                mime,
+                width_attr,
+                height_attr,
+                size_placeholder,
+                "Yes" if has_lazy else "No",
+            ]
+        )
     return rows
 
 
@@ -391,24 +526,130 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
         a = cast(bs4.element.Tag, raw)
         href_val = _attr(a, "href")
         href = urljoin(base, href_val)
-        rel_val: Any = a.get("rel")                        # ← ② default None OK
+        rel_val: Any = a.get("rel")                        # ÔåÉ Ôæí default None OK
         rel = rel_val if isinstance(rel_val, list) else [] # lista sicura
         nf  = "nofollow" in rel
         same_host = urlparse(href).netloc == urlparse(base).netloc
         typ = "Interno" if same_host else "Esterno"
-        
+
         out.append([href, typ, "NoFollow" if nf else "Follow", ""])  # status later
     return out
+
+
+def _schema_primary_type(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        for candidate in value:
+            if isinstance(candidate, str):
+                return candidate
+    return ""
+
+
+def _schema_block_label(index: int, obj: Dict[str, Any]) -> str:
+    type_name = _schema_primary_type(obj.get("@type"))
+    via = obj.get("_extracted_via", "")
+    label = f"Block #{index}"
+    if type_name:
+        label += f" ({type_name})"
+    if via:
+        label += f" via {via}"
+    return label
+
+
+def _schema_normalize_entries(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if value is None:
+        return []
+    return [value]
+
+
+def _schema_validate_breadcrumb(obj: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    entries = obj.get("itemListElement")
+    if not entries:
+        errors.append("missing itemListElement")
+        return errors
+
+    normalized = _schema_normalize_entries(entries)
+    for idx, entry in enumerate(normalized, start=1):
+        if not isinstance(entry, dict):
+            errors.append(f"itemListElement[{idx}] is not an object")
+            continue
+        target = entry.get("item") or entry.get("itemId") or entry.get("url")
+        if isinstance(target, dict):
+            target = target.get("@id") or target.get("url")
+        if "position" not in entry:
+            errors.append(f"itemListElement[{idx}] missing position")
+        if not entry.get("name"):
+            errors.append(f"itemListElement[{idx}] missing name")
+        if not target:
+            errors.append(f"itemListElement[{idx}] missing item url")
+    return errors
+
+
+def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    if not obj.get("name"):
+        errors.append("missing name")
+    if not obj.get("description"):
+        errors.append("missing description")
+    image = obj.get("image")
+    if not image:
+        errors.append("missing image")
+
+    offers = obj.get("offers")
+    if not offers:
+        errors.append("missing offers")
+        return errors
+
+    offers_list = _schema_normalize_entries(offers)
+    have_price = False
+    have_currency = False
+    for offer in offers_list:
+        if not isinstance(offer, dict):
+            continue
+        offer_type = _schema_primary_type(offer.get("@type")).lower()
+        price_spec = offer.get("priceSpecification")
+        if isinstance(price_spec, dict):
+            if price_spec.get("price") or price_spec.get("minPrice") or price_spec.get("lowPrice"):
+                have_price = True
+            if price_spec.get("priceCurrency"):
+                have_currency = True
+        price_value = offer.get("price") or offer.get("lowPrice") or offer.get("highPrice")
+        if price_value:
+            have_price = True
+        if offer.get("priceCurrency"):
+            have_currency = True
+        if offer_type == "aggregateoffer":
+            if offer.get("lowPrice") or offer.get("highPrice"):
+                have_price = True
+            if offer.get("priceCurrency"):
+                have_currency = True
+    if not have_price:
+        errors.append("missing offers.price")
+    if not have_currency:
+        errors.append("missing offers.priceCurrency")
+    return errors
+
+
+_SCHEMA_VALIDATORS: Dict[str, Callable[[Dict[str, Any]], List[str]]] = {
+    "breadcrumblist": _schema_validate_breadcrumb,
+    "product": _schema_validate_product,
+}
 
 
 def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     """
     Schema.org extraction (robust, logged, still lightweight):
-      • JSON-LD manual harvest FIRST (so JSON-LD items stay first in output)
-      • extruct pass (lxml) → retry with html5lib tree if needed
-      • Flatten JSON-LD @graph; keep malformed blocks as {"@raw": "..."}
-      • Heuristic discovery inside generic JSON (e.g. __NEXT_DATA__, __NUXT__)
-      • Append {"_schema_issues":[...]} with concise hints
+      * JSON-LD manual harvest FIRST (so JSON-LD items stay first in output)
+      * extruct pass (lxml) -> retry with html5lib tree if needed
+      * Flatten JSON-LD @graph; keep malformed blocks as {"@raw": "..."}
+      * Heuristic discovery inside generic JSON (e.g. __NEXT_DATA__, __NUXT__)
+      * Append {"_schema_issues":[...]} with concise hints
     RDFa intentionally excluded.
     """
     # Ask extruct for every lightweight syntax, including RDFa.
@@ -442,7 +683,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         return s
 
     def _safe_load(s: str) -> Any:
-        """Try strict JSON, then scrubbed, then HTML-unescaped → scrubbed."""
+        """Try strict JSON, then scrubbed, then HTML-unescaped -> scrubbed."""
         try:
             return json.loads(s)
         except Exception:
@@ -631,7 +872,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
     except Exception as e:
         _log_schema(f"heuristic json-ld error: {e!r}")
 
-    # --- 2) extruct passes (lxml → html5lib) ---------------------------------
+    # --- 2) extruct passes (lxml -> html5lib) ---------------------------------
     if USE_EXTRUCT:
         def _extract_lxml() -> dict[str, Any]:
             try:
@@ -677,22 +918,36 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
 
 
     # --- 3) Issue summary (explicit; no Pylance “unused expression”) ----------
-    issues: list[str] = []
-    for obj in collected:
+    aggregate: list[str] = []
+    for idx, obj in enumerate(collected, start=1):
+        if not isinstance(obj, dict):
+            continue
         via = str(obj.get("_extracted_via", ""))
+        block_issues: List[str] = []
         if via in ("json-ld", "json-ld-raw"):
             checks = [
                 ("@raw" in obj, "Unparseable JSON-LD block"),
                 ("@context" not in obj and "@raw" not in obj, "JSON-LD missing @context"),
                 ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
             ]
-            issues.extend([msg for cond, msg in checks if cond])
+            block_issues.extend(msg for cond, msg in checks if cond)
         if via == "microdata" and "@type" not in obj:
-            issues.append("Microdata item missing @type")
+            block_issues.append("Microdata item missing @type")
         if via == "rdfa" and "@type" not in obj:
-            issues.append("RDFa item missing @type")
-    if issues:
-        collected.append({"_schema_issues": sorted(set(issues))})
+            block_issues.append("RDFa item missing @type")
+
+        validator_key = _schema_primary_type(obj.get("@type")).lower()
+        validator = _SCHEMA_VALIDATORS.get(validator_key)
+        if validator:
+            block_issues.extend(validator(obj))
+
+        if block_issues:
+            unique = sorted(set(block_issues))
+            obj["_schema_errors"] = unique
+            label = _schema_block_label(idx, obj)
+            aggregate.extend(f"{label}: {msg}" for msg in unique)
+    if aggregate:
+        collected.append({"_schema_issues": sorted(set(aggregate))})
 
     # --- 4) Last resort: raw JSON-LD scripts if everything else failed --------
     if collected:
@@ -730,7 +985,7 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
         c.extract()
     plain = soup.get_text(separator=" ", strip=True)
     
-    # estrae le righe “grezze” (status ancora vuoto)
+    # estrae le righe "grezze" (status ancora vuoto)
     links_rows: list[list[str]] = _extract_links(resp.url, soup)
 
     # recupera in parallelo gli HTTP status
@@ -740,11 +995,10 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
         statuses = await asyncio.gather(*coros, return_exceptions=True)
 
     # riempie la 4ª colonna di ogni riga
-    for row, st in zip(links_rows, statuses):
-        row[3] = str(st if isinstance(st, int) else 0)
+    _update_link_statuses(links_rows, statuses)
 
     canonical_url, is_self, many_canon, canon_status = await _check_canonical(
-    resp.url, soup, timeout=timeout
+        resp.url, soup, timeout=timeout
     )
 
     # --- Redirect chain -------------------------------------------------
@@ -752,91 +1006,11 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
 
     hreflang_rows = await _extract_hreflang(resp.url, soup, timeout=timeout)
     
-    meta_robots = resp.headers.get("X-Robots-Tag", "") or next(
-        (m[1] for m in _extract_meta(soup) if m[0].lower() == "robots"), ""
-    )
-
+    meta_robots = _meta_robots_value(resp.headers, soup)
     robots_map = await _parse_robots(url, timeout=timeout)
     ai_rows = _ai_crawl_matrix(robots_map, meta_robots, resp.url)
-    serp_preview = _serp_preview(resp.url, soup)
-    title_audit = _title_audit(serp_preview["title"], _extract_headers(soup))
-
-    # -- SERP helper ----------------------------------------------------------------
-    from urllib.parse import urlparse, unquote
-
-    async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
-            async def _to_data_uri(img_url: str) -> str:
-                """Download *img_url* and return a data-URI.
-                Falls back to the original URL on error."""
-                try:
-                    async with aiohttp.ClientSession() as _s:
-                        async with _s.get(img_url, timeout=5) as _r:
-                            if _r.status == 200:
-                                raw = await _r.read()
-                                with Image.open(BytesIO(raw)).convert("RGBA") as im:
-                                    im = im.resize((16, 16), _LANCZOS)
-                                    mask = Image.new("L", (16, 16), 0)
-                                    ImageDraw.Draw(mask).ellipse((0, 0, 16, 16), fill=255)
-                                    im.putalpha(mask)
-                                    buf = BytesIO()
-                                    im.save(buf, format="PNG")
-                                    raw = buf.getvalue()
-                                return f"data:image/png;base64,{b64encode(raw).decode()}"
-                except Exception:
-                    pass
-                return img_url
-
-            parsed = urlparse(page_url)
-            domain = parsed.netloc
-
-            site_name = ""
-            og_site = soup.find("meta", property="og:site_name")
-            if isinstance(og_site, Tag):
-                site_name = _attr(og_site, "content").strip()
-            if not site_name and domain:
-                parts = domain.split(".")
-                site_name = parts[-2].capitalize() if len(parts) >= 2 else domain.capitalize()
-
-            title_tag = soup.title
-            raw_title = ""
-            if isinstance(title_tag, Tag):
-                raw_title = (title_tag.string or "").strip()
-
-            _MAX_PX = 600
-            _CHAR_LIMIT = int(_MAX_PX / _MEAN_PX)
-            title = (
-                raw_title[: _CHAR_LIMIT - 1].rstrip() + "…"
-                if len(raw_title) > _CHAR_LIMIT
-                else raw_title
-            )
-
-            path = unquote(parsed.path.strip("/")).replace("/", " › ")
-            breadcrumb = f"{domain} › {path}" if path else domain
-
-            desc_tag = (
-                soup.find("meta", attrs={"name": "description"})
-                or soup.find("meta", property="og:description")
-            )
-            raw_desc = ""
-            if isinstance(desc_tag, Tag):
-                raw_desc = _attr(desc_tag, "content").strip()
-            description = (raw_desc[:157] + "…") if len(raw_desc) > 160 else raw_desc
-
-            favicon_tag = soup.find("link", rel=lambda val: isinstance(val, str) and "icon" in val.lower())
-            favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
-            if isinstance(favicon_tag, Tag):
-                href_val = _attr(favicon_tag, "href").strip()
-                if href_val:
-                    favicon = urljoin(page_url, href_val)
-
-            return {
-                "title": title,
-                "description": (description[:157] + "…") if len(description) > 160 else description,
-                "url": page_url,
-                "site_name": site_name,
-                "favicon": await _to_data_uri(favicon),
-                "breadcrumb": breadcrumb,
-            }
+    serp_snippet = await _make_serp_snippet(soup, resp.url)
+    title_audit = _title_audit(serp_snippet["title"], _extract_headers(soup))
 
     # costruisce il risultato finale
     raw_payload = {
@@ -857,14 +1031,11 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
             "final_status": final_status,
             "loop": is_loop,
         },
-        "robots": await _parse_robots(resp.url, timeout=timeout),  # full UA map
-        "meta_robots": resp.headers.get("X-Robots-Tag", "")
-        or next(
-            (m[1] for m in _extract_meta(soup) if m[0].lower() == "robots"), ""
-        ),
+        "robots": robots_map,  # full UA map
+        "meta_robots": meta_robots,
         "hreflang": hreflang_rows,
         "ai_crawl": ai_rows,
-        "serp": await _make_serp_snippet(soup, resp.url),
+        "serp": serp_snippet,
         "serp_audit": title_audit,
         "keywords": _extract_keywords(plain),
     }
@@ -875,22 +1046,19 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
 async def analyse_images(base: str, rows: list[list[str]], timeout=10):
     conn = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=conn) as sess:
-        coros = [
-            _image_info(sess, urljoin(base, row[0]), timeout)   # <-- fix
-            for row in rows
-        ]
+        coros = [_image_info(sess, urljoin(base, row[0]), timeout) for row in rows]
         out = await asyncio.gather(*coros, return_exceptions=True)
 
     result: list[list[str]] = []
     for o in out:
         if isinstance(o, Exception):
-            # mantieni l’URL originale se possibile per
-            # facilitare il debug: lo ricavo dal messaggio d’errore
+            # mantieni l'URL originale se possibile per
+            # facilitare il debug: lo ricavo dal messaggio d'errore
             msg = str(o)
             url = msg.split(" ", 1)[0] if "http" in msg else "Errore"
-            result.append([url, "", "", ""])
+            result.append([url, "", "", "", "-"])
         else:
-            url, w, h, hr = cast(tuple[str, int, int, str], o)
-            result.append([url, str(w), str(h), hr])
+            url, w, h, hr, ctype = cast(tuple[str, int, int, str, str], o)
+            result.append([url, str(w), str(h), hr, ctype])
 
     return result

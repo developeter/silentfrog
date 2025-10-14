@@ -18,7 +18,7 @@ _WARN_MARGIN = 40
 class MetaModel(_BaseModel):
     HEADERS = ["Name/Property", "Content", "Length"]
 
-    def __init__(self, rows: List[List[str]]) -> None:
+    def __init__(self, rows: List[List[str]], add_placeholders: bool = True) -> None:
         processed = [list(row) for row in rows]
         self._brushes: StatusBrushPalette = status_brushes()
 
@@ -32,7 +32,7 @@ class MetaModel(_BaseModel):
         if viewport_indices:
             for idx in viewport_indices:
                 self._viewport_state[idx] = "good"
-        else:
+        elif add_placeholders:
             processed.append(["viewport", "", "0"])
             names.append("viewport")
             self._viewport_state[len(processed) - 1] = "warn"
@@ -42,7 +42,7 @@ class MetaModel(_BaseModel):
         if charset_indices:
             for idx in charset_indices:
                 self._charset_state[idx] = "good" if idx <= 5 else "warn"
-        else:
+        elif add_placeholders:
             processed.append(["charset", "", "0"])
             names.append("charset")
             self._charset_state[len(processed) - 1] = "warn"

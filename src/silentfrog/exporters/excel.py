@@ -220,19 +220,13 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         )
 
         images_rows = _stringify_rows(payload.images)
-        lazy_rows = {
-            idx for idx, row in enumerate(payload.images) if len(row) > 6 and str(row[6]) == "1"
-        }
-        dimension_rows = {
-            idx for idx, row in enumerate(payload.images) if len(row) > 7 and str(row[7]) == "1"
-        }
 
         def _images_formatter(row_idx: int, col_idx: int, value: str):
-            if row_idx >= len(payload.images):
+            if row_idx >= len(images_rows):
                 return None
             if col_idx in (1, 2):
                 return formats.good if str(images_rows[row_idx][col_idx]).strip() else formats.warn
-            if col_idx == 5:
+            if col_idx == 6:
                 size = _parse_size(images_rows[row_idx][col_idx])
                 if size < 0:
                     return None
@@ -241,16 +235,18 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
                 if size > 100 * 1024:
                     return formats.warn
                 return formats.good
-            if col_idx == 0 and row_idx > 0 and row_idx not in lazy_rows:
+            if col_idx in (4, 5) and not images_rows[row_idx][col_idx].strip():
                 return formats.warn
-            if col_idx in (3, 4) and row_idx not in dimension_rows:
+            if col_idx == 0 and images_rows[row_idx][7].strip().lower() != "yes":
                 return formats.warn
+            if col_idx == 7:
+                return formats.good if images_rows[row_idx][7].strip().lower() == "yes" else formats.warn
             return None
 
         _write_sheet(
             workbook,
             "Images",
-            ["Src", "Alt", "Title", "W", "H", "Size"],
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy"],
             images_rows,
             _images_formatter,
         )
