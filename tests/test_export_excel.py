@@ -20,7 +20,25 @@ def _sample_payload() -> CrawlPayload:
         "headers": [["h1", "Title"]],
         "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
-        "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
+        "schema": {
+            "summary": {
+                "total": 1,
+                "by_syntax": {"json-ld": 1},
+                "by_type": {"WebPage": 1},
+                "errors": []
+            },
+            "blocks": [
+                {
+                    "@context": "https://schema.org",
+                    "@type": "WebPage",
+                    "name": "Example Page",
+                    "url": "https://example.com/page",
+                    "_extracted_via": "json-ld"
+                }
+            ],
+            "issues": [],
+            "fallback_raw": []
+        },
         "canonical": {
             "target": "https://example.com",
             "self": True,
@@ -72,6 +90,8 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
     try:
         assert "Meta" in workbook.sheetnames
         assert "SERP Preview" in workbook.sheetnames
+        assert "Structured summary" in workbook.sheetnames
+        assert "Structured data" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
         assert meta_sheet["A2"].value == "title"
@@ -80,6 +100,14 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert meta_sheet["A3"].value == "description"
         assert meta_sheet["B3"].value == "Foo"
         assert meta_sheet["C3"].fill.start_color.rgb == "FFFFF3CD"
+
+        summary_sheet = workbook["Structured summary"]
+        assert summary_sheet["A2"].value == "Total items"
+        assert summary_sheet["B2"].value == "1"
+
+        structured_sheet = workbook["Structured data"]
+        assert structured_sheet["B2"].value == "json-ld"
+        assert structured_sheet["C2"].value == "WebPage"
 
         links_sheet = workbook["Links"]
         assert links_sheet["D2"].fill.start_color.rgb == "FFD1E7DD"

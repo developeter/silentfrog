@@ -99,7 +99,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.hreflang_tab, "Hreflang")
 
         self.schema_tab = SchemaTab()
-        self.tabs.addTab(self.schema_tab, "Schema.org")
+        self.tabs.addTab(self.schema_tab, "Structured data")
 
         self.keywords_tab = KeywordsTab()
         self.tabs.addTab(self.keywords_tab, "Keywords")
@@ -180,7 +180,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.hreflang_tab.update([])
         self.keywords_tab.update([])
         self.ai_tab.update([])
-        self.schema_tab.update([])
+        self.schema_tab.update({})
         self.serp_tab.update({}, {})
         self.btn_export.setEnabled(False)
         self.btn_img_dl.setEnabled(False)
@@ -244,7 +244,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.hreflang_tab.update, data.get("hreflang", [])),
             (self.keywords_tab.update, data.get("keywords", [])),
             (self.ai_tab.update, data.get("ai_crawl", [])),
-            (self.schema_tab.update, data.get("schema", [])),
+            (self.schema_tab.update, data.get("schema", {})),
         ]
         for updater, payload in list_tabs:
             updater(payload)

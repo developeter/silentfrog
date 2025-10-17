@@ -1,10 +1,10 @@
 ﻿from __future__ import annotations
-from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, cast
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPalette
+from .crawl_types import StructuredDataPayload
 from .models import (
     MetaModel,
     ImagesModel,
@@ -179,9 +179,13 @@ class SchemaTab(QtWidgets.QTextEdit):
         super().__init__(parent)
         self.setReadOnly(True)
 
-    def update(self, items: List[Any]) -> None:
-        if not items:
-            self.setHtml("<span style='color:red;font-weight:bold'>Schema.org not found</span>")
+    def update(self, payload: Any) -> None:
+        report = StructuredDataPayload.from_raw(payload)
+        blocks: List[Any] = list(report.blocks)
+        if not blocks and report.fallback_raw:
+            blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in report.fallback_raw]
+        if not blocks:
+            self.setHtml("<span style='color:red;font-weight:bold'>Structured data not found</span>")
             return
 
         is_dark = _is_dark(self)
@@ -192,65 +196,89 @@ class SchemaTab(QtWidgets.QTextEdit):
         pre_border = '#555555' if is_dark else '#cccccc'
         self.setStyleSheet(f"background:{base_bg}; color:{base_fg};")
 
-        blocks: List[_SchemaBlock] = []
-        issues: List[str] = []
-        counts: Counter[str] = Counter(
-            {"json-ld": 0, "microdata": 0, "rdfa": 0, "opengraph": 0, "json-ld-raw": 0}
-        )
+        summary = report.summary
+        syntax_counts = {name: count for name, count in summary.by_syntax.items() if count}
+        if not syntax_counts:
+            syntax_counts = self._fallback_syntax_counts(blocks)
+        type_counts = {name: count for name, count in summary.by_type.items() if count}
+        if not type_counts:
+            type_counts = self._fallback_type_counts(blocks)
 
-        for index, item in enumerate(items, start=1):
-            if isinstance(item, dict) and "_schema_issues" in item:
-                issues.extend(str(issue) for issue in (item.get("_schema_issues") or []))
-                continue
-            blocks.append(self._build_schema_block(index, item, counts))
+        total = summary.total or sum(syntax_counts.values()) or len(blocks)
+        issues = list(summary.errors)
 
-        total = sum(counts.values())
+        syntax_labels = {
+            "json-ld": "JSON-LD",
+            "json-ld-raw": "JSON-LD raw",
+            "microdata": "Microdata",
+            "microformat": "Microformat",
+            "opengraph": "OpenGraph",
+            "rdfa": "RDFa",
+        }
+        syntax_text = ", ".join(
+            f"{syntax_labels.get(name, name)} {syntax_counts[name]}"
+            for name in sorted(syntax_counts)
+        ) or "none"
+        type_text = ""
+        if type_counts:
+            type_text = " &nbsp; Types: " + ", ".join(
+                f"{schema_type} x {type_counts[schema_type]}" for schema_type in sorted(type_counts)
+            )
         color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
         header = (
-            f"<div style='font-weight:bold;color:{color}'>Schema.org: {total} items &nbsp; "
-            f"(JSON-LD {counts.get('json-ld',0)}, Microdata {counts.get('microdata',0)}, "
-            f"RDFa {counts.get('rdfa',0)}, OpenGraph {counts.get('opengraph',0)}, "
-            f"Raw {counts.get('json-ld-raw',0)})</div>"
+            f"<div style='font-weight:bold;color:{color}'>Structured data: {total} items &nbsp; "
+            f"(Syntax: {syntax_text}){type_text}</div>"
         )
+
+        unique_issues = list(dict.fromkeys(issues))
         issue_html = ""
-        if issues:
-            unique_issues = sorted({str(issue) for issue in issues})
+        if unique_issues:
             items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in unique_issues)
             issue_html = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
+
+        block_models = [self._build_schema_block(idx, item) for idx, item in enumerate(blocks, start=1)]
         block_html = "".join(
-            self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in blocks
+            self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in block_models
         )
         self.setHtml(header + issue_html + block_html)
 
     @staticmethod
-    def _build_schema_block(index: int, item: Any, counts: Counter[str]) -> _SchemaBlock:
-        label = f"Block #{index}"
-        errors: List[str] = []
-        text = ""
+    def _fallback_syntax_counts(blocks: List[Any]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for item in blocks:
+            if isinstance(item, dict):
+                via = str(item.get("_extracted_via", "")).strip()
+                if via:
+                    counts[via] = counts.get(via, 0) + 1
+        return counts
 
+    @staticmethod
+    def _fallback_type_counts(blocks: List[Any]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for item in blocks:
+            if isinstance(item, dict):
+                type_hint = SchemaTab._extract_type(item.get("@type"))
+                if type_hint:
+                    counts[type_hint] = counts.get(type_hint, 0) + 1
+        return counts
+
+    @staticmethod
+    def _build_schema_block(index: int, item: Any) -> _SchemaBlock:
+        label = f"Block #{index}"
         if isinstance(item, dict):
-            via = str(item.get("_extracted_via", ""))
-            counts[via] += 1
+            via = str(item.get("_extracted_via", "")).strip()
             type_hint = SchemaTab._extract_type(item.get("@type"))
             label = SchemaTab._compose_label(label, type_hint, via)
-            errors = [str(err) for err in (item.get("_schema_errors") or [])]
+            errors = [str(err).strip() for err in item.get("_schema_errors", []) if str(err).strip()]
             cleaned = {key: value for key, value in item.items() if key not in {"_schema_errors"}}
             text = json.dumps(cleaned, indent=2, ensure_ascii=False)
-            return _SchemaBlock(label, errors, text)
-
-        if isinstance(item, list) and item:
-            raw = item[0]
-            try:
-                parsed = json.loads(raw)
-                text = json.dumps(parsed, indent=2, ensure_ascii=False)
-            except Exception:
-                counts["json-ld-raw"] += 1
-                text = str(raw)
+            if "@raw" in cleaned and isinstance(cleaned["@raw"], str):
                 label = f"{label} (JSON-LD raw)"
             return _SchemaBlock(label, errors, text)
-
-        text = str(item)
-        return _SchemaBlock(label, errors, text)
+        if isinstance(item, list):
+            text = json.dumps(item, indent=2, ensure_ascii=False)
+            return _SchemaBlock(f"{label} (list)", [], text)
+        return _SchemaBlock(label, [], str(item))
 
     @staticmethod
     def _compose_label(base: str, type_hint: str, via: str) -> str:
@@ -263,13 +291,23 @@ class SchemaTab(QtWidgets.QTextEdit):
 
     @staticmethod
     def _extract_type(raw: Any) -> str:
+        candidate = ""
         if isinstance(raw, str):
-            return raw
-        if isinstance(raw, list):
-            for candidate in raw:
-                if isinstance(candidate, str):
-                    return candidate
-        return ""
+            candidate = raw
+        elif isinstance(raw, list):
+            for part in raw:
+                if isinstance(part, str) and part.strip():
+                    candidate = part
+                    break
+        if not candidate:
+            return ""
+        text = candidate.strip()
+        if not text:
+            return ""
+        for sep in ("#", "/"):
+            if sep in text:
+                text = text.rsplit(sep, 1)[-1]
+        return text.strip()
 
     @staticmethod
     def _render_block(
@@ -291,7 +329,6 @@ class SchemaTab(QtWidgets.QTextEdit):
             f"<pre style='background:{pre_bg};color:{pre_fg};border:1px solid {pre_border};padding:6px;white-space:pre-wrap'>{_html.escape(block.text)}</pre>"
             "</div>"
         )
-
 class SerpTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)

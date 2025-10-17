@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -59,7 +59,25 @@ def _sample_payload() -> CrawlPayload:
         "headers": [["h1", "Title"]],
         "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
         "links": [["https://example.com", "Example", "Follow", "200"]],
-        "schema": [{"@context": "https://schema.org", "_extracted_via": "json-ld"}],
+        "schema": {
+            "summary": {
+                "total": 1,
+                "by_syntax": {"json-ld": 1},
+                "by_type": {"WebPage": 1},
+                "errors": []
+            },
+            "blocks": [
+                {
+                    "@context": "https://schema.org",
+                    "@type": "WebPage",
+                    "name": "Example Page",
+                    "url": "https://example.com/page",
+                    "_extracted_via": "json-ld"
+                }
+            ],
+            "issues": [],
+            "fallback_raw": []
+        },
         "canonical": {
             "target": "https://example.com",
             "self": True,
@@ -115,7 +133,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Canonical",
         "Robots",
         "Hreflang",
-        "Schema.org",
+        "Structured data",
         "Keywords",
         "AI crawl",
         "SERP",
@@ -267,7 +285,7 @@ def test_schema_tab_handles_missing_items(qtbot):
     qtbot.addWidget(tab)
     tab.update([])
 
-    assert "Schema.org not found" in tab.toHtml()
+    assert "Structured data not found" in tab.toHtml()
 
 
 def test_schema_tab_displays_block_errors(qtbot):

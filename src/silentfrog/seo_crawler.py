@@ -407,7 +407,7 @@ async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, st
 
 # --- Title audit helper -------------------------------------------------
 _MEAN_PX = 7.2           # average desktop pixel width per glyph
-ELLIPSIS = "\u2026"
+ELLIPSIS = chr(0x2026)
 
 def _title_audit(title: str, headers: list[list[str]]) -> dict[str, str]:
     """Return a dict with all title warning flags."""
@@ -537,13 +537,23 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
 
 
 def _schema_primary_type(value: Any) -> str:
+    candidate = ""
     if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        for candidate in value:
-            if isinstance(candidate, str):
-                return candidate
-    return ""
+        candidate = value
+    elif isinstance(value, list):
+        for part in value:
+            if isinstance(part, str) and part.strip():
+                candidate = part
+                break
+    if not candidate:
+        return ""
+    text = candidate.strip()
+    if not text:
+        return ""
+    for sep in ("#", "/"):
+        if sep in text:
+            text = text.rsplit(sep, 1)[-1]
+    return text.strip()
 
 
 def _schema_block_label(index: int, obj: Dict[str, Any]) -> str:
@@ -642,20 +652,21 @@ _SCHEMA_VALIDATORS: Dict[str, Callable[[Dict[str, Any]], List[str]]] = {
 }
 
 
-def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
+def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
     """
-    Schema.org extraction (robust, logged, still lightweight):
+    Structured data extraction (robust, logged, still lightweight):
       * JSON-LD manual harvest FIRST (so JSON-LD items stay first in output)
       * extruct pass (lxml) -> retry with html5lib tree if needed
       * Flatten JSON-LD @graph; keep malformed blocks as {"@raw": "..."}
       * Heuristic discovery inside generic JSON (e.g. __NEXT_DATA__, __NUXT__)
-      * Append {"_schema_issues":[...]} with concise hints
-    RDFa intentionally excluded.
+      * Provide summary counts by syntax/@type and collect concise error hints
     """
-    # Ask extruct for every lightweight syntax, including RDFa.
     syntaxes = ["json-ld", "microdata", "opengraph", "microformat", "rdfa"]
-    collected: list[dict] = []
+    collected: list[Dict[str, Any]] = []
     seen: set[str] = set()
+    syntax_counter: Counter[str] = Counter()
+    type_counter: Counter[str] = Counter()
+    fallback_raw: list[str] = []
 
     # --- helpers --------------------------------------------------------------
     def _add_flat(obj: dict, via: str) -> None:
@@ -670,8 +681,13 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
         if sig in seen:
             return
         seen.add(sig)
-        o = dict(obj); o["_extracted_via"] = via
-        collected.append(o)
+        enriched = dict(obj)
+        enriched["_extracted_via"] = via
+        collected.append(enriched)
+        syntax_counter[via] += 1
+        primary_type = _schema_primary_type(enriched.get("@type"))
+        if primary_type:
+            type_counter[primary_type] += 1
 
     def _scrub_jsonish(s: str) -> str:
         """Make common broken JSON parseable (BOM, HTML/JS comments, trailing commas)."""
@@ -718,8 +734,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                 if isinstance(loaded, (list, dict)):
                     stack.append(loaded)
         return out
-    
-    
+
     # -------- minimal BeautifulSoup fallbacks for Microdata / RDFa ----------
     def _is_within_other(scope: bs4.element.Tag, node: bs4.element.Tag, attr: str) -> bool:
         """Return True if *node* is inside a descendant subtree that also has *attr*."""
@@ -843,17 +858,13 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                     out.append(text[start : i + 1])
         return out
 
-
     # --- 1b) Heuristic discovery inside generic JS/JSON blobs -----------------
-    # Covers __NEXT_DATA__, window.__NUXT__ = {...}, CMS blobs, etc.
     try:
         soup2 = BeautifulSoup(html_text, "html.parser")
         hits = 0
-        for node in soup2.find_all("script"):
-            if not isinstance(node, Tag):
-                continue
-            raw = (node.string or node.get_text() or "").strip()
-            if not raw or ("@context" not in raw and "@type" not in raw):
+        for script in soup2.find_all("script"):
+            raw = script.string or script.get_text()
+            if not raw:
                 continue
             parsed = _safe_load(raw)
             if isinstance(parsed, (list, dict)):
@@ -902,11 +913,11 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
                     _add_flat(it, syntax)
             if items:
                 _log_schema(f"extruct:{syntax} -> {len(items)} items")
-                
+
     # --- 2b) Microdata/RDFa BeautifulSoup fallbacks (when extruct gave none) -
     soup_md = BeautifulSoup(html_text, "html.parser")
     have_micro = any(isinstance(o, dict) and o.get("_extracted_via") == "microdata" for o in collected)
-    have_rdfa  = any(isinstance(o, dict) and o.get("_extracted_via") == "rdfa"      for o in collected)
+    have_rdfa = any(isinstance(o, dict) and o.get("_extracted_via") == "rdfa" for o in collected)
     if not have_micro:
         for item in _microdata_bs(soup_md):
             _add_flat(item, "microdata")
@@ -916,24 +927,37 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
             _add_flat(item, "rdfa")
         _log_schema("fallback: rdfa added")
 
+    if not collected:
+        soup_fallback = BeautifulSoup(html_text, "html.parser")
+        fallback_blocks: list[Dict[str, Any]] = []
+        for script in soup_fallback.find_all("script", {"type": "application/ld+json"}):
+            raw = script.get_text(strip=True) or ""
+            if not raw:
+                continue
+            fallback_raw.append(raw)
+            fallback_blocks.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
+        if fallback_blocks:
+            collected.extend(fallback_blocks)
+            syntax_counter["json-ld-raw"] += len(fallback_blocks)
+            _log_schema(f"fallback: raw json-ld captured={len(fallback_blocks)}")
 
-    # --- 3) Issue summary (explicit; no Pylance “unused expression”) ----------
     aggregate: list[str] = []
     for idx, obj in enumerate(collected, start=1):
         if not isinstance(obj, dict):
             continue
-        via = str(obj.get("_extracted_via", ""))
+        via = str(obj.get("_extracted_via", "")).strip()
+        via_lower = via.lower()
         block_issues: List[str] = []
-        if via in ("json-ld", "json-ld-raw"):
+        if via_lower in ("json-ld", "json-ld-raw"):
             checks = [
                 ("@raw" in obj, "Unparseable JSON-LD block"),
                 ("@context" not in obj and "@raw" not in obj, "JSON-LD missing @context"),
                 ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
             ]
             block_issues.extend(msg for cond, msg in checks if cond)
-        if via == "microdata" and "@type" not in obj:
+        if via_lower == "microdata" and "@type" not in obj:
             block_issues.append("Microdata item missing @type")
-        if via == "rdfa" and "@type" not in obj:
+        if via_lower == "rdfa" and "@type" not in obj:
             block_issues.append("RDFa item missing @type")
 
         validator_key = _schema_primary_type(obj.get("@type")).lower()
@@ -946,19 +970,19 @@ def _extract_schema_all(html_text: str, response_url: str) -> list[Any]:
             obj["_schema_errors"] = unique
             label = _schema_block_label(idx, obj)
             aggregate.extend(f"{label}: {msg}" for msg in unique)
-    if aggregate:
-        collected.append({"_schema_issues": sorted(set(aggregate))})
 
-    # --- 4) Last resort: raw JSON-LD scripts if everything else failed --------
-    if collected:
-        return collected
-    soup = BeautifulSoup(html_text, "html.parser")
-    out: list[list[str]] = []
-    for script in soup.find_all("script", {"type": "application/ld+json"}):
-        raw = script.get_text(strip=True) or ""
-        if raw:
-            out.append([raw])
-    return out
+    summary = {
+        "total": int(sum(syntax_counter.values())),
+        "by_syntax": {name: syntax_counter[name] for name in sorted(syntax_counter) if syntax_counter[name]},
+        "by_type": {name: type_counter[name] for name in sorted(type_counter) if type_counter[name]},
+        "errors": sorted(set(aggregate)),
+    }
+    return {
+        "blocks": collected,
+        "summary": summary,
+        "issues": summary["errors"],
+        "fallback_raw": fallback_raw,
+    }
 
 
 def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:
@@ -977,7 +1001,7 @@ def _extract_keywords(text: str, top_n: int = 30) -> list[list[str]]:
 async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
     resp = await fetch_page(url, timeout)
     soup = BeautifulSoup(resp.body, "html.parser")
-    schema_rows = _extract_schema_all(resp.body, resp.url)
+    structured_data = _extract_schema_all(resp.body, resp.url)
     # rimuovi commenti e script/style per trovare keyword
     for tag in soup.find_all(["script", "style"]):
         tag.extract()
@@ -1018,7 +1042,7 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
         "headers": _extract_headers(soup),
         "images": _extract_images(resp.url, soup),
         "links": links_rows,
-        "schema": schema_rows,
+        "schema": structured_data,
         "canonical": {
             "target": canonical_url,
             "self": is_self,

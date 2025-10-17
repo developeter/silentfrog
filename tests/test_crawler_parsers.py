@@ -1,4 +1,6 @@
-﻿import textwrap
+from __future__ import annotations
+
+import textwrap
 from typing import Dict, List
 
 import pytest
@@ -56,7 +58,16 @@ def test_extract_headers_picks_h1(soup: BeautifulSoup) -> None:
 def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> None:
     images = crawler._extract_images(base_url, soup)
     assert images == [
-        ["https://example.com/images/logo.png", "Logo", "Logo title", "image/png", "", "", "", "No"]
+        [
+            "https://example.com/images/logo.png",
+            "Logo",
+            "Logo title",
+            "image/png",
+            "",
+            "",
+            "",
+            "No",
+        ]
     ]
 
 
@@ -92,11 +103,14 @@ def test_title_audit_flags_short_title(soup: BeautifulSoup) -> None:
 
 def test_schema_extraction_yields_jsonld(sample_html: str) -> None:
     schema = crawler._extract_schema_all(sample_html, "https://example.com/canonical/page")
-    assert schema, "schema extraction should return at least one entry"
-    first = schema[0]
-    assert isinstance(first, dict)
-    assert first["@context"] == "https://schema.org"
-    assert first["_extracted_via"] == "json-ld"
+    assert isinstance(schema, dict), "schema extraction must return a mapping"
+    summary = schema.get("summary", {})
+    blocks = schema.get("blocks", [])
+    assert summary.get("total", 0) >= 1
+    assert blocks, "expected at least one structured data block"
+    first = blocks[0]
+    assert isinstance(first, dict), f"unexpected block type: {type(first)}"
+    assert "@context" in first
 
 
 def test_schema_validation_flags_breadcrumb_and_product() -> None:
@@ -119,22 +133,25 @@ def test_schema_validation_flags_breadcrumb_and_product() -> None:
         """
     )
     schema = crawler._extract_schema_all(html, "https://example.com")
-    breadcrumb = next(
-        item for item in schema if isinstance(item, dict) and item.get("@type") == "BreadcrumbList"
-    )
+    summary = schema["summary"]
+    blocks = schema["blocks"]
+    assert summary["total"] >= 2
+    assert "BreadcrumbList" in summary["by_type"]
+    assert "Product" in summary["by_type"]
+
+    breadcrumb = next(item for item in blocks if isinstance(item, dict) and item.get("@type") == "BreadcrumbList")
     assert breadcrumb.get("_schema_errors"), "breadcrumb block should expose schema errors"
     assert "itemListElement[1] missing position" in breadcrumb["_schema_errors"]
     assert "itemListElement[1] missing item url" in breadcrumb["_schema_errors"]
 
-    product = next(item for item in schema if isinstance(item, dict) and item.get("@type") == "Product")
+    product = next(item for item in blocks if isinstance(item, dict) and item.get("@type") == "Product")
     assert product.get("_schema_errors"), "product block should expose schema errors"
     assert "missing offers.price" in product["_schema_errors"]
     assert "missing offers.priceCurrency" in product["_schema_errors"]
 
-    issues_entry = next(item for item in schema if isinstance(item, dict) and "_schema_issues" in item)
-    summary = "\n".join(issues_entry["_schema_issues"])
-    assert "itemListElement[1] missing position" in summary
-    assert "missing offers.priceCurrency" in summary
+    summary_errors = "\n".join(summary["errors"])
+    assert "itemListElement[1] missing position" in summary_errors
+    assert "missing offers.priceCurrency" in summary_errors
 
 
 def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
@@ -154,9 +171,11 @@ def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
 def test_serp_schema_snapshot_combined(sample_html: str, soup: BeautifulSoup) -> None:
     preview = crawler._serp_preview("https://example.com/sample", soup)
     schema = crawler._extract_schema_all(sample_html, "https://example.com/sample")
+    summary = schema["summary"]
+    assert summary["total"] >= 1
     snapshot = {
         "serp": preview,
-        "schema_first": schema[0],
+        "schema_first": schema["blocks"][0],
     }
     assert snapshot == {
         "serp": {

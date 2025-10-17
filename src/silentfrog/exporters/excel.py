@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Callable, List, Sequence
+from typing import Any, Callable, List, Sequence
 
 import xlsxwriter
 
@@ -96,6 +96,26 @@ def _parse_size(text: str) -> int:
         "gib": 1_073_741_824,
     }
     return int(number * multipliers.get(unit, 1))
+
+
+def _schema_type_label(value: Any) -> str:
+    candidate = ""
+    if isinstance(value, str):
+        candidate = value
+    elif isinstance(value, list):
+        for part in value:
+            if isinstance(part, str) and part.strip():
+                candidate = part
+                break
+    if not candidate:
+        return ""
+    text = candidate.strip()
+    if not text:
+        return ""
+    for sep in ("#", "/"):
+        if sep in text:
+            text = text.rsplit(sep, 1)[-1]
+    return text.strip()
 
 
 def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
@@ -453,38 +473,79 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             _ai_formatter,
         )
 
-        schema_rows: List[List[str]] = []
-        for idx, item in enumerate(payload.schema, start=1):
+        structured = payload.schema
+        blocks = list(structured.blocks)
+        if not blocks and structured.fallback_raw:
+            blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in structured.fallback_raw]
+
+        summary = structured.summary
+        syntax_labels = {
+            "json-ld": "JSON-LD",
+            "json-ld-raw": "JSON-LD raw",
+            "microdata": "Microdata",
+            "microformat": "Microformat",
+            "opengraph": "OpenGraph",
+            "rdfa": "RDFa",
+        }
+        syntax_text = ", ".join(
+            f"{syntax_labels.get(name, name)} {count}"
+            for name, count in sorted(summary.by_syntax.items())
+            if count
+        )
+        type_text = ", ".join(
+            f"{schema_type} {count}" for schema_type, count in sorted(summary.by_type.items()) if count
+        )
+        total_items = summary.total or len(blocks)
+        summary_rows = [
+            ["Total items", str(total_items)],
+            ["Syntax", syntax_text or "-"],
+            ["Types", type_text or "-"],
+        ]
+        if summary.errors:
+            summary_rows.append(["Errors", "\n".join(summary.errors)])
+
+        _write_sheet(
+            workbook,
+            "Structured summary",
+            ["Metric", "Value"],
+            summary_rows,
+        )
+
+        detail_rows: List[List[str]] = []
+        for idx, item in enumerate(blocks, start=1):
             if isinstance(item, dict):
-                schema_rows.append(
+                raw_snapshot = json.dumps({key: value for key, value in item.items() if key != "_schema_errors"}, ensure_ascii=False)
+                error_text = "; ".join(str(err).strip() for err in item.get("_schema_errors", []) if str(err).strip())
+                detail_rows.append(
                     [
                         str(idx),
-                        item.get("_extracted_via", ""),
-                        json.dumps(item, ensure_ascii=False),
+                        str(item.get("_extracted_via", "")),
+                        _schema_type_label(item.get("@type")),
+                        error_text or "-",
+                        raw_snapshot,
                     ]
                 )
             elif isinstance(item, list):
-                schema_rows.append(
+                detail_rows.append(
                     [
                         str(idx),
                         "list",
+                        "",
+                        "-",
                         json.dumps(item, ensure_ascii=False),
                     ]
                 )
             else:
-                schema_rows.append(
-                    [
-                        str(idx),
-                        "",
-                        str(item),
-                    ]
-                )
+                detail_rows.append([str(idx), "", "", "-", str(item)])
+
+        if not detail_rows:
+            detail_rows = [["-", "-", "-", "-", "-"]]
 
         _write_sheet(
             workbook,
-            "Schema",
-            ["#", "Source", "Raw"],
-            schema_rows or [["-", "-", "-"]],
+            "Structured data",
+            ["#", "Source", "Type", "Errors", "Raw"],
+            detail_rows,
         )
 
         serp = payload.serp

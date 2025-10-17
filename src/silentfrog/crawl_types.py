@@ -25,14 +25,6 @@ def _ensure_mapping(value: Any, label: str) -> Mapping[str, Any]:
     raise ValueError(f"{label} must be a mapping")
 
 
-def _normalize_schema(value: Any) -> List[Any]:
-    if isinstance(value, list):
-        return value
-    if _is_iterable_of_iterables(value):
-        return list(value)
-    return []
-
-
 def _normalize_robots(value: Any) -> Dict[str, List[Tuple[str, str]]]:
     if not isinstance(value, Mapping):
         return {}
@@ -45,6 +37,157 @@ def _normalize_robots(value: Any) -> Dict[str, List[Tuple[str, str]]]:
                     bucket.append((str(directive[0]), str(directive[1])))
         normalized[str(agent)] = bucket
     return normalized
+
+
+@dataclass(frozen=True)
+class StructuredDataSummary:
+    total: int
+    by_syntax: Dict[str, int]
+    by_type: Dict[str, int]
+    errors: List[str]
+
+    @staticmethod
+    def _as_int_dict(value: Any) -> Dict[str, int]:
+        if not isinstance(value, Mapping):
+            return {}
+        result: Dict[str, int] = {}
+        for key, raw in value.items():
+            try:
+                result[str(key)] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    @classmethod
+    def empty(cls) -> StructuredDataSummary:
+        return cls(total=0, by_syntax={}, by_type={}, errors=[])
+
+    @classmethod
+    def from_raw(cls, value: Any) -> StructuredDataSummary:
+        if not isinstance(value, Mapping):
+            return cls.empty()
+        try:
+            total = int(value.get("total", 0))
+        except (TypeError, ValueError):
+            total = 0
+        by_syntax = cls._as_int_dict(value.get("by_syntax"))
+        by_type = cls._as_int_dict(value.get("by_type"))
+        errors_raw = value.get("errors", [])
+        errors: List[str] = []
+        if isinstance(errors_raw, Iterable) and not isinstance(errors_raw, (str, bytes)):
+            for item in errors_raw:
+                text = str(item).strip()
+                if text:
+                    errors.append(text)
+        return cls(total=total, by_syntax=by_syntax, by_type=by_type, errors=errors)
+
+    def with_errors(self, extra: Iterable[str]) -> StructuredDataSummary:
+        merged: List[str] = list(self.errors)
+        seen = {err for err in merged}
+        for item in extra:
+            text = str(item).strip()
+            if not text or text in seen:
+                continue
+            merged.append(text)
+            seen.add(text)
+        if merged == self.errors:
+            return self
+        return StructuredDataSummary(
+            total=self.total,
+            by_syntax=dict(self.by_syntax),
+            by_type=dict(self.by_type),
+            errors=merged,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total": self.total,
+            "by_syntax": dict(self.by_syntax),
+            "by_type": dict(self.by_type),
+            "errors": list(self.errors),
+        }
+
+
+@dataclass(frozen=True)
+class StructuredDataPayload:
+    blocks: List[Any]
+    summary: StructuredDataSummary
+    fallback_raw: List[str]
+
+    @classmethod
+    def empty(cls) -> StructuredDataPayload:
+        return cls(blocks=[], summary=StructuredDataSummary.empty(), fallback_raw=[])
+
+    @staticmethod
+    def _coerce_blocks(value: Any) -> List[Any]:
+        if isinstance(value, list):
+            return list(value)
+        if _is_iterable_of_iterables(value):
+            return list(value)
+        return []
+
+    @staticmethod
+    def _coerce_fallback(raw: Any) -> List[str]:
+        if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
+            return []
+        fallback: List[str] = []
+        for item in raw:
+            text = str(item).strip()
+            if text:
+                fallback.append(text)
+        return fallback
+
+    @classmethod
+    def from_raw(cls, value: Any) -> StructuredDataPayload:
+        if isinstance(value, StructuredDataPayload):
+            return value
+        if isinstance(value, Mapping):
+            summary = StructuredDataSummary.from_raw(value.get("summary", {}))
+            blocks = cls._coerce_blocks(value.get("blocks"))
+            extra_errors_source = value.get("issues", [])
+            extra_errors: Iterable[str] = (
+                extra_errors_source
+                if isinstance(extra_errors_source, Iterable) and not isinstance(extra_errors_source, (str, bytes))
+                else []
+            )
+            summary = summary.with_errors(extra_errors)
+            fallback_raw = cls._coerce_fallback(value.get("fallback_raw"))
+            return cls(blocks=blocks, summary=summary, fallback_raw=fallback_raw)
+        if isinstance(value, list):
+            summary_raw: Mapping[str, Any] | None = None
+            extra_errors: List[str] = []
+            blocks: List[Any] = []
+            fallback: List[str] = []
+            for item in value:
+                if isinstance(item, Mapping) and "_schema_summary" in item and summary_raw is None:
+                    raw = item.get("_schema_summary", {})
+                    summary_raw = raw if isinstance(raw, Mapping) else {}
+                    continue
+                if isinstance(item, Mapping) and "_schema_issues" in item:
+                    for issue in item.get("_schema_issues") or []:
+                        text = str(issue).strip()
+                        if text:
+                            extra_errors.append(text)
+                    continue
+                if isinstance(item, list):
+                    if item:
+                        text = str(item[0]).strip()
+                        if text:
+                            fallback.append(text)
+                    continue
+                blocks.append(item)
+            summary = StructuredDataSummary.from_raw(summary_raw or {})
+            summary = summary.with_errors(extra_errors)
+            return cls(blocks=blocks, summary=summary, fallback_raw=fallback)
+        return cls.empty()
+
+    def to_mapping(self) -> Dict[str, Any]:
+        return {
+            "blocks": list(self.blocks),
+            "summary": self.summary.to_dict(),
+            "fallback_raw": list(self.fallback_raw),
+            "issues": list(self.summary.errors),
+        }
 
 
 @dataclass(frozen=True)
@@ -173,7 +316,7 @@ class CrawlPayload:
     headers: List[List[str]]
     images: List[List[str]]
     links: List[List[str]]
-    schema: List[Any]
+    schema: StructuredDataPayload
     canonical: CanonicalInfo
     redirect: RedirectInfo
     robots: Dict[str, List[Tuple[str, str]]]
@@ -216,7 +359,7 @@ class CrawlPayload:
             headers=_normalize_rows(data["headers"], label="headers"),
             images=_normalize_rows(data["images"], label="images"),
             links=_normalize_rows(data["links"], label="links"),
-            schema=_normalize_schema(data["schema"]),
+            schema=StructuredDataPayload.from_raw(data["schema"]),
             canonical=CanonicalInfo.from_raw(canonical_raw),
             redirect=RedirectInfo.from_raw(redirect_raw),
             robots=_normalize_robots(data["robots"]),
@@ -234,7 +377,7 @@ class CrawlPayload:
             "headers": [row[:] for row in self.headers],
             "images": [row[:] for row in self.images],
             "links": [row[:] for row in self.links],
-            "schema": list(self.schema),
+            "schema": self.schema.to_mapping(),
             "canonical": self.canonical.to_dict(),
             "redirect": self.redirect.to_dict(),
             "robots": {agent: [list(pair) for pair in directives] for agent, directives in self.robots.items()},
@@ -258,5 +401,7 @@ __all__ = [
     "RedirectInfo",
     "SerpPreview",
     "SerpAudit",
+    "StructuredDataPayload",
+    "StructuredDataSummary",
     "CrawlPayload",
 ]

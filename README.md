@@ -7,7 +7,7 @@ It lets quickly:
 | Capability                                                          | Status |
 | ------------------------------------------------------------------- | ------ |
 | Bulk-check redirects from Excel                                     | ✅     |
-| Single-page SEO analyser (meta, headers, images, links, Schema.org) | ✅     |
+| Single-page SEO analyser (meta, headers, images, links, Structured data) | ✅     |
 | Export results to Excel                                             | ✅     |
 
 ---

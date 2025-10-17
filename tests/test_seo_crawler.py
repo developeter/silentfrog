@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 import warnings
 from aiohttp import web
 from pathlib import Path
@@ -79,13 +79,12 @@ async def test_analyse(local_server):
     assert payload.links[0][3].isdigit()
 
     # Schema tab: at least one entry contains @context
-    first = payload.schema[0]
-    if isinstance(first, dict):
-        assert "@context" in first
-    elif isinstance(first, list) and first:
-        assert "@context" in first[0]
-    else:
-        pytest.fail(f"Unexpected schema item type: {type(first)}")
+    schema_report = payload.schema
+    assert schema_report.summary.total >= 1
+    assert schema_report.blocks, "expected at least one structured data block"
+    first = schema_report.blocks[0]
+    assert isinstance(first, dict)
+    assert "@context" in first
 
     # Canonical tab: self-referencing to requested URL
     canon = payload.canonical
