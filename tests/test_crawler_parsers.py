@@ -101,6 +101,37 @@ def test_title_audit_flags_short_title(soup: BeautifulSoup) -> None:
     }
 
 
+def test_keyword_extraction_returns_rich_metrics(sample_html: str) -> None:
+    soup = BeautifulSoup(sample_html, "html.parser")
+    plain = soup.get_text(" ", strip=True)
+    keywords = crawler._extract_keywords(soup, plain, top_n=5)
+    assert keywords, "expected at least one keyword entry"
+    first = keywords[0]
+    assert "term" in first and isinstance(first["term"], str)
+    assert "frequency" in first and isinstance(first["frequency"], int)
+    assert "density" in first and isinstance(first["density"], float)
+    assert "density_threshold" in first and isinstance(first["density_threshold"], float)
+    assert "density_warning" in first and isinstance(first["density_warning"], bool)
+    assert "in_title" in first and isinstance(first["in_title"], bool)
+    assert "heading_count" in first
+
+
+def test_keyword_density_threshold_env(monkeypatch) -> None:
+    html = """
+    <html>
+      <head><title>focus term focus term</title></head>
+      <body>focus term focus term focus term focus term focus term focus</body>
+    </html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    plain = soup.get_text(" ", strip=True)
+    monkeypatch.setenv("SILENTFROG_KEYWORD_WARN_DENSITY", "1.0")
+    keywords = crawler._extract_keywords(soup, plain, top_n=3)
+    focus = next(item for item in keywords if item["term"] == "focus")
+    assert focus["density_warning"] is True
+    assert focus["density_threshold"] == 1.0
+
+
 def test_schema_extraction_yields_jsonld(sample_html: str) -> None:
     schema = crawler._extract_schema_all(sample_html, "https://example.com/canonical/page")
     assert isinstance(schema, dict), "schema extraction must return a mapping"

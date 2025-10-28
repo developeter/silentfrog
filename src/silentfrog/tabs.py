@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, cast
 
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtGui import QPalette
-from .crawl_types import StructuredDataPayload
+from PyQt5.QtGui import QPalette, QColor
+from .crawl_types import KeywordEntry, StructuredDataPayload
 from .models import (
     MetaModel,
     ImagesModel,
@@ -16,6 +16,7 @@ from .models import (
     HeaderModel,
     LinksModel,
     GenericModel,
+    KeywordModel,
 )
 
 import html as _html
@@ -163,8 +164,113 @@ class AiTab(TableTab):
 
 
 class KeywordsTab(TableTab):
-    def update(self, rows: List[List[str]]) -> None:
-        self.set_model(GenericModel(["Termine", "Freq"], rows))
+    def __init__(self) -> None:
+        super().__init__(sorting=True)
+        self._summary = QtWidgets.QLabel()
+        self._summary.setWordWrap(True)
+        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._entries: List[KeywordEntry] = []
+        self._applying_palette = False
+        layout = self.layout()
+        if layout is not None:
+            layout.insertWidget(0, self._summary)
+
+    def update(self, rows: List[object]) -> None:
+        entries: List[KeywordEntry] = []
+        for item in rows:
+            if isinstance(item, KeywordEntry):
+                entries.append(item)
+            elif isinstance(item, dict):
+                entries.append(KeywordEntry.from_raw(item))
+        self._entries = entries
+        self._summary.setText(self._summary_text(self._entries))
+        model = KeywordModel(entries)
+        self.set_model(model)
+        self.view.setAlternatingRowColors(True)
+        header = _header(self.view)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        for column in range(1, model.columnCount()):
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
+        self._apply_palette()
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() == QtCore.QEvent.Type.PaletteChange:
+            if self._applying_palette:
+                super().changeEvent(event)
+                return
+            self._summary.setText(self._summary_text(self._entries))
+            self._apply_palette()
+        super().changeEvent(event)
+
+    def _apply_palette(self) -> None:
+        if self._applying_palette:
+            return
+        self._applying_palette = True
+        try:
+            is_dark = _is_dark(self)
+            summary_color = "#f0f0f0" if is_dark else "#202124"
+            self._summary.setStyleSheet(f"color:{summary_color}; margin:4px 0;")
+            if is_dark:
+                table_stylesheet = (
+                    "QTableView {"
+                    "background-color:#1e1e1e;"
+                    "color:#f0f0f0;"
+                    "gridline-color:#444444;"
+                    "alternate-background-color:#2b2b2b;"
+                    "selection-background-color:#31475b;"
+                    "selection-color:#ffffff;"
+                    "}"
+                    "QHeaderView::section {"
+                    "background-color:#2b2b2b;"
+                    "color:#f0f0f0;"
+                    "}"
+                )
+            else:
+                table_stylesheet = (
+                    "QTableView {"
+                    "background-color:#ffffff;"
+                    "color:#202124;"
+                    "gridline-color:#d0d4da;"
+                    "alternate-background-color:#f5f7fa;"
+                    "selection-background-color:#dbeafe;"
+                    "selection-color:#202124;"
+                    "}"
+                    "QHeaderView::section {"
+                    "background-color:#f0f2f5;"
+                    "color:#202124;"
+                    "}"
+                )
+            self.view.setStyleSheet(table_stylesheet)
+        finally:
+            self._applying_palette = False
+
+    def _summary_text(self, entries: List[KeywordEntry]) -> str:
+        if not entries:
+            return "<span style='color:#c62828;font-weight:bold'>No keywords extracted.</span>"
+        top_terms = [entry.term for entry in entries if entry.length == 1][:3]
+        dominant = ", ".join(top_terms) if top_terms else "n/a"
+        title_hits = sum(1 for entry in entries if entry.in_title)
+        heading_coverage = sum(1 for entry in entries if entry.heading_count > 0)
+        threshold = max((entry.density_threshold for entry in entries), default=4.0)
+        high_density = [entry for entry in entries if entry.density_warning]
+        alerts = ""
+        if high_density and threshold > 0:
+            flagged = ", ".join(entry.term for entry in high_density[:3])
+            alerts = (
+                f"<br><span style='color:#b26a00'>High density (&gt;{threshold:.2f}%): "
+                f"{flagged} ({len(high_density)} flagged)</span>"
+            )
+        return (
+            "<b>Top focus keywords:</b> {dominant}<br>"
+            "<b>Terms in title:</b> {title_hits} &nbsp; "
+            "<b>Heading coverage:</b> {heading_coverage}"
+            "{alerts}"
+        ).format(
+            dominant=_html.escape(dominant),
+            title_hits=title_hits,
+            heading_coverage=heading_coverage,
+            alerts=alerts,
+        )
 
 
 @dataclass
@@ -178,6 +284,8 @@ class SchemaTab(QtWidgets.QTextEdit):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
+        self._render_state: Dict[str, Any] | None = None
+        self._is_rendering = False
 
     def update(self, payload: Any) -> None:
         report = StructuredDataPayload.from_raw(payload)
@@ -186,15 +294,8 @@ class SchemaTab(QtWidgets.QTextEdit):
             blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in report.fallback_raw]
         if not blocks:
             self.setHtml("<span style='color:red;font-weight:bold'>Structured data not found</span>")
+            self._render_state = None
             return
-
-        is_dark = _is_dark(self)
-        base_bg = '#1e1e1e' if is_dark else '#ffffff'
-        base_fg = '#f0f0f0' if is_dark else '#202124'
-        pre_bg = '#2a2a2a' if is_dark else '#f7f7f7'
-        pre_fg = '#f0f0f0' if is_dark else '#202124'
-        pre_border = '#555555' if is_dark else '#cccccc'
-        self.setStyleSheet(f"background:{base_bg}; color:{base_fg};")
 
         summary = report.summary
         syntax_counts = {name: count for name, count in summary.by_syntax.items() if count}
@@ -206,41 +307,80 @@ class SchemaTab(QtWidgets.QTextEdit):
 
         total = summary.total or sum(syntax_counts.values()) or len(blocks)
         issues = list(summary.errors)
-
-        syntax_labels = {
-            "json-ld": "JSON-LD",
-            "json-ld-raw": "JSON-LD raw",
-            "microdata": "Microdata",
-            "microformat": "Microformat",
-            "opengraph": "OpenGraph",
-            "rdfa": "RDFa",
-        }
-        syntax_text = ", ".join(
-            f"{syntax_labels.get(name, name)} {syntax_counts[name]}"
-            for name in sorted(syntax_counts)
-        ) or "none"
-        type_text = ""
-        if type_counts:
-            type_text = " &nbsp; Types: " + ", ".join(
-                f"{schema_type} x {type_counts[schema_type]}" for schema_type in sorted(type_counts)
-            )
-        color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
-        header = (
-            f"<div style='font-weight:bold;color:{color}'>Structured data: {total} items &nbsp; "
-            f"(Syntax: {syntax_text}){type_text}</div>"
-        )
-
-        unique_issues = list(dict.fromkeys(issues))
-        issue_html = ""
-        if unique_issues:
-            items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in unique_issues)
-            issue_html = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
-
         block_models = [self._build_schema_block(idx, item) for idx, item in enumerate(blocks, start=1)]
-        block_html = "".join(
-            self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in block_models
-        )
-        self.setHtml(header + issue_html + block_html)
+        self._render_state = {
+            "blocks": block_models,
+            "summary": summary,
+            "issues": issues,
+            "syntax_counts": syntax_counts,
+            "type_counts": type_counts,
+            "total": total,
+        }
+        self._render()
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() == QtCore.QEvent.Type.PaletteChange:
+            self._render()
+        super().changeEvent(event)
+
+    def _render(self) -> None:
+        data = self._render_state
+        if not data or self._is_rendering:
+            return
+        self._is_rendering = True
+        is_dark = _is_dark(self)
+        try:
+            base_bg = '#1e1e1e' if is_dark else '#ffffff'
+            base_fg = '#f0f0f0' if is_dark else '#202124'
+            pre_bg = '#2a2a2a' if is_dark else '#f7f7f7'
+            pre_fg = '#f0f0f0' if is_dark else '#202124'
+            pre_border = '#555555' if is_dark else '#cccccc'
+            self.setStyleSheet(f"background:{base_bg}; color:{base_fg};")
+
+            summary = data["summary"]
+            syntax_counts = data["syntax_counts"]
+            type_counts = data["type_counts"]
+            total = data["total"]
+            issues = list(data["issues"])
+
+            syntax_labels = {
+                "json-ld": "JSON-LD",
+                "json-ld-raw": "JSON-LD raw",
+                "microdata": "Microdata",
+                "microformat": "Microformat",
+                "opengraph": "OpenGraph",
+                "rdfa": "RDFa",
+            }
+            syntax_text = ", ".join(
+                f"{syntax_labels.get(name, name)} {syntax_counts[name]}"
+                for name in sorted(syntax_counts)
+                if syntax_counts[name]
+            ) or "none"
+            type_text = ""
+            if type_counts:
+                type_text = " &nbsp; Types: " + ", ".join(
+                    f"{schema_type} ×{type_counts[schema_type]}" for schema_type in sorted(type_counts)
+                )
+            color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
+            header = (
+                f"<div style='font-weight:bold;color:{color}'>Structured data: {total} items &nbsp; "
+                f"(Syntax: {syntax_text}){type_text}</div>"
+            )
+
+            unique_issues = list(dict.fromkeys(issues))
+            if unique_issues:
+                items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in unique_issues)
+                issue_html = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
+            else:
+                issue_html = ""
+
+            block_models: List[_SchemaBlock] = data["blocks"]
+            block_html = "".join(
+                self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in block_models
+            )
+            self.setHtml(header + issue_html + block_html)
+        finally:
+            self._is_rendering = False
 
     @staticmethod
     def _fallback_syntax_counts(blocks: List[Any]) -> Dict[str, int]:

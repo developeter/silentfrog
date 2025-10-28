@@ -135,7 +135,7 @@ async def test_analyse(local_server):
     assert audit.missing == "No"
 
     # Keywords tab: extracted tokens include hello (appears twice in body)
-    assert any(row[0] == "hello" for row in payload.keywords if row[0])
+    assert any(entry.term == "hello" for entry in payload.keywords)
 
 
 @pytest.mark.asyncio

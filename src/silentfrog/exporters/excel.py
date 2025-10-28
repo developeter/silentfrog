@@ -583,9 +583,23 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             _audit_formatter,
         )
 
+        keyword_rows = [
+            [
+                entry.term,
+                f"{entry.length}-gram",
+                str(entry.frequency),
+                f"{entry.density:.2f}",
+                "Yes" if entry.in_title else "No",
+                "Yes" if entry.in_description else "No",
+                str(entry.heading_count),
+                "-" if entry.first_position is None else str(entry.first_position + 1),
+            ]
+            for entry in payload.keywords
+        ]
+
         _write_sheet(
             workbook,
             "Keywords",
-            ["Keyword / Ngram", "Frequency"],
-            _stringify_rows(payload.keywords),
+            ["Keyword", "Type", "Frequency", "Density %", "In Title", "Meta Description", "Headings", "1st Occurrence"],
+            keyword_rows or [["-", "-", "-", "-", "-", "-", "-", "-"]],
         )

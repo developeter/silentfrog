@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple, Type
 
 import pytest
-from PyQt5 import QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from silentfrog.crawl_types import CrawlPayload
 from silentfrog.seo_gui import WebpageSeoWindow
@@ -112,7 +112,32 @@ def _sample_payload() -> CrawlPayload:
             "px_len": "100",
             "char_len": "10",
         },
-        "keywords": [["keyword", "5"]],
+        "keywords": [
+            {
+                "term": "example",
+                "length": 1,
+                "frequency": 5,
+                "density": 3.2,
+                "density_threshold": 4.0,
+                "density_warning": False,
+                "in_title": True,
+                "in_description": True,
+                "heading_count": 1,
+                "first_position": 0,
+            },
+            {
+                "term": "sample page",
+                "length": 2,
+                "frequency": 2,
+                "density": 1.0,
+                "density_threshold": 4.0,
+                "density_warning": False,
+                "in_title": False,
+                "in_description": False,
+                "heading_count": 1,
+                "first_position": 5,
+            },
+        ],
     }
     return CrawlPayload.from_raw(raw)
 
@@ -191,7 +216,29 @@ TABLE_TAB_CASES: Tuple[
             3: QtWidgets.QHeaderView.ResizeToContents,
         },
     ),
-    (KeywordsTab, ([["python", "4"]],), {}),
+    (
+        KeywordsTab,
+        (
+            [
+                {
+                    "term": "python",
+                    "length": 1,
+                    "frequency": 4,
+                    "density": 2.5,
+                    "density_threshold": 4.0,
+                    "density_warning": False,
+                    "in_title": False,
+                    "in_description": True,
+                    "heading_count": 1,
+                    "first_position": 3,
+                }
+            ],
+        ),
+        {
+            0: QtWidgets.QHeaderView.Stretch,
+            3: QtWidgets.QHeaderView.ResizeToContents,
+        },
+    ),
 )
 
 
@@ -215,6 +262,77 @@ def test_table_tab_update_sets_model_and_resizing(
     assert isinstance(header, QtWidgets.QHeaderView)
     for section, expected_mode in resize_modes.items():
         assert header.sectionResizeMode(section) == expected_mode
+
+
+def test_schema_tab_theme_toggle(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    payload = [
+        {
+            "_schema_summary": {
+                "total": 1,
+                "by_syntax": {"json-ld": 1},
+                "by_type": {"WebPage": 1},
+                "errors": [],
+            }
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            "_extracted_via": "json-ld",
+        },
+    ]
+    dark_palette = tab.palette()
+    dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
+    tab.setPalette(dark_palette)
+    tab.update(payload)
+    assert "#1e1e1e" in tab.styleSheet()
+
+    light_palette = tab.palette()
+    light_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(255, 255, 255))
+    tab.setPalette(light_palette)
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    assert "#ffffff" in tab.styleSheet()
+
+    dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
+    tab.setPalette(dark_palette)
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    assert "#1e1e1e" in tab.styleSheet()
+
+
+def test_keywords_tab_theme_toggle(qtbot):
+    tab = KeywordsTab()
+    qtbot.addWidget(tab)
+    payload = [
+        {
+            "term": "example",
+            "length": 1,
+            "frequency": 5,
+            "density": 3.2,
+            "density_threshold": 4.0,
+            "density_warning": False,
+            "in_title": True,
+            "in_description": False,
+            "heading_count": 1,
+            "first_position": 0,
+        }
+    ]
+    dark_palette = tab.palette()
+    dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
+    tab.setPalette(dark_palette)
+    tab.update(payload)
+    assert "#1e1e1e" in tab.view.styleSheet()
+
+    light_palette = tab.palette()
+    light_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(255, 255, 255))
+    tab.setPalette(light_palette)
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    assert "#ffffff" in tab.view.styleSheet()
+
+    dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
+    tab.setPalette(dark_palette)
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    assert "#1e1e1e" in tab.view.styleSheet()
 
 
 def test_robots_tab_appends_empty_state(qtbot):

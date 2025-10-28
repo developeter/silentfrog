@@ -8,6 +8,7 @@ from .hreflang import HreflangModel
 from .serp_audit import SerpAuditModel
 from .headers import HeaderModel
 from .links import LinksModel
+from .keywords import KeywordModel
 
 __all__ = [
     "GenericModel",
@@ -21,4 +22,5 @@ __all__ = [
     "SerpAuditModel",
     "HeaderModel",
     "LinksModel",
+    "KeywordModel",
 ]

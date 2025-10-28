@@ -191,6 +191,76 @@ class StructuredDataPayload:
 
 
 @dataclass(frozen=True)
+class KeywordEntry:
+    term: str
+    length: int
+    frequency: int
+    density: float
+    density_threshold: float
+    density_warning: bool
+    in_title: bool
+    in_description: bool
+    heading_count: int
+    first_position: int | None
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> KeywordEntry:
+        def _to_float(raw: Any, default: float = 0.0) -> float:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return default
+
+        def _to_int(raw: Any, default: int = 0) -> int:
+            try:
+                if isinstance(raw, bool):
+                    return default
+                return int(raw)
+            except (TypeError, ValueError):
+                return default
+
+        first_raw = value.get("first_position")
+        first_position = None
+        if isinstance(first_raw, (int, float)) and not isinstance(first_raw, bool):
+            first_position = int(first_raw)
+        else:
+            try:
+                first_position = int(str(first_raw))
+            except (TypeError, ValueError):
+                first_position = None
+
+        return cls(
+            term=str(value.get("term", "")),
+            length=_to_int(value.get("length", 1), 1),
+            frequency=_to_int(value.get("frequency", 0), 0),
+            density=_to_float(value.get("density", 0.0)),
+            density_threshold=_to_float(value.get("density_threshold", 4.0), 4.0),
+            density_warning=bool(value.get("density_warning", False)),
+            in_title=bool(value.get("in_title", False)),
+            in_description=bool(value.get("in_description", False)),
+            heading_count=_to_int(value.get("heading_count", 0), 0),
+            first_position=first_position if first_position is not None and first_position >= 0 else None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "term": self.term,
+            "length": self.length,
+            "frequency": self.frequency,
+            "density": self.density,
+            "density_threshold": self.density_threshold,
+            "density_warning": self.density_warning,
+            "in_title": self.in_title,
+            "in_description": self.in_description,
+            "heading_count": self.heading_count,
+            "first_position": self.first_position if self.first_position is not None else -1,
+        }
+
+    def formatted_density(self) -> str:
+        return f"{self.density:.2f}"
+
+
+@dataclass(frozen=True)
 class CanonicalInfo:
     target: str
     is_self: bool
@@ -325,7 +395,7 @@ class CrawlPayload:
     ai_crawl: List[List[str]]
     serp: SerpPreview
     serp_audit: SerpAudit
-    keywords: List[List[str]]
+    keywords: List[KeywordEntry]
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -368,7 +438,7 @@ class CrawlPayload:
             ai_crawl=_normalize_rows(data["ai_crawl"], label="ai_crawl"),
             serp=SerpPreview.from_raw(serp_raw),
             serp_audit=SerpAudit.from_raw(serp_audit_raw),
-            keywords=_normalize_rows(data["keywords"], label="keywords"),
+            keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
         )
 
     def to_mapping(self) -> Dict[str, Any]:
@@ -386,7 +456,7 @@ class CrawlPayload:
             "ai_crawl": [row[:] for row in self.ai_crawl],
             "serp": self.serp.to_dict(),
             "serp_audit": self.serp_audit.to_dict(),
-            "keywords": [row[:] for row in self.keywords],
+            "keywords": [entry.to_dict() for entry in self.keywords],
         }
 
     def __getitem__(self, key: str) -> Any:
@@ -403,5 +473,6 @@ __all__ = [
     "SerpAudit",
     "StructuredDataPayload",
     "StructuredDataSummary",
+    "KeywordEntry",
     "CrawlPayload",
 ]

@@ -73,7 +73,20 @@ def _sample_payload() -> CrawlPayload:
             "px_len": "100",
             "char_len": "10",
         },
-        "keywords": [["keyword", "5"]],
+        "keywords": [
+            {
+                "term": "example",
+                "length": 1,
+                "frequency": 5,
+                "density": 3.2,
+                "density_threshold": 4.0,
+                "density_warning": False,
+                "in_title": True,
+                "in_description": True,
+                "heading_count": 1,
+                "first_position": 0,
+            }
+        ],
     }
     return CrawlPayload.from_raw(raw)
 
