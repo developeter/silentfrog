@@ -16,9 +16,10 @@ from urllib.parse import urljoin, urlparse, urlunparse, unquote
 from urllib.robotparser import RobotFileParser
 from base64 import b64encode
 from textwrap import shorten
-from .http_client import fetch_page, head_status, fetch_text
+from .http_client import fetch_page, head_status, fetch_text, HttpResponse
 from .crawler_utils import _attr, _hr_size
 from .crawl_types import CrawlPayload
+from .perf_guides import PerformanceContext, open_source_hints
 
 import asyncio
 import re
@@ -663,6 +664,176 @@ _SCHEMA_VALIDATORS: Dict[str, Callable[[Dict[str, Any]], List[str]]] = {
 }
 
 
+_RESOURCE_FETCH_LIMIT = 20
+_RESOURCE_BYTES_TIMEOUT = 5
+_RESOURCE_BODY_SAMPLE = 512_000
+
+
+def _data_uri_size(data_uri: str) -> int:
+    if not data_uri.startswith("data:"):
+        return 0
+    if ";base64," in data_uri:
+        encoded = data_uri.split(";base64,", 1)[1]
+        padding = encoded.count("=")
+        return int(len(encoded) * 3 / 4) - padding
+    if "," in data_uri:
+        payload = data_uri.split(",", 1)[1]
+        return len(payload.encode("utf-8"))
+    return 0
+
+
+async def _measure_remote_resources(targets: Dict[str, List[str]]) -> Dict[str, int]:
+    aggregated = {key: 0 for key in targets}
+    url_bucket: list[tuple[str, str]] = []
+    for resource_type, urls in targets.items():
+        seen: set[str] = set()
+        for url in urls:
+            if url in seen:
+                continue
+            seen.add(url)
+            if len(seen) > _RESOURCE_FETCH_LIMIT:
+                break
+            url_bucket.append((resource_type, url))
+
+    if not url_bucket:
+        return aggregated
+
+    timeout = ClientTimeout(total=_RESOURCE_BYTES_TIMEOUT)
+    connector = aiohttp.TCPConnector(ssl=False)
+    semaphore = asyncio.Semaphore(6)
+
+    async with aiohttp.ClientSession(connector=connector) as session:
+        async def _probe(resource_type: str, url: str) -> tuple[str, int]:
+            async with semaphore:
+                async def _size_via_get() -> int:
+                    try:
+                        async with session.get(url, allow_redirects=True, timeout=timeout) as resp:
+                            length = resp.headers.get("Content-Length")
+                            if length is not None:
+                                return max(int(length), 0)
+                            total = 0
+                            async for chunk in resp.content.iter_chunked(16384):
+                                total += len(chunk)
+                                if total >= _RESOURCE_BODY_SAMPLE:
+                                    break
+                            return total
+                    except Exception:
+                        return 0
+                    return 0
+
+                try:
+                    async with session.head(url, allow_redirects=True, timeout=timeout) as resp:
+                        length = resp.headers.get("Content-Length")
+                        if length is not None:
+                            value = max(int(length), 0)
+                            if value:
+                                return resource_type, value
+                except aiohttp.ClientResponseError as exc:
+                    if exc.status not in {403, 405}:
+                        return resource_type, 0
+                except Exception:
+                    pass
+                fallback_size = await _size_via_get()
+                if fallback_size:
+                    return resource_type, fallback_size
+                return resource_type, 0
+
+        results = await asyncio.gather(*(_probe(r_type, url) for r_type, url in url_bucket))
+
+    for resource_type, size in results:
+        if size > 0:
+            aggregated[resource_type] += size
+    return aggregated
+
+
+async def _collect_performance_metrics(response: HttpResponse, soup: BeautifulSoup) -> dict[str, object]:
+    transfer_size = len(response.body.encode("utf-8", errors="ignore"))
+    resources: Dict[str, Dict[str, int]] = {
+        "css": {"count": 0, "bytes": 0},
+        "js": {"count": 0, "bytes": 0},
+        "img": {"count": 0, "bytes": 0},
+        "font": {"count": 0, "bytes": 0},
+    }
+    fetch_targets: Dict[str, List[str]] = {key: [] for key in resources.keys()}
+    base_url = response.url
+
+    def _register(resource_type: str, raw_url: str) -> None:
+        url = raw_url.strip()
+        if not url:
+            return
+        resources[resource_type]["count"] += 1
+        if url.startswith("data:"):
+            resources[resource_type]["bytes"] += _data_uri_size(url)
+            return
+        absolute = urljoin(base_url, url)
+        parsed = urlparse(absolute)
+        if parsed.scheme in {"http", "https"}:
+            fetch_targets[resource_type].append(urlunparse(parsed))
+
+    for link in soup.find_all("link"):
+        rel_tokens = {token.lower() for token in (link.get("rel") or [])}
+        href = link.get("href") or ""
+        if not href:
+            continue
+        if "stylesheet" in rel_tokens or (link.get("type") or "").lower() == "text/css":
+            _register("css", href)
+            continue
+        if "preload" in rel_tokens:
+            target = (link.get("as") or "").lower()
+            if target in resources:
+                _register(target, href)
+                continue
+        if any("font" in token for token in rel_tokens):
+            _register("font", href)
+
+    for script in soup.find_all("script"):
+        src = script.get("src")
+        if src:
+            _register("js", src)
+        else:
+            text = script.string or ""
+            if text:
+                resources["js"]["bytes"] += len(text.encode("utf-8"))
+
+    for img in soup.find_all("img"):
+        src = img.get("src")
+        if src:
+            _register("img", src)
+
+    remote_sizes = await _measure_remote_resources(fetch_targets)
+    for resource_type, size in remote_sizes.items():
+        resources[resource_type]["bytes"] += size
+
+    opportunities: list[str] = []
+    if transfer_size > 800_000:
+        opportunities.append(
+            "Main document size exceeds 800 KB; consider compression or trimming inline data."
+        )
+    if resources["js"]["count"] > 20:
+        opportunities.append("More than 20 external scripts detected; bundle or defer non-critical JS.")
+    if resources["css"]["count"] > 10:
+        opportunities.append("High stylesheet count; inline critical CSS and combine static files.")
+
+    context = PerformanceContext(
+        transfer_size=transfer_size,
+        css_count=resources["css"]["count"],
+        js_count=resources["js"]["count"],
+        img_count=resources["img"]["count"],
+        font_count=resources["font"]["count"],
+        nav_total_ms=response.total_ms,
+        nav_ttfb_ms=response.ttfb_ms,
+    )
+    opportunities.extend(open_source_hints(context))
+
+    return {
+        "nav_ttfb_ms": response.ttfb_ms,
+        "nav_total_ms": response.total_ms,
+        "transfer_size": transfer_size,
+        "status": response.status,
+        "resource_summary": resources,
+        "opportunities": opportunities,
+    }
+
 def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
     """
     Structured data extraction (robust, logged, still lightweight):
@@ -1106,13 +1277,14 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
     resp = await fetch_page(url, timeout)
     soup = BeautifulSoup(resp.body, "html.parser")
     structured_data = _extract_schema_all(resp.body, resp.url)
+    performance_metrics = await _collect_performance_metrics(resp, soup)
     # rimuovi commenti e script/style per trovare keyword
     for tag in soup.find_all(["script", "style"]):
         tag.extract()
     for c in soup.find_all(string=lambda t: isinstance(t, Comment)):
         c.extract()
     plain = soup.get_text(separator=" ", strip=True)
-    
+
     # estrae le righe "grezze" (status ancora vuoto)
     links_rows: list[list[str]] = _extract_links(resp.url, soup)
 
@@ -1166,6 +1338,7 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
         "serp": serp_snippet,
         "serp_audit": title_audit,
         "keywords": _extract_keywords(soup, plain),
+        "performance": performance_metrics,
     }
 
     return CrawlPayload.from_raw(raw_payload)

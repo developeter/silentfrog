@@ -4,11 +4,11 @@ Silentfrog is a **simple desktop SEO auditor** built with Python 3.11 / 3.12 and
 
 It lets you quickly:
 
-| Capability                                                          | Status |
-| ------------------------------------------------------------------- | ------ |
-| Bulk-check redirects from Excel                                     | ✅     |
-| Single-page SEO analyser (meta, headers, images, links, structured data) | ✅     |
-| Export results to Excel                                             | ✅     |
+| Capability                                                                  | Status |
+| --------------------------------------------------------------------------- | ------ |
+| Bulk-check redirects from Excel                                             | ✅     |
+| Single-page SEO analyser (meta, headers, images, links, structured data, performance) | ✅     |
+| Export results to Excel                                                     | ✅     |
 
 ---
 
@@ -49,7 +49,7 @@ $ poetry run silentfrog
 
 1. Run a page analysis with **Analizza**.
 2. Click **Esporta Excel** and pick a filename (the `.xlsx` extension is appended if missing).
-3. Each tab is exported to its own worksheet (Meta, Headers, Images, Links, Redirect, Canonical, Robots, Hreflang, AI crawl, Structured data, SERP preview/audit, Keywords, Keyword Alerts).
+3. Each tab is exported to its own worksheet (Meta, Headers, Images, Links, Redirect, Canonical, Robots, Hreflang, AI crawl, Structured data, Performance, SERP preview/audit, Keywords, Keyword Alerts).
 4. Re-run the export after a new crawl to refresh the workbook.
 
 ### Keyword analysis & fine tuning
@@ -65,6 +65,23 @@ set SILENTFROG_KEYWORD_WARN_DENSITY=6.5      # Windows Command Prompt
 ```
 
 Set the value back to blank (or `0`) to disable the warning altogether.
+
+### Performance metrics & open-source guidance
+
+The **Performance** tab (and the corresponding Excel worksheet) displays:
+
+- navigation timings (HTTP status, Time To First Byte, total navigation time, transfer size);
+- resource mix (per-type request counts and approximate weights for CSS, JS, images, fonts);
+- opportunity hints whenever payloads look heavy or script/stylesheet counts climb.
+
+Silentfrog can also suggest **open-source learning resources** (HTTP Archive Web Almanac, Google’s RAIL model, Web Vitals patterns). Toggle them with:
+
+```bash
+export SILENTFROG_PERF_GUIDES=0     # macOS / Linux
+set SILENTFROG_PERF_GUIDES=0        # Windows CMD
+```
+
+Unset the variable (or set it to `1`) to re-enable the guidance.
 
 ### macOS first-run issues
 

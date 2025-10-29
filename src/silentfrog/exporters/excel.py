@@ -8,7 +8,7 @@ from typing import Any, Callable, List, Sequence
 
 import xlsxwriter
 
-from ..crawl_types import CrawlPayload
+from ..crawl_types import CrawlPayload, PerformanceMetrics
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
 
@@ -118,12 +118,60 @@ def _schema_type_label(value: Any) -> str:
     return text.strip()
 
 
+def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: PerformanceMetrics) -> None:
+    worksheet = workbook.add_worksheet("Performance")
+    worksheet.freeze_panes(1, 0)
+
+    summary_rows = [
+        ("HTTP status", "-" if performance.status == 0 else str(performance.status)),
+        ("TTFB (ms)", f"{performance.nav_ttfb_ms:.0f}"),
+        ("Total (ms)", f"{performance.nav_total_ms:.0f}"),
+        ("Transfer (KB)", f"{performance.transfer_size / 1024:.1f}"),
+    ]
+    worksheet.write_row(0, 0, ["Metric", "Value"])
+    for idx, (label, value) in enumerate(summary_rows, start=1):
+        worksheet.write(idx, 0, label)
+        worksheet.write(idx, 1, value)
+
+    resource_rows = []
+    for resource, info in sorted(performance.resource_summary.items()):
+        count = info.get("count", 0)
+        bytes_val = info.get("bytes", 0)
+        resource_rows.append(
+            [
+                resource.upper(),
+                str(count),
+                f"{bytes_val / 1024:.1f} KB",
+            ]
+        )
+    if not resource_rows:
+        resource_rows = [["-", "-", "-"]]
+
+    resource_start = len(summary_rows) + 2
+    worksheet.write_row(resource_start, 0, ["Resource", "Count", "Bytes"])
+    for offset, row in enumerate(resource_rows, start=1):
+        worksheet.write_row(resource_start + offset, 0, row)
+
+    opp_start = resource_start + len(resource_rows) + 2
+    worksheet.write(opp_start, 0, "Opportunities")
+    wrap = workbook.add_format({"text_wrap": True})
+    if performance.opportunities:
+        for offset, item in enumerate(performance.opportunities, start=1):
+            worksheet.write(opp_start + offset, 0, item, wrap)
+    else:
+        worksheet.write(opp_start + 1, 0, "-")
+
+    worksheet.set_column(0, 0, 80)
+    worksheet.set_column(1, 1, 18)
+
+
 def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _Formats(workbook)
+        _write_performance_sheet(workbook, payload.performance)
 
         raw_meta = [list(row) for row in payload.meta]
         names = [(row[0] or "").lower() for row in raw_meta]

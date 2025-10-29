@@ -29,6 +29,9 @@ PNG_BYTES = (
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00"
     b"\x00\x00\x04\x00\x01\x0b\xe7\x02\xb5\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+CSS_BYTES = b"body{color:#333;background:#fff;margin:0;}\n"
+JS_BYTES = b"console.log('fixture');"
+FONT_BYTES = b"wOFF2fixture-font-data"
 
 
 @pytest.fixture
@@ -47,12 +50,24 @@ async def local_server(aiohttp_server):
     async def _robots(_):
         return web.Response(text=ROBOTS_TEXT, content_type="text/plain")
 
+    async def _css(_):
+        return web.Response(body=CSS_BYTES, content_type="text/css")
+
+    async def _js(_):
+        return web.Response(body=JS_BYTES, content_type="application/javascript")
+
+    async def _font(_):
+        return web.Response(body=FONT_BYTES, content_type="font/woff2")
+
     app = web.Application()
     app.router.add_route("GET", "/", _html)
     app.router.add_route("HEAD", "/", _html)
     app.router.add_get("/logo.png", _png)
     app.router.add_get("/favicon.ico", _ico)
     app.router.add_get("/robots.txt", _robots)
+    app.router.add_get("/styles.css", _css)
+    app.router.add_get("/app.js", _js)
+    app.router.add_get("/font.woff2", _font)
 
     server = await aiohttp_server(app)
     return str(server.make_url("/"))
@@ -137,6 +152,15 @@ async def test_analyse(local_server):
     # Keywords tab: extracted tokens include hello (appears twice in body)
     assert any(entry.term == "hello" for entry in payload.keywords)
 
+    perf = payload.performance
+    assert perf.transfer_size >= 0
+    summary = perf.resource_summary
+    assert summary["css"]["count"] >= 1
+    assert summary["css"]["bytes"] >= len(CSS_BYTES)
+    assert summary["js"]["count"] >= 1
+    assert summary["js"]["bytes"] >= len(JS_BYTES)
+    assert summary["img"]["bytes"] >= len(PNG_BYTES)
+    assert summary["font"]["bytes"] >= len(FONT_BYTES)
 
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):

@@ -1,10 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, cast
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPalette, QColor
-from .crawl_types import KeywordEntry, StructuredDataPayload
+from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics
 from .models import (
     MetaModel,
     ImagesModel,
@@ -114,9 +114,9 @@ class LinksTab(TableTab):
 
 class RedirectTab(TableTab):
     def update(self, data: Dict[str, object]) -> None:
-        chain = " → ".join(data.get("chain", []) or [])
+        chain = " ? ".join(data.get("chain", []) or [])
         rows = [
-            ["Redirect chain", chain or "—"],
+            ["Redirect chain", chain or ""],
             ["Hop count", str(data.get("hops", ""))],
             ["Final status", data.get("final_status", "")],
             ["Loop detected", "Yes" if data.get("loop") else "No"],
@@ -128,17 +128,17 @@ class RedirectTab(TableTab):
 class CanonicalTab(TableTab):
     def update(self, data: Dict[str, object]) -> None:
         rows = [
-            ["Canonical URL", data.get("target", "") or "—"],
+            ["Canonical URL", data.get("target", "") or ""],
             ["Self-referencing", "Yes" if data.get("self") else "No"],
             ["Multiple canonicals", "Yes" if data.get("multiple") else "No"],
-            ["Canonical status", data.get("status", "") or "—"],
+            ["Canonical status", data.get("status", "") or ""],
         ]
         self.set_model(CanonicalModel(["Check", "Value"], rows))
 
 
 class RobotsTab(TableTab):
     def update(self, meta_robots: str, robots_map: Dict[str, List[tuple[str, str]]]) -> None:
-        rows: List[List[str]] = [["Meta / X-Robots-Tag", meta_robots or "—"], ["", ""]]
+        rows: List[List[str]] = [["Meta / X-Robots-Tag", meta_robots or ""], ["", ""]]
         for agent, directives in robots_map.items():
             rows.append([f"User-Agent: {agent}", ""])
             rows.extend([[verb, path] for verb, path in directives])
@@ -273,6 +273,62 @@ class KeywordsTab(TableTab):
         )
 
 
+class PerformanceTab(TableTab):
+    def __init__(self) -> None:
+        super().__init__(sorting=True)
+        self._summary = QtWidgets.QLabel()
+        self._summary.setWordWrap(True)
+        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._opportunities = QtWidgets.QLabel()
+        self._opportunities.setWordWrap(True)
+        layout = self.layout()
+        if layout is not None:
+            layout.insertWidget(0, self._summary)
+            layout.addWidget(self._opportunities)
+
+    def update(self, data: object) -> None:
+        metrics = PerformanceMetrics.empty()
+        if isinstance(data, PerformanceMetrics):
+            metrics = data
+        elif isinstance(data, dict):
+            metrics = PerformanceMetrics.from_raw(data)
+
+        summary_html = (
+            f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
+            f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
+            f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
+            f"<b>Transfer:</b> {metrics.transfer_size / 1024:.1f} KB"
+        )
+        self._summary.setText(summary_html)
+
+        rows: List[List[str]] = []
+        for r_type, info in metrics.resource_summary.items():
+            rows.append(
+                [
+                    r_type.upper(),
+                    str(info.get("count", 0)),
+                    f"{info.get('bytes', 0) / 1024:.1f} KB",
+                ]
+            )
+        if not rows:
+            rows = [["-", "-", "-"]]
+        model = GenericModel(["Resource", "Count", "Bytes"], rows)
+        self.set_model(model)
+        header = _header(self.view)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+
+        if metrics.opportunities:
+            items_html = "".join(f"<li>{_html.escape(item)}</li>" for item in metrics.opportunities)
+            self._opportunities.setText(f"<b>Opportunities</b><ul>{items_html}</ul>")
+        else:
+            self._opportunities.setText("")
+
+    def clear(self) -> None:
+        self.update({})
+
+
 @dataclass
 class _SchemaBlock:
     label: str
@@ -359,7 +415,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             type_text = ""
             if type_counts:
                 type_text = " &nbsp; Types: " + ", ".join(
-                    f"{schema_type} ×{type_counts[schema_type]}" for schema_type in sorted(type_counts)
+                    f"{schema_type} {type_counts[schema_type]}" for schema_type in sorted(type_counts)
                 )
             color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
             header = (
@@ -485,7 +541,7 @@ class SerpTab(QtWidgets.QWidget):
     def update(self, serp: Dict[str, str], audit: Dict[str, str]) -> None:
         description = serp.get('description', '')
         if len(description) > 160:
-            description = description[:157].rstrip() + '…'
+            description = description[:157].rstrip() + ''
 
         self.preview.setStyleSheet('background:#ffffff;color:#202124;border:1px solid #d0d0d0;')
         favicon_html = ''
@@ -548,6 +604,7 @@ __all__ = [
     "HreflangTab",
     "AiTab",
     "KeywordsTab",
+    "PerformanceTab",
     "SchemaTab",
     "SerpTab",
 ]

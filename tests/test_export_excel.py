@@ -87,6 +87,21 @@ def _sample_payload() -> CrawlPayload:
                 "first_position": 0,
             }
         ],
+        "performance": {
+            "nav_ttfb_ms": 220.0,
+            "nav_total_ms": 4200.0,
+            "transfer_size": 2100000,
+            "status": 200,
+            "resource_summary": {
+                "css": {"count": 12, "bytes": 96000},
+                "js": {"count": 35, "bytes": 420000},
+                "img": {"count": 18, "bytes": 580000},
+            },
+            "opportunities": [
+                "HTTP Archive Web Almanac (open source): Page weight is above 1.5 MB; compare with the community benchmarks (https://almanac.httparchive.org/en/2023/performance#page-weight)",
+                "High stylesheet count; inline critical CSS and combine static files.",
+            ],
+        },
     }
     return CrawlPayload.from_raw(raw)
 
@@ -105,6 +120,7 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert "SERP Preview" in workbook.sheetnames
         assert "Structured summary" in workbook.sheetnames
         assert "Structured data" in workbook.sheetnames
+        assert "Performance" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
         assert meta_sheet["A2"].value == "title"
@@ -136,5 +152,14 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert robots_sheet["A4"].value == "Allow"
         assert robots_sheet["B4"].value == "/"
         assert robots_sheet["B4"].fill.start_color.rgb == "FFD1E7DD"
+
+        performance_sheet = workbook["Performance"]
+        assert performance_sheet["A2"].value == "HTTP status"
+        assert performance_sheet["B2"].value == "200"
+        assert performance_sheet["A7"].value == "Resource"
+        assert performance_sheet["A8"].value == "CSS"
+        assert performance_sheet["B8"].value == "12"
+        assert performance_sheet["A12"].value == "Opportunities"
+        assert "HTTP Archive Web Almanac" in performance_sheet["A13"].value
     finally:
         workbook.close()

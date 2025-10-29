@@ -16,6 +16,7 @@ from silentfrog.tabs import (
     ImagesTab,
     HreflangTab,
     KeywordsTab,
+    PerformanceTab,
     LinksTab,
     MetaTab,
     RedirectTab,
@@ -112,6 +113,7 @@ def _sample_payload() -> CrawlPayload:
             "px_len": "100",
             "char_len": "10",
         },
+        "performance": {"nav_ttfb_ms": 120.0, "nav_total_ms": 450.0, "transfer_size": 180000, "status": 200, "resource_summary": {"css": {"count": 4, "bytes": 42000}, "js": {"count": 6, "bytes": 88000}, "img": {"count": 10, "bytes": 220000}, "font": {"count": 1, "bytes": 16000}}, "opportunities": ["Enable compression for hero.jpg"]},
         "keywords": [
             {
                 "term": "example",
@@ -138,39 +140,36 @@ def _sample_payload() -> CrawlPayload:
                 "first_position": 5,
             },
         ],
+        "performance": {
+            "nav_ttfb_ms": 120.0,
+            "nav_total_ms": 450.0,
+            "transfer_size": 180000,
+            "status": 200,
+            "resource_summary": {
+                "css": {"count": 4, "bytes": 42000},
+                "js": {"count": 6, "bytes": 88000},
+                "img": {"count": 10, "bytes": 220000},
+            },
+            "opportunities": ["Enable compression for hero.jpg"],
+        },
     }
     return CrawlPayload.from_raw(raw)
-
-
-def test_seo_window_exposes_expected_tabs(qtbot):
-    win = WebpageSeoWindow()
-    qtbot.addWidget(win)
-    win.show()
-
-    assert win.tabs.count() == 12
-    labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
-    assert labels == [
-        "Meta tag",
-        "Header H1-H6",
-        "Images",
-        "Link",
-        "Redirect",
-        "Canonical",
-        "Robots",
-        "Hreflang",
-        "Structured data",
-        "Keywords",
-        "AI crawl",
-        "SERP",
-    ]
 
 
 TABLE_TAB_CASES: Tuple[
     Tuple[Type[QtWidgets.QWidget], Tuple[object, ...], Dict[int, QtWidgets.QHeaderView.ResizeMode]],
     ...,
 ] = (
-    (MetaTab, ([["description", "Example description", "150"]],), {}),
-    (HeadersTab, ([["h1", "Heading"]],), {}),
+    (
+        MetaTab,
+        ([["description", "Example description", "150"]],),
+        {},
+    ),
+    (
+        HeadersTab,
+        ([["h1", "Heading"]],),
+        {},
+    ),
     (
         ImagesTab,
         ([["https://example.com/img.png", "Alt", "Title", "640", "480", "18 KB"]],),
@@ -195,12 +194,22 @@ TABLE_TAB_CASES: Tuple[
     ),
     (
         CanonicalTab,
-        ({"target": "https://example.com", "self": True, "multiple": False, "status": "200"},),
+        (
+            {
+                "target": "https://example.com",
+                "self": True,
+                "multiple": False,
+                "status": "200",
+            },
+        ),
         {},
     ),
     (
         RobotsTab,
-        ("noindex", {"*": [("Allow", "/"), ("Disallow", "/tmp")]}),
+        (
+            "noindex",
+            {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
+        ),
         {1: QtWidgets.QHeaderView.Stretch},
     ),
     (
@@ -239,7 +248,48 @@ TABLE_TAB_CASES: Tuple[
             3: QtWidgets.QHeaderView.ResizeToContents,
         },
     ),
+    (
+        PerformanceTab,
+        (
+            {
+                "nav_ttfb_ms": 120.0,
+                "nav_total_ms": 450.0,
+                "transfer_size": 180000,
+                "status": 200,
+                "resource_summary": {
+                    "css": {"count": 4, "bytes": 42000},
+                    "js": {"count": 6, "bytes": 88000},
+                    "img": {"count": 10, "bytes": 220000},
+                },
+                "opportunities": ["Enable compression for hero.jpg"],
+            },
+        ),
+        {0: QtWidgets.QHeaderView.Stretch},
+    ),
 )
+
+def test_seo_window_exposes_expected_tabs(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win.show()
+
+    assert win.tabs.count() == 13
+    labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
+    assert labels == [
+        "Meta tag",
+        "Header H1-H6",
+        "Images",
+        "Link",
+        "Redirect",
+        "Canonical",
+        "Robots",
+        "Hreflang",
+        "Structured data",
+        "Keywords",
+        "AI crawl",
+        "Performance",
+        "SERP",
+    ]
 
 
 @pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
@@ -334,6 +384,39 @@ def test_keywords_tab_theme_toggle(qtbot):
     tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
     assert "#1e1e1e" in tab.view.styleSheet()
 
+
+def test_performance_tab_renders_summary_and_opportunities(qtbot):
+    tab = PerformanceTab()
+    qtbot.addWidget(tab)
+
+    payload = {
+        "status": 200,
+        "nav_ttfb_ms": 135.0,
+        "nav_total_ms": 780.0,
+        "transfer_size": 512000,
+        "resource_summary": {
+            "js": {"count": 5, "bytes": 40960},
+            "img": {"count": 2, "bytes": 81920},
+        },
+        "opportunities": ["Bundle JavaScript files"],
+    }
+
+    tab.update(payload)
+
+    summary_text = tab._summary.text()
+    assert "Status:" in summary_text
+    assert "TTFB:" in summary_text
+    assert "Transfer:" in summary_text
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 2
+    header = tab.view.horizontalHeader()
+    assert isinstance(header, QtWidgets.QHeaderView)
+    assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Stretch
+    assert model.data(model.index(0, 2)) == "40.0 KB"
+
+    assert "Bundle JavaScript files" in tab._opportunities.text()
 
 def test_robots_tab_appends_empty_state(qtbot):
     tab = RobotsTab()

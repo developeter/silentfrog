@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,7 @@ from .tabs import (
     HreflangTab,
     AiTab,
     KeywordsTab,
+    PerformanceTab,
     SchemaTab,
     SerpTab,
 )
@@ -105,7 +106,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.keywords_tab, "Keywords")
 
         self.ai_tab = AiTab()
+        self.performance_tab = PerformanceTab()
         self.tabs.addTab(self.ai_tab, "AI crawl")
+        self.tabs.addTab(self.performance_tab, "Performance")
 
         self.serp_tab = SerpTab()
         self.tabs.addTab(self.serp_tab, "SERP")
@@ -180,6 +183,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.hreflang_tab.update([])
         self.keywords_tab.update([])
         self.ai_tab.update([])
+        self.performance_tab.update({})
         self.schema_tab.update({})
         self.serp_tab.update({}, {})
         self.btn_export.setEnabled(False)
@@ -244,6 +248,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.hreflang_tab.update, data.get("hreflang", [])),
             (self.keywords_tab.update, data.get("keywords", [])),
             (self.ai_tab.update, data.get("ai_crawl", [])),
+            (self.performance_tab.update, data.get("performance", {})),
             (self.schema_tab.update, data.get("schema", {})),
         ]
         for updater, payload in list_tabs:
@@ -306,3 +311,4 @@ if __name__ == "__main__":
     window = WebpageSeoWindow()
     window.show()
     sys.exit(app.exec())
+

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 
@@ -37,6 +37,71 @@ def _normalize_robots(value: Any) -> Dict[str, List[Tuple[str, str]]]:
                     bucket.append((str(directive[0]), str(directive[1])))
         normalized[str(agent)] = bucket
     return normalized
+
+
+@dataclass(frozen=True)
+class PerformanceMetrics:
+    nav_ttfb_ms: float
+    nav_total_ms: float
+    transfer_size: int
+    status: int
+    resource_summary: Dict[str, Dict[str, int]]
+    opportunities: List[str]
+
+    @classmethod
+    def empty(cls) -> 'PerformanceMetrics':
+        return cls(0.0, 0.0, 0, 0, {}, [])
+
+    @classmethod
+    def from_raw(cls, value: Any) -> 'PerformanceMetrics':
+        if not isinstance(value, Mapping):
+            return cls.empty()
+        def _to_float(val: Any) -> float:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return 0.0
+        def _to_int(val: Any) -> int:
+            try:
+                if isinstance(val, bool):
+                    return 0
+                return int(val)
+            except (TypeError, ValueError):
+                return 0
+        summary_raw = value.get('resource_summary')
+        summary: Dict[str, Dict[str, int]] = {}
+        if isinstance(summary_raw, Mapping):
+            for key, item in summary_raw.items():
+                if isinstance(item, Mapping):
+                    summary[str(key)] = {
+                        'count': _to_int(item.get('count', 0)),
+                        'bytes': _to_int(item.get('bytes', 0)),
+                    }
+        opp_raw = value.get('opportunities', [])
+        opp: List[str] = []
+        if isinstance(opp_raw, Iterable) and not isinstance(opp_raw, (str, bytes)):
+            for entry in opp_raw:
+                text = str(entry).strip()
+                if text:
+                    opp.append(text)
+        return cls(
+            nav_ttfb_ms=_to_float(value.get('nav_ttfb_ms', 0.0)),
+            nav_total_ms=_to_float(value.get('nav_total_ms', 0.0)),
+            transfer_size=_to_int(value.get('transfer_size', 0)),
+            status=_to_int(value.get('status', 0)),
+            resource_summary=summary,
+            opportunities=opp,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'nav_ttfb_ms': self.nav_ttfb_ms,
+            'nav_total_ms': self.nav_total_ms,
+            'transfer_size': self.transfer_size,
+            'status': self.status,
+            'resource_summary': {k: dict(v) for k, v in self.resource_summary.items()},
+            'opportunities': list(self.opportunities),
+        }
 
 
 @dataclass(frozen=True)
@@ -396,6 +461,7 @@ class CrawlPayload:
     serp: SerpPreview
     serp_audit: SerpAudit
     keywords: List[KeywordEntry]
+    performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -439,6 +505,7 @@ class CrawlPayload:
             serp=SerpPreview.from_raw(serp_raw),
             serp_audit=SerpAudit.from_raw(serp_audit_raw),
             keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
+            performance=PerformanceMetrics.from_raw(data.get("performance", {})),
         )
 
     def to_mapping(self) -> Dict[str, Any]:
@@ -457,6 +524,7 @@ class CrawlPayload:
             "serp": self.serp.to_dict(),
             "serp_audit": self.serp_audit.to_dict(),
             "keywords": [entry.to_dict() for entry in self.keywords],
+            "performance": self.performance.to_dict(),
         }
 
     def __getitem__(self, key: str) -> Any:
@@ -474,5 +542,6 @@ __all__ = [
     "StructuredDataPayload",
     "StructuredDataSummary",
     "KeywordEntry",
+    "PerformanceMetrics",
     "CrawlPayload",
 ]

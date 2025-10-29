@@ -7,30 +7,40 @@ import aiohttp  # type: ignore
 from aiohttp import ClientSession, ClientTimeout  # type: ignore
 
 
+from time import perf_counter
+
+
 @dataclass
 class HttpResponse:
     body: str
     status: int
     url: str
     headers: dict[str, str]
+    ttfb_ms: float
+    total_ms: float
 
 
 async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
     try:
+        start = perf_counter()
         async with session.get(
             url,
             timeout=ClientTimeout(total=timeout),
             allow_redirects=True,
         ) as response:
+            ttfb = (perf_counter() - start) * 1000
             text = await response.text("utf-8", errors="ignore")
+            total = (perf_counter() - start) * 1000
             return HttpResponse(
                 body=text,
                 status=response.status,
                 url=str(response.url),
                 headers=dict(response.headers),
+                ttfb_ms=ttfb,
+                total_ms=total,
             )
     except Exception:
-        return HttpResponse("", 0, url, {})
+        return HttpResponse("", 0, url, {}, 0.0, 0.0)
 
 
 async def fetch_page(url: str, timeout: int = 10) -> HttpResponse:
