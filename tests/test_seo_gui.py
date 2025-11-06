@@ -28,6 +28,14 @@ from silentfrog.tabs import (
 SNAPSHOT_DIR = Path(__file__).with_name("snapshots")
 SERP_SNAPSHOT = SNAPSHOT_DIR / "serp_preview.html"
 
+@pytest.fixture(autouse=True)
+def _restore_palette():
+    app = QtWidgets.QApplication.instance()
+    original = QtGui.QPalette(app.palette()) if app is not None else None
+    yield
+    if app is not None and original is not None:
+        app.setPalette(original)
+
 
 def _normalize_html(html: str) -> str:
     cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", html, flags=re.IGNORECASE)
@@ -38,9 +46,18 @@ def _normalize_html(html: str) -> str:
 
 
 def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
-    palette = widget.palette()
-    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(value, value, value))
-    widget.setPalette(palette)
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return
+    color = QtGui.QColor(value, value, value)
+    palette = QtGui.QPalette(app.palette())
+    palette.setColor(QtGui.QPalette.Base, color)
+    palette.setColor(QtGui.QPalette.Window, color)
+    text = QtGui.QColor(240, 240, 240) if value < 128 else QtGui.QColor(32, 33, 36)
+    palette.setColor(QtGui.QPalette.Text, text)
+    palette.setColor(QtGui.QPalette.WindowText, text)
+    app.setPalette(palette)
+    app.setProperty("silentfrog_theme", "dark" if value < 128 else "light")
 
 
 def _row_count(view: QtWidgets.QTableView) -> int:
@@ -113,7 +130,29 @@ def _sample_payload() -> CrawlPayload:
             "px_len": "100",
             "char_len": "10",
         },
-        "performance": {"nav_ttfb_ms": 120.0, "nav_total_ms": 450.0, "transfer_size": 180000, "status": 200, "resource_summary": {"css": {"count": 4, "bytes": 42000}, "js": {"count": 6, "bytes": 88000}, "img": {"count": 10, "bytes": 220000}, "font": {"count": 1, "bytes": 16000}}, "opportunities": ["Enable compression for hero.jpg"]},
+        "performance": {
+            "nav_ttfb_ms": 120.0,
+            "nav_total_ms": 450.0,
+            "transfer_size": 180000,
+            "status": 200,
+            "resource_summary": {
+                "css": {"count": 4, "bytes": 42000},
+                "js": {"count": 6, "bytes": 88000},
+                "img": {"count": 10, "bytes": 220000},
+                "font": {"count": 1, "bytes": 16000},
+            },
+            "top_offenders": [
+                {"type": "js", "url": "https://example.com/app.js", "bytes": 88000, "blocking": True},
+                {"type": "img", "url": "https://example.com/photo.jpg", "bytes": 220000, "blocking": False},
+            ],
+            "scripts": {
+                "blocking": {"count": 2, "bytes": 90000},
+                "async": {"count": 4, "bytes": 118000},
+            },
+            "opportunity_details": [
+                {"message": "Enable compression for hero.jpg", "severity": "warning"},
+            ],
+        },
         "keywords": [
             {
                 "term": "example",
@@ -398,7 +437,18 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
             "js": {"count": 5, "bytes": 40960},
             "img": {"count": 2, "bytes": 81920},
         },
-        "opportunities": ["Bundle JavaScript files"],
+        "opportunity_details": [
+            {"message": "Bundle JavaScript files", "severity": "warning"},
+            {"message": "Review resource weight", "severity": "critical"},
+        ],
+        "top_offenders": [
+            {"type": "js", "url": "https://example.com/app.js", "bytes": 40960, "blocking": True},
+            {"type": "img", "url": "https://example.com/photo.jpg", "bytes": 81920, "blocking": False},
+        ],
+        "scripts": {
+            "blocking": {"count": 2, "bytes": 45000},
+            "async": {"count": 3, "bytes": 10240},
+        },
     }
 
     tab.update(payload)
@@ -407,6 +457,12 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     assert "Status:" in summary_text
     assert "TTFB:" in summary_text
     assert "Transfer:" in summary_text
+    assert "Page weight:" in summary_text
+    assert "620.0 KB" in summary_text
+
+    scripts_text = tab._scripts.text()
+    assert "Blocking JS" in scripts_text
+    assert "Async/Deferred JS" in scripts_text
 
     model = tab.view.model()
     assert model is not None
@@ -416,7 +472,20 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Stretch
     assert model.data(model.index(0, 2)) == "40.0 KB"
 
-    assert "Bundle JavaScript files" in tab._opportunities.text()
+    opp_html = tab._opportunities.text()
+    assert "Bundle JavaScript files" in opp_html
+    assert "Review resource weight" in opp_html
+    assert "Critical" in opp_html
+    assert "Warning" in opp_html
+
+    offender_model = tab._offender_view.model()
+    assert offender_model is not None
+    assert offender_model.rowCount() == 2
+    assert offender_model.data(offender_model.index(0, 0)) == "JS"
+    assert offender_model.data(offender_model.index(0, 2)) == "Blocking"
+    assert offender_model.data(offender_model.index(0, 3)) == "40.0 KB"
+    assert offender_model.data(offender_model.index(1, 2)) == "Async"
+    assert offender_model.data(offender_model.index(1, 3)) == "80.0 KB"
 
 def test_robots_tab_appends_empty_state(qtbot):
     tab = RobotsTab()
@@ -464,7 +533,7 @@ def test_schema_tab_dark_palette(qtbot):
 
     assert "background:#1e1e1e; color:#f0f0f0;" in tab.styleSheet()
     html = tab.toHtml()
-    assert "background-color:#2a2a2a;" in html
+    assert "background-color:#262626;" in html
     assert "color:#f0f0f0;" in html
 
 

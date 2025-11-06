@@ -28,8 +28,21 @@ def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
 
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
-    base = widget.palette().color(QPalette.Base)
-    return base.value() < 128
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        theme = app.property("silentfrog_theme")
+        if theme in {"dark", "light"}:
+            return theme == "dark"
+    # fall back to palette inspection
+    if widget.testAttribute(QtCore.Qt.WidgetAttribute.WA_SetPalette):
+        base = widget.palette().color(QPalette.Base)
+        if base.isValid():
+            return base.value() < 128
+    if app is not None:
+        window_color = app.palette().color(QPalette.Window)
+        if window_color.isValid():
+            return window_color.value() < 128
+    return widget.palette().color(QPalette.Base).value() < 128
 
 
 class TableTab(QtWidgets.QWidget):
@@ -281,10 +294,23 @@ class PerformanceTab(TableTab):
         self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self._opportunities = QtWidgets.QLabel()
         self._opportunities.setWordWrap(True)
+        self._opportunities.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._scripts = QtWidgets.QLabel()
+        self._scripts.setWordWrap(True)
+        self._scripts.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._offender_view = QtWidgets.QTableView()
+        self._offender_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._offender_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self._offender_view.setSortingEnabled(True)
+        self._offender_view.setAlternatingRowColors(True)
+        self._current_metrics = PerformanceMetrics.empty()
+        self._is_rendering = False
         layout = self.layout()
         if layout is not None:
             layout.insertWidget(0, self._summary)
+            layout.insertWidget(1, self._scripts)
             layout.addWidget(self._opportunities)
+            layout.addWidget(self._offender_view)
 
     def update(self, data: object) -> None:
         metrics = PerformanceMetrics.empty()
@@ -292,41 +318,335 @@ class PerformanceTab(TableTab):
             metrics = data
         elif isinstance(data, dict):
             metrics = PerformanceMetrics.from_raw(data)
+        self._current_metrics = metrics
+        self._render(metrics)
 
-        summary_html = (
-            f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
-            f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
-            f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
-            f"<b>Transfer:</b> {metrics.transfer_size / 1024:.1f} KB"
-        )
-        self._summary.setText(summary_html)
+    def _render(self, metrics: PerformanceMetrics) -> None:
 
-        rows: List[List[str]] = []
-        for r_type, info in metrics.resource_summary.items():
-            rows.append(
-                [
-                    r_type.upper(),
-                    str(info.get("count", 0)),
-                    f"{info.get('bytes', 0) / 1024:.1f} KB",
-                ]
+        if self._is_rendering:
+
+            return
+
+        self._is_rendering = True
+
+        try:
+
+            total_bytes = metrics.transfer_size + sum(
+
+                info.get("bytes", 0) for info in metrics.resource_summary.values()
+
             )
-        if not rows:
-            rows = [["-", "-", "-"]]
-        model = GenericModel(["Resource", "Count", "Bytes"], rows)
-        self.set_model(model)
-        header = _header(self.view)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
 
-        if metrics.opportunities:
-            items_html = "".join(f"<li>{_html.escape(item)}</li>" for item in metrics.opportunities)
-            self._opportunities.setText(f"<b>Opportunities</b><ul>{items_html}</ul>")
-        else:
-            self._opportunities.setText("")
+            transfer_text = self._format_bytes(metrics.transfer_size)
+
+            weight_text = self._format_bytes(total_bytes)
+
+            summary_html = (
+
+                f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
+
+                f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
+
+                f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
+
+                f"<b>Transfer:</b> {transfer_text} &nbsp; "
+
+                f"<b>Page weight:</b> {weight_text}"
+
+            )
+
+            self._summary.setText(summary_html)
+
+
+
+            script_html = (
+
+                f"<b>Blocking JS:</b> {metrics.scripts.blocking_count} "
+
+                f"({self._format_bytes(metrics.scripts.blocking_bytes)}) &nbsp; "
+
+                f"<b>Async/Deferred JS:</b> {metrics.scripts.async_count} "
+
+                f"({self._format_bytes(metrics.scripts.async_bytes)})"
+
+            )
+
+            self._scripts.setText(script_html)
+
+
+
+            severity_order = {"critical": 3, "warning": 2, "info": 1, "ok": 0}
+
+            dominant = "ok"
+
+            if metrics.opportunity_details:
+
+                dominant = max(
+
+                    (detail.severity.lower() or "info" for detail in metrics.opportunity_details),
+
+                    key=lambda sev: severity_order.get(sev, 1),
+
+                    default="info",
+
+                )
+
+            elif metrics.opportunities:
+
+                dominant = "info"
+
+
+
+            dark_theme = _is_dark(self)
+
+            if dark_theme:
+
+                severity_styles = {
+
+                    "critical": ("#3b1f21", "#ffb4ab"),
+
+                    "warning": ("#3b3017", "#ffe082"),
+
+                    "info": ("#1b2f47", "#90caf9"),
+
+                    "ok": ("#1f3325", "#a5d6a7"),
+
+                }
+
+            else:
+
+                severity_styles = {
+
+                    "critical": ("#ffebee", "#c62828"),
+
+                    "warning": ("#fff8e1", "#ef6c00"),
+
+                    "info": ("#e3f2fd", "#1565c0"),
+
+                    "ok": ("#e8f5e9", "#2e7d32"),
+
+                }
+
+            bg_color, fg_color = severity_styles.get(dominant, severity_styles["info"])
+
+            style_block = (
+
+                f"background:{bg_color};color:{fg_color};padding:6px;border-radius:4px;"
+
+                "border:1px solid rgba(255,255,255,0.05);"
+
+            )
+
+            self._summary.setStyleSheet(style_block)
+
+            self._scripts.setStyleSheet(style_block)
+
+            self._opportunities.setStyleSheet(
+
+                "color:#f0f0f0;margin-top:6px;" if dark_theme else "color:#202124;margin-top:6px;"
+
+            )
+
+
+
+            rows: List[List[str]] = []
+
+            for r_type, info in metrics.resource_summary.items():
+
+                byte_value = info.get("bytes", 0)
+
+                rows.append([r_type.upper(), str(info.get("count", 0)), self._format_bytes(byte_value)])
+
+            if not rows:
+
+                rows = [["-", "-", "-"]]
+
+            model = GenericModel(["Resource", "Count", "Bytes"], rows)
+
+            self.set_model(model)
+
+            header = _header(self.view)
+
+            header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+
+            header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+
+            header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+
+
+
+            if dark_theme:
+
+                badge_colors = {"critical": "#ff5252", "warning": "#ffca28", "info": "#64b5f6", "ok": "#81c784"}
+
+                badge_text_color = "#121212"
+
+            else:
+
+                badge_colors = {"critical": "#d32f2f", "warning": "fbc02d", "info": "#1976d2", "ok": "#2e7d32"}
+
+                badge_text_color = "#ffffff"
+
+            opportunity_items: List[str] = []
+
+            if metrics.opportunity_details:
+
+                for detail in metrics.opportunity_details:
+
+                    severity = detail.severity.lower() if detail.severity else "info"
+
+                    color = badge_colors.get(severity, badge_colors["info"])
+
+                    badge = (
+
+                        "<span style='display:inline-block;padding:1px 6px;"
+
+                        f"border-radius:10px;background:{color};color:{badge_text_color};"
+
+                        "font-weight:bold;font-size:11px;'>"
+
+                        f"{severity.title()}</span>"
+
+                    )
+
+                    opportunity_items.append(f"<li>{badge} {_html.escape(detail.message)}</li>")
+
+            elif metrics.opportunities:
+
+                opportunity_items = [f"<li>{_html.escape(item)}</li>" for item in metrics.opportunities]
+
+
+
+            if opportunity_items:
+
+                self._opportunities.setText(f"<b>Opportunities</b><ul>{''.join(opportunity_items)}</ul>")
+
+            else:
+
+                ok_color = badge_colors["ok"]
+
+                ok_text = "#b2dfdb" if dark_theme else "#2e7d32"
+
+                self._opportunities.setText(
+
+                    "<b>Opportunities</b><br/>"
+
+                    "<span style='display:inline-block;padding:2px 6px;border-radius:10px;"
+
+                    f"background:{ok_color};color:{badge_text_color};font-weight:bold;font-size:11px;'>OK</span> "
+
+                    f"<span style='color:{ok_text}'>No issues detected.</span>"
+
+                )
+
+
+
+            offenders_rows: List[List[str]] = []
+
+            for offender in metrics.top_offenders:
+
+                offenders_rows.append([
+
+                    offender.resource_type.upper() or "-",
+
+                    offender.url or "-",
+
+                    "Blocking" if offender.blocking else "Async",
+
+                    self._format_bytes(offender.bytes),
+
+                ])
+
+            if not offenders_rows:
+
+                offenders_rows = [["-", "-", "-", "-"]]
+
+            offender_model = GenericModel(["Type", "URL", "Script", "Bytes"], offenders_rows)
+
+            self._offender_view.setModel(offender_model)
+
+            offender_header = _header(self._offender_view)
+
+            offender_header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+
+            offender_header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+
+            offender_header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+
+            offender_header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+
+
+
+            self._apply_table_palette(self.view)
+
+            self._apply_table_palette(self._offender_view)
+
+        finally:
+
+            self._is_rendering = False
 
     def clear(self) -> None:
         self.update({})
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() in (
+            QtCore.QEvent.Type.PaletteChange,
+            QtCore.QEvent.Type.StyleChange,
+            QtCore.QEvent.Type.ApplicationPaletteChange,
+        ):
+            self._render(self._current_metrics)
+            self._offender_view.viewport().update()
+            self.view.viewport().update()
+        super().changeEvent(event)
+
+    def _apply_table_palette(self, view: QtWidgets.QTableView) -> None:
+        if _is_dark(self):
+            stylesheet = (
+                "QTableView {"
+                "background-color:#1e1e1e;"
+                "color:#f0f0f0;"
+                "gridline-color:#444444;"
+                "alternate-background-color:#262626;"
+                "selection-background-color:#31475b;"
+                "selection-color:#ffffff;"
+                "}"
+                "QHeaderView::section {"
+                "background-color:#2b2b2b;"
+                "color:#f0f0f0;"
+                "}"
+            )
+        else:
+            stylesheet = (
+                "QTableView {"
+                "background-color:#ffffff;"
+                "color:#202124;"
+                "gridline-color:#d0d4da;"
+                "alternate-background-color:#f5f7fa;"
+                "selection-background-color:#dbeafe;"
+                "selection-color:#202124;"
+                "}"
+                "QHeaderView::section {"
+                "background-color:#f0f2f5;"
+                "color:#202124;"
+                "}"
+            )
+        view.setStyleSheet(stylesheet)
+
+    @staticmethod
+    def _format_bytes(value: int | float) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return "-"
+        number = max(number, 0.0)
+        units = ["B", "KB", "MB", "GB", "TB"]
+        for unit in units:
+            if number < 1024.0 or unit == units[-1]:
+                if unit == "B":
+                    return f"{int(number)} {unit}"
+                return f"{number:.1f} {unit}"
+            number /= 1024.0
+        return f"{number:.1f} TB"
 
 
 @dataclass
@@ -340,7 +660,7 @@ class SchemaTab(QtWidgets.QTextEdit):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
-        self._render_state: Dict[str, Any] | None = None
+        self._state: Dict[str, Any] | None = None
         self._is_rendering = False
 
     def update(self, payload: Any) -> None:
@@ -349,55 +669,72 @@ class SchemaTab(QtWidgets.QTextEdit):
         if not blocks and report.fallback_raw:
             blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in report.fallback_raw]
         if not blocks:
-            self.setHtml("<span style='color:red;font-weight:bold'>Structured data not found</span>")
-            self._render_state = None
+            self._state = None
+            self.setHtml("<span style='color:#c62828;font-weight:bold'>Structured data not found</span>")
             return
 
         summary = report.summary
-        syntax_counts = {name: count for name, count in summary.by_syntax.items() if count}
-        if not syntax_counts:
-            syntax_counts = self._fallback_syntax_counts(blocks)
-        type_counts = {name: count for name, count in summary.by_type.items() if count}
-        if not type_counts:
-            type_counts = self._fallback_type_counts(blocks)
+        syntax_counts = {name: count for name, count in summary.by_syntax.items() if count} or self._fallback_syntax_counts(blocks)
+        type_counts = {name: count for name, count in summary.by_type.items() if count} or self._fallback_type_counts(blocks)
 
         total = summary.total or sum(syntax_counts.values()) or len(blocks)
-        issues = list(summary.errors)
         block_models = [self._build_schema_block(idx, item) for idx, item in enumerate(blocks, start=1)]
-        self._render_state = {
-            "blocks": block_models,
+        self._state = {
             "summary": summary,
-            "issues": issues,
+            "blocks": block_models,
             "syntax_counts": syntax_counts,
             "type_counts": type_counts,
+            "issues": list(summary.errors),
             "total": total,
         }
         self._render()
 
     def changeEvent(self, event: QtCore.QEvent) -> None:
-        if event.type() == QtCore.QEvent.Type.PaletteChange:
+        if event.type() in (
+            QtCore.QEvent.Type.PaletteChange,
+            QtCore.QEvent.Type.StyleChange,
+            QtCore.QEvent.Type.ApplicationPaletteChange,
+        ):
             self._render()
         super().changeEvent(event)
 
+    def _theme(self) -> Dict[str, str]:
+        is_dark = _is_dark(self)
+        if is_dark:
+            return {
+                "background": "#1e1e1e",
+                "foreground": "#f0f0f0",
+                "block_bg": "#262626",
+                "block_fg": "#f0f0f0",
+                "block_border": "#444444",
+                "issue": "#ff8a80",
+                "warn": "#ffd54f",
+                "ok": "#81c784",
+            }
+        return {
+            "background": "#ffffff",
+            "foreground": "#202124",
+            "block_bg": "#f7f7f7",
+            "block_fg": "#202124",
+            "block_border": "#cccccc",
+            "issue": "#c62828",
+            "warn": "#b26a00",
+            "ok": "#1a7f37",
+        }
+
     def _render(self) -> None:
-        data = self._render_state
-        if not data or self._is_rendering:
+        if not self._state or self._is_rendering:
             return
         self._is_rendering = True
-        is_dark = _is_dark(self)
         try:
-            base_bg = '#1e1e1e' if is_dark else '#ffffff'
-            base_fg = '#f0f0f0' if is_dark else '#202124'
-            pre_bg = '#2a2a2a' if is_dark else '#f7f7f7'
-            pre_fg = '#f0f0f0' if is_dark else '#202124'
-            pre_border = '#555555' if is_dark else '#cccccc'
-            self.setStyleSheet(f"background:{base_bg}; color:{base_fg};")
+            theme = self._theme()
+            self.setStyleSheet(f"background:{theme['background']}; color:{theme['foreground']};")
 
-            summary = data["summary"]
-            syntax_counts = data["syntax_counts"]
-            type_counts = data["type_counts"]
-            total = data["total"]
-            issues = list(data["issues"])
+            summary = self._state["summary"]
+            syntax_counts = self._state["syntax_counts"]
+            type_counts = self._state["type_counts"]
+            total = self._state["total"]
+            issues = list(dict.fromkeys(self._state["issues"]))
 
             syntax_labels = {
                 "json-ld": "JSON-LD",
@@ -408,32 +745,32 @@ class SchemaTab(QtWidgets.QTextEdit):
                 "rdfa": "RDFa",
             }
             syntax_text = ", ".join(
-                f"{syntax_labels.get(name, name)} {syntax_counts[name]}"
-                for name in sorted(syntax_counts)
-                if syntax_counts[name]
+                f"{syntax_labels.get(name, name)} {syntax_counts[name]}" for name in sorted(syntax_counts)
             ) or "none"
-            type_text = ""
-            if type_counts:
-                type_text = " &nbsp; Types: " + ", ".join(
-                    f"{schema_type} {type_counts[schema_type]}" for schema_type in sorted(type_counts)
-                )
-            color = "#1a7f37" if total and not issues else ("#b26a00" if total else "#c62828")
+            type_text = (
+                " &nbsp; Types: "
+                + ", ".join(f"{schema_type} {type_counts[schema_type]}" for schema_type in sorted(type_counts))
+                if type_counts
+                else ""
+            )
+            if total == 0:
+                header_color = theme["issue"]
+            elif issues:
+                header_color = theme["warn"]
+            else:
+                header_color = theme["ok"]
             header = (
-                f"<div style='font-weight:bold;color:{color}'>Structured data: {total} items &nbsp; "
+                f"<div style='font-weight:bold;color:{header_color}'>Structured data: {total} items &nbsp; "
                 f"(Syntax: {syntax_text}){type_text}</div>"
             )
 
-            unique_issues = list(dict.fromkeys(issues))
-            if unique_issues:
-                items_html = "".join(f"<li>{_html.escape(issue)}</li>" for issue in unique_issues)
-                issue_html = f"<div style='color:#c62828;margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
+            if issues:
+                items_html = "".join(f"<li>{_html.escape(item)}</li>" for item in issues)
+                issue_html = f"<div style='color:{theme['issue']};margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
             else:
                 issue_html = ""
 
-            block_models: List[_SchemaBlock] = data["blocks"]
-            block_html = "".join(
-                self._render_block(block, base_fg, pre_bg, pre_fg, pre_border) for block in block_models
-            )
+            block_html = "".join(self._render_block(block, theme) for block in self._state["blocks"])
             self.setHtml(header + issue_html + block_html)
         finally:
             self._is_rendering = False
@@ -506,23 +843,19 @@ class SchemaTab(QtWidgets.QTextEdit):
         return text.strip()
 
     @staticmethod
-    def _render_block(
-        block: _SchemaBlock,
-        base_fg: str,
-        pre_bg: str,
-        pre_fg: str,
-        pre_border: str,
-    ) -> str:
-        label_color = "#c62828" if block.errors else base_fg
+    def _render_block(block: _SchemaBlock, theme: Dict[str, str]) -> str:
+        label_color = theme["issue"] if block.errors else theme["foreground"]
         error_section = ""
         if block.errors:
             error_items = "".join(f"<li>{_html.escape(err)}</li>" for err in block.errors)
-            error_section = f"<ul style='margin:4px 0 8px 18px;color:#c62828'>{error_items}</ul>"
+            error_section = f"<ul style='margin:4px 0 8px 18px;color:{theme['issue']}'>{error_items}</ul>"
         return (
             "<div style='margin-top:10px'>"
             f"<div style='font-weight:bold;color:{label_color}'>{_html.escape(block.label)}</div>"
             f"{error_section}"
-            f"<pre style='background:{pre_bg};color:{pre_fg};border:1px solid {pre_border};padding:6px;white-space:pre-wrap'>{_html.escape(block.text)}</pre>"
+            f"<pre style='background:{theme['block_bg']};color:{theme['block_fg']};"
+            f"border:1px solid {theme['block_border']};padding:6px;white-space:pre-wrap'>"
+            f"{_html.escape(block.text)}</pre>"
             "</div>"
         )
 class SerpTab(QtWidgets.QWidget):

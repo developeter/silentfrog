@@ -47,20 +47,35 @@ class PerformanceMetrics:
     status: int
     resource_summary: Dict[str, Dict[str, int]]
     opportunities: List[str]
+    top_offenders: List["PerformanceOffender"]
+    scripts: "PerformanceScripts"
+    opportunity_details: List["PerformanceOpportunity"]
 
     @classmethod
-    def empty(cls) -> 'PerformanceMetrics':
-        return cls(0.0, 0.0, 0, 0, {}, [])
+    def empty(cls) -> "PerformanceMetrics":
+        return cls(
+            nav_ttfb_ms=0.0,
+            nav_total_ms=0.0,
+            transfer_size=0,
+            status=0,
+            resource_summary={},
+            opportunities=[],
+            top_offenders=[],
+            scripts=PerformanceScripts.empty(),
+            opportunity_details=[],
+        )
 
     @classmethod
-    def from_raw(cls, value: Any) -> 'PerformanceMetrics':
+    def from_raw(cls, value: Any) -> "PerformanceMetrics":
         if not isinstance(value, Mapping):
             return cls.empty()
+
         def _to_float(val: Any) -> float:
             try:
                 return float(val)
             except (TypeError, ValueError):
                 return 0.0
+
         def _to_int(val: Any) -> int:
             try:
                 if isinstance(val, bool):
@@ -68,6 +83,7 @@ class PerformanceMetrics:
                 return int(val)
             except (TypeError, ValueError):
                 return 0
+
         summary_raw = value.get('resource_summary')
         summary: Dict[str, Dict[str, int]] = {}
         if isinstance(summary_raw, Mapping):
@@ -84,6 +100,23 @@ class PerformanceMetrics:
                 text = str(entry).strip()
                 if text:
                     opp.append(text)
+
+        offender_raw = value.get("top_offenders", [])
+        offenders: List[PerformanceOffender] = []
+        if isinstance(offender_raw, Iterable):
+            for item in offender_raw:
+                if isinstance(item, Mapping):
+                    offenders.append(PerformanceOffender.from_raw(item))
+
+        scripts = PerformanceScripts.from_raw(value.get("scripts"))
+
+        opportunity_details_raw = value.get("opportunity_details", [])
+        opportunity_details: List[PerformanceOpportunity] = []
+        if isinstance(opportunity_details_raw, Iterable):
+            for item in opportunity_details_raw:
+                if isinstance(item, Mapping):
+                    opportunity_details.append(PerformanceOpportunity.from_raw(item))
+
         return cls(
             nav_ttfb_ms=_to_float(value.get('nav_ttfb_ms', 0.0)),
             nav_total_ms=_to_float(value.get('nav_total_ms', 0.0)),
@@ -91,6 +124,9 @@ class PerformanceMetrics:
             status=_to_int(value.get('status', 0)),
             resource_summary=summary,
             opportunities=opp,
+            top_offenders=offenders,
+            scripts=scripts,
+            opportunity_details=opportunity_details,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -101,7 +137,102 @@ class PerformanceMetrics:
             'status': self.status,
             'resource_summary': {k: dict(v) for k, v in self.resource_summary.items()},
             'opportunities': list(self.opportunities),
+            'top_offenders': [entry.to_dict() for entry in self.top_offenders],
+            'scripts': self.scripts.to_dict(),
+            'opportunity_details': [item.to_dict() for item in self.opportunity_details],
         }
+
+
+@dataclass(frozen=True)
+class PerformanceScripts:
+    blocking_count: int
+    blocking_bytes: int
+    async_count: int
+    async_bytes: int
+
+    @classmethod
+    def empty(cls) -> "PerformanceScripts":
+        return cls(0, 0, 0, 0)
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "PerformanceScripts":
+        if not isinstance(value, Mapping):
+            return cls.empty()
+
+        def _part(key: str) -> Dict[str, int]:
+            raw = value.get(key, {})
+            if isinstance(raw, Mapping):
+                count = raw.get("count", 0)
+                bytes_val = raw.get("bytes", 0)
+            else:
+                count = 0
+                bytes_val = 0
+            try:
+                count_int = int(count)
+            except (TypeError, ValueError):
+                count_int = 0
+            try:
+                bytes_int = int(bytes_val)
+            except (TypeError, ValueError):
+                bytes_int = 0
+            return {"count": max(count_int, 0), "bytes": max(bytes_int, 0)}
+
+        blocking = _part("blocking")
+        async_part = _part("async")
+        return cls(
+            blocking_count=blocking["count"],
+            blocking_bytes=blocking["bytes"],
+            async_count=async_part["count"],
+            async_bytes=async_part["bytes"],
+        )
+
+    def to_dict(self) -> Dict[str, Dict[str, int]]:
+        return {
+            "blocking": {"count": self.blocking_count, "bytes": self.blocking_bytes},
+            "async": {"count": self.async_count, "bytes": self.async_bytes},
+        }
+
+
+@dataclass(frozen=True)
+class PerformanceOffender:
+    resource_type: str
+    url: str
+    bytes: int
+    blocking: bool = False
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceOffender":
+        resource_type = str(value.get("type", "")).strip()
+        url = str(value.get("url", "")).strip()
+        try:
+            size = int(value.get("bytes", 0))
+        except (TypeError, ValueError):
+            size = 0
+        blocking = bool(value.get("blocking", False))
+        return cls(resource_type=resource_type, url=url, bytes=max(size, 0), blocking=blocking)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.resource_type,
+            "url": self.url,
+            "bytes": self.bytes,
+            "blocking": self.blocking,
+        }
+
+
+@dataclass(frozen=True)
+class PerformanceOpportunity:
+    message: str
+    severity: str
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceOpportunity":
+        message = str(value.get("message", "")).strip()
+        severity = str(value.get("severity", "")).strip().lower()
+        return cls(message=message, severity=severity or "info")
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"message": self.message, "severity": self.severity}
 
 
 @dataclass(frozen=True)
@@ -542,6 +673,9 @@ __all__ = [
     "StructuredDataPayload",
     "StructuredDataSummary",
     "KeywordEntry",
+    "PerformanceOffender",
+    "PerformanceOpportunity",
+    "PerformanceScripts",
     "PerformanceMetrics",
     "CrawlPayload",
 ]

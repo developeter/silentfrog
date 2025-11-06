@@ -161,6 +161,14 @@ async def test_analyse(local_server):
     assert summary["js"]["bytes"] >= len(JS_BYTES)
     assert summary["img"]["bytes"] >= len(PNG_BYTES)
     assert summary["font"]["bytes"] >= len(FONT_BYTES)
+    assert perf.scripts.blocking_count >= 0
+    assert perf.scripts.async_count >= 0
+    assert perf.scripts.blocking_bytes >= 0
+    assert perf.scripts.async_bytes >= 0
+    assert perf.top_offenders, "expected top offenders list to be populated"
+    assert any(off.resource_type.upper() == "JS" for off in perf.top_offenders)
+    assert all(off.bytes >= 0 for off in perf.top_offenders)
+    assert isinstance(perf.opportunity_details, list)
 
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):

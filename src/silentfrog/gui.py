@@ -69,6 +69,7 @@ def apply_theme(app, dark: bool = True) -> None:
     """
     if app is not None:
         app.setStyleSheet(DARK_STYLESHEET if dark else LIGHT_STYLESHEET)
+        app.setProperty("silentfrog_theme", "dark" if dark else "light")
 
 
 icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")

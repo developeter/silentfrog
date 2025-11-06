@@ -127,6 +127,10 @@ def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: Perform
         ("TTFB (ms)", f"{performance.nav_ttfb_ms:.0f}"),
         ("Total (ms)", f"{performance.nav_total_ms:.0f}"),
         ("Transfer (KB)", f"{performance.transfer_size / 1024:.1f}"),
+        (
+            "Page weight (KB)",
+            f"{(performance.transfer_size + sum(info.get('bytes', 0) for info in performance.resource_summary.values())) / 1024:.1f}",
+        ),
     ]
     worksheet.write_row(0, 0, ["Metric", "Value"])
     for idx, (label, value) in enumerate(summary_rows, start=1):
@@ -152,17 +156,61 @@ def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: Perform
     for offset, row in enumerate(resource_rows, start=1):
         worksheet.write_row(resource_start + offset, 0, row)
 
-    opp_start = resource_start + len(resource_rows) + 2
-    worksheet.write(opp_start, 0, "Opportunities")
+    scripts_start = resource_start + len(resource_rows) + 2
+    worksheet.write_row(scripts_start, 0, ["Scripts", "Count", "Bytes"])
+    worksheet.write_row(
+        scripts_start + 1,
+        0,
+        [
+            "Blocking",
+            str(performance.scripts.blocking_count),
+            f"{performance.scripts.blocking_bytes / 1024:.1f} KB",
+        ],
+    )
+    worksheet.write_row(
+        scripts_start + 2,
+        0,
+        [
+            "Async/Deferred",
+            str(performance.scripts.async_count),
+            f"{performance.scripts.async_bytes / 1024:.1f} KB",
+        ],
+    )
+
+    opp_start = scripts_start + 4
+    worksheet.write_row(opp_start, 0, ["Severity", "Opportunity"])
     wrap = workbook.add_format({"text_wrap": True})
-    if performance.opportunities:
+    if performance.opportunity_details:
+        for offset, item in enumerate(performance.opportunity_details, start=1):
+            severity = item.severity.title()
+            worksheet.write(opp_start + offset, 0, severity)
+            worksheet.write(opp_start + offset, 1, item.message, wrap)
+    elif performance.opportunities:
         for offset, item in enumerate(performance.opportunities, start=1):
-            worksheet.write(opp_start + offset, 0, item, wrap)
+            worksheet.write(opp_start + offset, 0, "Info")
+            worksheet.write(opp_start + offset, 1, item, wrap)
     else:
-        worksheet.write(opp_start + 1, 0, "-")
+        worksheet.write_row(opp_start + 1, 0, ["-", "-"])
+
+    offenders_start = opp_start + max(2, len(performance.opportunity_details) + 2, len(performance.opportunities) + 2)
+    worksheet.write_row(offenders_start, 0, ["Type", "URL", "Script", "Bytes"])
+    offender_rows = [
+        [
+            offender.resource_type.upper() or "-",
+            offender.url or "-",
+            "Blocking" if offender.blocking else "Async",
+            f"{offender.bytes / 1024:.1f} KB",
+        ]
+        for offender in performance.top_offenders
+    ]
+    if not offender_rows:
+        offender_rows = [["-", "-", "-", "-"]]
+    for offset, row in enumerate(offender_rows, start=1):
+        worksheet.write_row(offenders_start + offset, 0, row)
 
     worksheet.set_column(0, 0, 80)
     worksheet.set_column(1, 1, 18)
+    worksheet.set_column(1, 3, 80)
 
 
 def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:

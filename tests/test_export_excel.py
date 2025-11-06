@@ -97,9 +97,20 @@ def _sample_payload() -> CrawlPayload:
                 "js": {"count": 35, "bytes": 420000},
                 "img": {"count": 18, "bytes": 580000},
             },
-            "opportunities": [
-                "HTTP Archive Web Almanac (open source): Page weight is above 1.5 MB; compare with the community benchmarks (https://almanac.httparchive.org/en/2023/performance#page-weight)",
-                "High stylesheet count; inline critical CSS and combine static files.",
+            "top_offenders": [
+                {"type": "js", "url": "https://example.com/app.js", "bytes": 420000, "blocking": True},
+                {"type": "img", "url": "https://example.com/hero.jpg", "bytes": 580000, "blocking": False},
+            ],
+            "scripts": {
+                "blocking": {"count": 4, "bytes": 320000},
+                "async": {"count": 31, "bytes": 720000},
+            },
+            "opportunity_details": [
+                {
+                    "message": "HTTP Archive Web Almanac (open source): Page weight is above 1.5 MB; compare with the community benchmarks (https://almanac.httparchive.org/en/2023/performance#page-weight)",
+                    "severity": "critical",
+                },
+                {"message": "High stylesheet count; inline critical CSS and combine static files.", "severity": "warning"},
             ],
         },
     }
@@ -156,10 +167,20 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         performance_sheet = workbook["Performance"]
         assert performance_sheet["A2"].value == "HTTP status"
         assert performance_sheet["B2"].value == "200"
-        assert performance_sheet["A7"].value == "Resource"
-        assert performance_sheet["A8"].value == "CSS"
-        assert performance_sheet["B8"].value == "12"
-        assert performance_sheet["A12"].value == "Opportunities"
-        assert "HTTP Archive Web Almanac" in performance_sheet["A13"].value
+        assert performance_sheet["A5"].value == "Transfer (KB)"
+        assert performance_sheet["B5"].value == f"{2100000 / 1024:.1f}"
+        assert performance_sheet["A6"].value == "Page weight (KB)"
+        assert performance_sheet["A8"].value == "Resource"
+        assert performance_sheet["A9"].value == "CSS"
+        assert performance_sheet["B9"].value == "12"
+        assert performance_sheet["A13"].value == "Scripts"
+        assert performance_sheet["A14"].value == "Blocking"
+        assert performance_sheet["B14"].value == "4"
+        assert performance_sheet["A17"].value == "Severity"
+        assert performance_sheet["A18"].value == "Critical"
+        assert "HTTP Archive Web Almanac" in performance_sheet["B18"].value
+        assert performance_sheet["A21"].value == "Type"
+        assert performance_sheet["B22"].value == "https://example.com/app.js"
+        assert performance_sheet["D22"].value == f"{420000 / 1024:.1f} KB"
     finally:
         workbook.close()
