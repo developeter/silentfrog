@@ -67,14 +67,27 @@ def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> No
             "",
             "",
             "No",
+            "",
         ]
     ]
 
 
 def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup) -> None:
     links = crawler._extract_links(base_url, soup)
-    assert links[0][:3] == ["https://example.com/internal", "Interno", "Follow"]
-    assert links[1][:3] == ["https://external.example", "Esterno", "NoFollow"]
+    assert links[0][:4] == [
+        "https://example.com/internal",
+        "Internal",
+        "Interno",
+        "follow",
+    ]
+    assert links[1][:4] == [
+        "https://external.example",
+        "External",
+        "Esterno",
+        "nofollow",
+    ]
+    assert links[0][6] == "Body"
+    assert links[0][7] == "Main Heading"
 
 
 def test_serp_preview_snapshot(soup: BeautifulSoup) -> None:

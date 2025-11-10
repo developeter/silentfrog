@@ -16,19 +16,23 @@ class ImagesModel(GenericModel):
         self._lazy_rows: set[int] = set()
         self._dimension_rows: set[int] = set()
         for idx, row in enumerate(rows):
-            padded = (row + [""] * 8)[:8]
-            src, alt, title, mime, width, height, size, lazy = padded
+            padded = (row + [""] * 9)[:9]
+            src, alt, title, mime, width, height, size, lazy, fetch_priority = padded
             lazy_text = str(lazy).strip().lower()
             lazy_value = "Yes" if lazy_text in {"yes", "1", "true"} else "No"
+            fetch_text = str(fetch_priority).strip()
             normalized.append(
-                [src, alt, title, mime, width, height, size, lazy_value]
+                [src, alt, title, mime, width, height, size, lazy_value, fetch_text]
             )
             if lazy_value == "Yes":
                 self._lazy_rows.add(idx)
             if str(width).strip() and str(height).strip():
                 self._dimension_rows.add(idx)
 
-        super().__init__(["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy"], normalized)
+        super().__init__(
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy", "Fetch priority"],
+            normalized,
+        )
         self._brushes: StatusBrushPalette = status_brushes()
 
     @staticmethod
@@ -69,6 +73,17 @@ class ImagesModel(GenericModel):
             return self._brushes.warn
         return self._brushes.good
 
+    @staticmethod
+    def _priority_status(value: object) -> str:
+        text = str(value).strip().lower()
+        if not text:
+            return "missing"
+        if text in {"high", "true"}:
+            return "high"
+        if text in {"low", "auto", "false", "0", "no"}:
+            return "low"
+        return "custom"
+
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
@@ -92,4 +107,11 @@ class ImagesModel(GenericModel):
             return self._brushes.warn
         if column == 7 and row not in self._lazy_rows:
             return self._brushes.warn
+        if column == 8:
+            status = ImagesModel._priority_status(self._rows[row][column])
+            if status == "missing":
+                return self._brushes.warn
+            if status == "high":
+                return self._brushes.good
+            return None
         return None

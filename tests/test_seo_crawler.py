@@ -88,10 +88,13 @@ async def test_analyse(local_server):
     # Images tab: absolute URL, alt preserved
     assert payload.images[0][0].endswith("/logo.png")
     assert payload.images[0][1] == "logo"
+    assert payload.images[0][8] == ""
 
-    # Links tab: follow flag and HTTP status populated
-    assert payload.links[0][2] == "NoFollow"
-    assert payload.links[0][3].isdigit()
+    # Links tab: rel + status populated with context
+    rel_value = payload.links[0][3].lower()
+    assert "follow" in rel_value or "nofollow" in rel_value
+    assert payload.links[0][4].isdigit()
+    assert payload.links[0][6]  # section label
 
     # Schema tab: at least one entry contains @context
     schema_report = payload.schema
@@ -172,7 +175,7 @@ async def test_analyse(local_server):
 
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):
-    input_rows = [["/logo.png", "", "", "-", "", "", "", "No"]]
+    input_rows = [["/logo.png", "", "", "-", "", "", "", "No", ""]]
     out = await analyse_images(local_server, input_rows, timeout=5)
 
     assert isinstance(out, list)

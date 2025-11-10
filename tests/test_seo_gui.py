@@ -75,8 +75,22 @@ def _sample_payload() -> CrawlPayload:
             ["charset", "utf-8", "5"],
         ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
-        "links": [["https://example.com", "Example", "Follow", "200"]],
+        "images": [
+            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes", "High"]
+        ],
+        "links": [
+            [
+                "https://example.com",
+                "Example anchor",
+                "Interno",
+                "follow",
+                "200",
+                "OK",
+                "Navigation",
+                "Header",
+                "com",
+            ]
+        ],
         "schema": {
             "summary": {
                 "total": 1,
@@ -216,7 +230,21 @@ TABLE_TAB_CASES: Tuple[
     ),
     (
         LinksTab,
-        ([["https://example.com", "Example", "Follow", "200"]],),
+        (
+            [
+                [
+                    "https://example.com",
+                    "Example anchor",
+                    "Interno",
+                    "follow",
+                    "200",
+                    "OK",
+                    "Navigation",
+                    "Header",
+                    "com",
+                ]
+            ],
+        ),
         {0: QtWidgets.QHeaderView.Stretch},
     ),
     (
@@ -505,7 +533,7 @@ def test_images_tab_merges_worker_results(qtbot):
     tab = ImagesTab()
     qtbot.addWidget(tab)
     initial_rows = [
-        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "No"]
+        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "No", ""]
     ]
     tab.update(initial_rows)
 
@@ -695,6 +723,7 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[5] == "320"
     assert image_row[6] == "42 KB"
     assert image_row[7] == "Yes"
+    assert image_row[8] == payload.images[0][8]
 
 
 def test_populate_tables_reenables_controls(qtbot):

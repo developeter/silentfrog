@@ -18,8 +18,22 @@ def _sample_payload() -> CrawlPayload:
             ["charset", "utf-8", "5"],
         ],
         "headers": [["h1", "Title"]],
-        "images": [["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes"]],
-        "links": [["https://example.com", "Example", "Follow", "200"]],
+        "images": [
+            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes", "High"]
+        ],
+        "links": [
+            [
+                "https://example.com",
+                "Example",
+                "Interno",
+                "follow",
+                "200",
+                "OK",
+                "Navigation",
+                "Header",
+                "com",
+            ]
+        ],
         "schema": {
             "summary": {
                 "total": 1,
@@ -150,7 +164,8 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert structured_sheet["C2"].value == "WebPage"
 
         links_sheet = workbook["Links"]
-        assert links_sheet["D2"].fill.start_color.rgb == "FFD1E7DD"
+        assert links_sheet["E2"].fill.start_color.rgb == "FFD1E7DD"
+        assert links_sheet["F2"].value == "OK"
 
         redirect_sheet = workbook["Redirect"]
         assert redirect_sheet["A2"].value == "Redirect chain"

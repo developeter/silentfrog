@@ -357,12 +357,19 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
                 return formats.warn
             if col_idx == 7:
                 return formats.good if images_rows[row_idx][7].strip().lower() == "yes" else formats.warn
+            if col_idx == 8:
+                value_norm = images_rows[row_idx][8].strip().lower()
+                if not value_norm:
+                    return formats.warn
+                if value_norm in {"high", "true"}:
+                    return formats.good
+                return None
             return None
 
         _write_sheet(
             workbook,
             "Images",
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy"],
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy", "Fetch priority"],
             images_rows,
             _images_formatter,
         )
@@ -370,21 +377,41 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         links_rows = _stringify_rows(payload.links)
 
         def _links_formatter(row_idx: int, col_idx: int, value: str):
-            if col_idx != 3 or row_idx >= len(payload.links):
+            if row_idx >= len(payload.links):
                 return None
-            code = _parse_int(payload.links[row_idx][3])
-            if code is None:
+            if col_idx == 4:
+                code = _parse_int(payload.links[row_idx][4])
+                if code is None:
+                    return formats.bad
+                if 200 <= code < 300:
+                    return formats.good
+                if 300 <= code < 400:
+                    return formats.warn
                 return formats.bad
-            if 200 <= code < 300:
-                return formats.good
-            if 300 <= code < 400:
-                return formats.warn
-            return formats.bad
+            if col_idx == 5:
+                note = (payload.links[row_idx][5] or "").strip().lower()
+                if note == "ok":
+                    return formats.good
+                if note == "redirect":
+                    return formats.warn
+                if note in {"client error", "server error", "fetch error"}:
+                    return formats.bad
+            return None
 
         _write_sheet(
             workbook,
             "Links",
-            ["URL", "Anchor", "Follow ?", "Status"],
+            [
+                "URL",
+                "Anchor",
+                "Type",
+                "Rel",
+                "Status",
+                "Status note",
+                "Section",
+                "Heading",
+                "TLD",
+            ],
             links_rows,
             _links_formatter,
         )

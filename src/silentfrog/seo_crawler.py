@@ -10,7 +10,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, Comment
 from nltk.corpus import stopwords
 from aiohttp import ClientTimeout, ClientSession  # type: ignore
-from typing import Any, Callable, Dict, Iterable, List, Mapping, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple, cast
 from PIL import Image, ImageDraw
 from urllib.parse import urljoin, urlparse, urlunparse, unquote
 from urllib.robotparser import RobotFileParser
@@ -129,6 +129,23 @@ def _guess_image_mime(url: str) -> str:
         "heif": "image/heif",
     }
     return mapping.get(ext, "-") if ext else "-"
+
+
+def _normalize_fetchpriority(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    mapping = {"high": "High", "low": "Low", "auto": "Auto"}
+    if lowered in mapping:
+        return mapping[lowered]
+    truthy = {"true", "1", "yes"}
+    falsy = {"false", "0", "no"}
+    if lowered in truthy:
+        return "True"
+    if lowered in falsy:
+        return "False"
+    return text
 
 # -- robots.txt helper ---------------------------------------------------
 async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
@@ -325,9 +342,24 @@ def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
 
 # -- 
 
+def _link_status_note(code: int) -> str:
+    if code <= 0:
+        return "Fetch error"
+    bucket = code // 100
+    mapping = {
+        2: "OK",
+        3: "Redirect",
+        4: "Client error",
+        5: "Server error",
+    }
+    return mapping.get(bucket, "Unknown")
+
+
 def _update_link_statuses(rows: list[list[str]], statuses: Iterable[object]) -> None:
     for row, status in zip(rows, statuses):
-        row[3] = str(status if isinstance(status, int) else 0)
+        code = status if isinstance(status, int) else 0
+        row[4] = str(code)
+        row[5] = _link_status_note(code)
 
 
 def _meta_robots_value(headers: Mapping[str, str], soup: BeautifulSoup) -> str:
@@ -517,6 +549,7 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
         width_attr = _attr(img, "width")
         height_attr = _attr(img, "height")
         size_placeholder = ""
+        fetch_priority = _normalize_fetchpriority(_attr(img, "fetchpriority"))
         rows.append(
             [
                 src,
@@ -527,13 +560,49 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
                 height_attr,
                 size_placeholder,
                 "Yes" if has_lazy else "No",
+                fetch_priority,
             ]
         )
     return rows
 
 
+def _link_section(tag: Tag) -> str:
+    for ancestor in tag.parents:
+        if not isinstance(ancestor, Tag):
+            continue
+        name = ancestor.name.lower()
+        role = (ancestor.get("role") or "").lower()
+        if name == "nav" or role == "navigation":
+            return "Navigation"
+        if name == "header":
+            return "Header"
+        if name == "footer":
+            return "Footer"
+        if name == "aside":
+            return "Aside"
+    return "Body"
+
+
+def _link_heading(tag: Tag) -> str:
+    heading = tag.find_previous(["h1", "h2", "h3", "h4", "h5", "h6"])
+    if isinstance(heading, Tag):
+        return heading.get_text(" ", strip=True)
+    return ""
+
+
+def _link_domain_info(url: str) -> Tuple[str, str]:
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    if not domain:
+        return "", ""
+    parts = domain.split(".")
+    tld = parts[-1] if parts else ""
+    return domain, tld
+
+
 def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
+    base_host = urlparse(base).netloc
     for raw in soup.find_all("a", href=True):
         a = cast(bs4.element.Tag, raw)
         href_val = _attr(a, "href")
@@ -541,10 +610,33 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
         rel_val: Any = a.get("rel")                        # ÔåÉ Ôæí default None OK
         rel = rel_val if isinstance(rel_val, list) else [] # lista sicura
         nf  = "nofollow" in rel
-        same_host = urlparse(href).netloc == urlparse(base).netloc
+        same_host = urlparse(href).netloc == base_host
         typ = "Interno" if same_host else "Esterno"
-
-        out.append([href, typ, "NoFollow" if nf else "Follow", ""])  # status later
+        anchor_text = " ".join(a.stripped_strings).strip()
+        if not anchor_text:
+            anchor_text = (_attr(a, "title") or href).strip()
+        tokens = [token for token in rel if token]
+        if nf and "nofollow" not in tokens:
+            tokens.append("nofollow")
+        if not nf and "follow" not in tokens:
+            tokens.append("follow")
+        rel_display = ", ".join(tokens) or "follow"
+        section = _link_section(a)
+        heading = _link_heading(a)
+        _domain, tld = _link_domain_info(href)
+        out.append(
+            [
+                href,
+                anchor_text,
+                typ,
+                rel_display,
+                "",
+                "",
+                section or "",
+                heading,
+                tld,
+            ]
+        )
     return out
 
 
