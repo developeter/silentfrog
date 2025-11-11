@@ -52,6 +52,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._latest_payload: CrawlPayload | None = None
 
         self._build_ui()
+        self._progress_value = 0
+        self._progress_limit = 100
+        self._progress_timer: QtCore.QTimer | None = None
 
         self.dataReady.connect(self._populate_tables)
         self.errorSig.connect(self._show_error)
@@ -128,7 +131,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         layout.addLayout(controls)
 
         self.bar = QtWidgets.QProgressBar()
-        self.bar.setRange(0, 1)
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setFormat("%p%")
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
 
@@ -164,12 +169,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         if self._handle_image_update(data):
             return
 
+        self._stop_progress_drift()
+        self._set_progress(max(self._progress_value, 65))
         self._latest_payload = self._load_payload(data)
+        self._set_progress(max(self._progress_value, 70))
 
         meta_rows = data.get("meta", [])
         self.meta_tab.update(meta_rows)
         self.headers_tab.update(data.get("headers", []), self._title_from_meta(meta_rows))
-        self._update_content_tabs(data)
+        self._set_progress(max(self._progress_value, 75))
+        self._update_content_tabs(data, span=(75, 95))
         self._finalise_population()
 
     def _clear_results(self) -> None:
@@ -201,7 +210,35 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             if url and isinstance(url, str):
                 webbrowser.open(url)
 
+    def _set_progress(self, value: int) -> None:
+        clamped = max(0, min(100, value))
+        if clamped == self._progress_value:
+            return
+        self._progress_value = clamped
+        self.bar.setValue(clamped)
+
+    def _start_progress_drift(self, limit: int = 80) -> None:
+        self._progress_limit = max(0, min(100, limit))
+        if self._progress_timer is None:
+            timer = QtCore.QTimer(self)
+            timer.setInterval(160)
+            timer.timeout.connect(self._tick_progress)
+            self._progress_timer = timer
+        self._progress_timer.start()
+
+    def _stop_progress_drift(self) -> None:
+        self._progress_limit = 100
+        if self._progress_timer:
+            self._progress_timer.stop()
+
+    def _tick_progress(self) -> None:
+        next_value = min(self._progress_limit, self._progress_value + 1)
+        self._set_progress(next_value)
+        if next_value >= self._progress_limit and self._progress_timer:
+            self._progress_timer.stop()
+
     def _reset_ui(self) -> None:
+        self._stop_progress_drift()
         self.bar.setVisible(False)
         self.btn_go.setEnabled(True)
 
@@ -213,7 +250,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._clear_results()
         self._latest_payload = None
         self.btn_go.setEnabled(False)
-        self.bar.setRange(0, 0)
+        self.bar.setRange(0, 100)
+        self._set_progress(5)
+        self._start_progress_drift(60)
         self.bar.setVisible(True)
         self.btn_export.setEnabled(False)
 
@@ -241,7 +280,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
                 return row[1]
         return ""
 
-    def _update_content_tabs(self, data: dict[str, Any]) -> None:
+    def _update_content_tabs(self, data: dict[str, Any], span: tuple[int, int]) -> None:
         list_tabs = [
             (self.images_tab.update, data.get("images", [])),
             (self.links_tab.update, data.get("links", [])),
@@ -251,16 +290,23 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.performance_tab.update, data.get("performance", {})),
             (self.schema_tab.update, data.get("schema", {})),
         ]
+        start, end = span
+        steps = len(list_tabs) or 1
+        increment = 0 if steps == 0 else (end - start) / steps
+        progress_value = float(start)
         for updater, payload in list_tabs:
             updater(payload)
+            progress_value += increment
+            self._set_progress(int(progress_value))
         self.redirect_tab.update(data.get("redirect", {}))
         self.canonical_tab.update(data.get("canonical", {}))
         self.robots_tab.update(data.get("meta_robots", ""), data.get("robots", {}))
         self.serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
+        self._set_progress(end)
 
     def _finalise_population(self) -> None:
-        self.bar.setRange(0, 1)
-        self.bar.setValue(1)
+        self._stop_progress_drift()
+        self._set_progress(100)
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
         self._reset_ui()
