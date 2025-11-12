@@ -8,6 +8,7 @@ import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_types import CrawlPayload
+from .crawl_options import CrawlOptions
 from .exporters import export_page_analysis
 from .tabs import (
     MetaTab,
@@ -50,6 +51,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         icon_path = Path(__file__).with_name("assets").joinpath("icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         self._latest_payload: CrawlPayload | None = None
+        self._crawl_options: CrawlOptions = CrawlOptions.default()
 
         self._build_ui()
         self._progress_value = 0
@@ -130,6 +132,21 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         controls.addStretch()
         layout.addLayout(controls)
 
+        settings = QtWidgets.QHBoxLayout()
+        self.chk_gentle = QtWidgets.QCheckBox("Gentle crawl mode")
+        self.chk_gentle.setChecked(False)
+        settings.addWidget(self.chk_gentle)
+        settings.addSpacing(8)
+
+        settings.addWidget(QtWidgets.QLabel("Max parallel requests"))
+        self.spin_parallel = QtWidgets.QSpinBox()
+        self.spin_parallel.setRange(1, 8)
+        self.spin_parallel.setValue(2)
+        self.spin_parallel.setEnabled(False)
+        settings.addWidget(self.spin_parallel)
+        settings.addStretch()
+        layout.addLayout(settings)
+
         self.bar = QtWidgets.QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
@@ -137,11 +154,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
 
+        self.chk_gentle.toggled.connect(self._on_gentle_mode_toggled)
+        self.spin_parallel.valueChanged.connect(self._on_parallel_changed)
+        self._refresh_crawl_options()
+
     def _start_analysis(self) -> None:
         url = self.url_edit.text().strip()
         if not url:
             QtWidgets.QMessageBox.warning(self, "URL mancante", "Inserisci un URL.")
             return
+        self._refresh_crawl_options()
         self._prepare_for_analysis()
 
         run_crawl(
@@ -149,6 +171,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             timeout=15,
             on_success=lambda data: self.dataReady.emit(data),
             on_error=lambda err: self.errorSig.emit(err),
+            options=self._crawl_options,
         )
 
     def _start_img_analysis(self) -> None:
@@ -210,12 +233,26 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             if url and isinstance(url, str):
                 webbrowser.open(url)
 
+    def _on_gentle_mode_toggled(self, checked: bool) -> None:
+        self.spin_parallel.setEnabled(checked)
+        self._refresh_crawl_options()
+
+    def _on_parallel_changed(self, _: int) -> None:
+        if self.spin_parallel.isEnabled():
+            self._refresh_crawl_options()
+
     def _set_progress(self, value: int) -> None:
         clamped = max(0, min(100, value))
         if clamped == self._progress_value:
             return
         self._progress_value = clamped
         self.bar.setValue(clamped)
+
+    def _refresh_crawl_options(self) -> None:
+        self._crawl_options = CrawlOptions.from_ui(
+            gentle_mode=self.chk_gentle.isChecked(),
+            max_parallel=self.spin_parallel.value(),
+        )
 
     def _start_progress_drift(self, limit: int = 80) -> None:
         self._progress_limit = max(0, min(100, limit))

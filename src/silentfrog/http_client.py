@@ -6,8 +6,9 @@ from typing import Optional
 import aiohttp  # type: ignore
 from aiohttp import ClientSession, ClientTimeout  # type: ignore
 
-
 from time import perf_counter
+
+from .crawl_options import DEFAULT_USER_AGENT
 
 
 @dataclass
@@ -43,12 +44,16 @@ async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpR
         return HttpResponse("", 0, url, {}, 0.0, 0.0)
 
 
-async def fetch_page(url: str, timeout: int = 10) -> HttpResponse:
+async def fetch_page(url: str, timeout: int = 10, headers: Optional[dict[str, str]] = None) -> HttpResponse:
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
-    headers = {"User-Agent": "SilentFrog/1.0 (+https://example.com)"}
+    base_headers = headers or {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+    async with aiohttp.ClientSession(headers=base_headers, connector=connector) as session:
         return await fetch(session, url, timeout)
 
 

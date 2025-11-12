@@ -4,6 +4,7 @@ import asyncio
 import threading
 
 from .seo_crawler import analyse, analyse_images
+from .crawl_options import CrawlOptions
 
 
 def run_crawl(
@@ -11,10 +12,11 @@ def run_crawl(
     timeout: int,
     on_success: Callable[[dict], None],
     on_error: Callable[[str], None],
+    options: CrawlOptions | None = None,
 ) -> threading.Thread:
     def _target() -> None:
         try:
-            data = asyncio.run(analyse(url, timeout))
+            data = asyncio.run(analyse(url, timeout, options=options))
             on_success(data.to_mapping())
         except Exception as exc:  # noqa: BLE001
             on_error(str(exc))

@@ -17,11 +17,13 @@ from urllib.robotparser import RobotFileParser
 from base64 import b64encode
 from textwrap import shorten
 from .http_client import fetch_page, head_status, fetch_text, HttpResponse
+from .crawl_options import CrawlOptions
 from .crawler_utils import _attr, _hr_size
 from .crawl_types import CrawlPayload
 from .perf_guides import PerformanceContext, open_source_hints
 
 import asyncio
+from contextlib import asynccontextmanager
 import re
 import string
 import bs4
@@ -82,6 +84,47 @@ def _keyword_density_threshold() -> float:
     return max(value, 0.0)
 
 
+_ACCEPT_DEFAULT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+_ACCEPT_LANGUAGE_DEFAULT = "en-US,en;q=0.9"
+_HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
+_HOST_LIMITER_LOCK = asyncio.Lock()
+_HOST_DELAYS: dict[str, float] = {}
+
+
+def _host_key(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc or parsed.path or url
+    return host.lower()
+
+
+async def _get_host_semaphore(host: str, limit: int) -> asyncio.Semaphore:
+    async with _HOST_LIMITER_LOCK:
+        cached = _HOST_LIMITERS.get(host)
+        if cached and cached[0] == limit:
+            return cached[1]
+        semaphore = asyncio.Semaphore(limit)
+        _HOST_LIMITERS[host] = (limit, semaphore)
+        return semaphore
+
+
+@asynccontextmanager
+async def _throttle_host(host: str, options: CrawlOptions):
+    if not options.gentle_mode:
+        yield
+        return
+    semaphore = await _get_host_semaphore(host, max(1, options.max_concurrent_per_host))
+    async with semaphore:
+        yield
+
+
+def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
+    return {
+        "User-Agent": options.user_agent,
+        "Accept": _ACCEPT_DEFAULT,
+        "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
+    }
+
+
 async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
     try:
         async with session.get(url, timeout=ClientTimeout(total=timeout)) as r:
@@ -103,8 +146,13 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
         return "Errore", 0, 0, "", "-"
 
 
-async def _link_status(session: ClientSession, url: str, timeout: int) -> int:
-    return await head_status(session, url, timeout)
+async def _link_status(session: ClientSession, url: str, timeout: int, options: CrawlOptions) -> int:
+    host = _host_key(url)
+    async with _throttle_host(host, options):
+        delay = _HOST_DELAYS.get(host, 0.0) if options.gentle_mode and options.respect_crawl_delay else 0.0
+        if delay > 0:
+            await asyncio.sleep(delay)
+        return await head_status(session, url, timeout)
 
 
 def _guess_image_mime(url: str) -> str:
@@ -195,6 +243,20 @@ async def _parse_robots(url: str, timeout: int = 5) -> dict[str, list[tuple[str,
             result.setdefault(ua, []).append((key.title(), value))
 
     return result
+
+
+def _crawl_delay_for(options: CrawlOptions, host: str, robots: dict[str, list[tuple[str, str]]]) -> float:
+    if not options.gentle_mode or not options.respect_crawl_delay:
+        return 0.0
+    ua_key = options.user_agent.lower()
+    candidates = robots.get(ua_key) or robots.get("*") or []
+    for key, value in candidates:
+        if key.lower() == "crawl-delay":
+            try:
+                return max(0.0, float(value.replace(",", ".").strip()))
+            except ValueError:
+                return 0.0
+    return 0.0
 
 # -- canonical helper ----------------------------------------------------------
 async def _check_canonical(
@@ -1476,8 +1538,31 @@ def _extract_keywords(soup: BeautifulSoup, text: str, top_n: int = 20) -> list[d
 
 
 # --------------------------------------------------------------------- #
-async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
-    resp = await fetch_page(url, timeout)
+_ACCEPT_DEFAULT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+_ACCEPT_LANGUAGE_DEFAULT = "en-US,en;q=0.9"
+
+
+def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
+    return {
+        "User-Agent": options.user_agent,
+        "Accept": _ACCEPT_DEFAULT,
+        "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
+    }
+
+
+async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
+    crawl_options = options or CrawlOptions.default()
+    host_key = _host_key(url)
+    robots_snapshot: dict[str, list[tuple[str, str]]] | None = None
+    async with _throttle_host(host_key, crawl_options):
+        if crawl_options.respect_crawl_delay:
+            robots_snapshot = await _parse_robots(url, timeout=timeout)
+        delay_seconds = _crawl_delay_for(crawl_options, host_key, robots_snapshot or {})
+        active_delay = delay_seconds if (crawl_options.gentle_mode and crawl_options.respect_crawl_delay) else 0.0
+        _HOST_DELAYS[host_key] = active_delay
+        if active_delay > 0:
+            await asyncio.sleep(active_delay)
+        resp = await fetch_page(url, timeout, headers=_headers_from_options(crawl_options))
     soup = BeautifulSoup(resp.body, "html.parser")
     structured_data = _extract_schema_all(resp.body, resp.url)
     performance_metrics = await _collect_performance_metrics(resp, soup)
@@ -1494,7 +1579,7 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
     # recupera in parallelo gli HTTP status
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as _sess:
-        coros = [_link_status(_sess, row[0], timeout) for row in links_rows]
+        coros = [_link_status(_sess, row[0], timeout, crawl_options) for row in links_rows]
         statuses = await asyncio.gather(*coros, return_exceptions=True)
 
     # riempie la 4ª colonna di ogni riga
@@ -1510,7 +1595,7 @@ async def analyse(url: str, timeout: int = 10) -> CrawlPayload:
     hreflang_rows = await _extract_hreflang(resp.url, soup, timeout=timeout)
     
     meta_robots = _meta_robots_value(resp.headers, soup)
-    robots_map = await _parse_robots(url, timeout=timeout)
+    robots_map = robots_snapshot or await _parse_robots(url, timeout=timeout)
     ai_rows = _ai_crawl_matrix(robots_map, meta_robots, resp.url)
     serp_snippet = await _make_serp_snippet(soup, resp.url)
     title_audit = _title_audit(serp_snippet["title"], _extract_headers(soup))

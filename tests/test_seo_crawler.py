@@ -1,9 +1,13 @@
+import asyncio
 import pytest
 import warnings
+import aiohttp
 from aiohttp import web
 from pathlib import Path
 
+from silentfrog import seo_crawler as crawler
 from silentfrog.seo_crawler import analyse, analyse_images
+from silentfrog.crawl_options import CrawlOptions
 
 # ------------------------------------------------------------------
 # Silence third-party warning inside pyRdfa only
@@ -187,3 +191,57 @@ async def test_analyse_images(local_server):
     assert isinstance(height, str) and height.isdigit()
     assert isinstance(hr_size, str) and hr_size.endswith("B")
     assert content_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_host_throttle_limits_concurrency(aiohttp_server):
+    crawler._HOST_DELAYS.clear()
+    tracker = {"current": 0, "max": 0}
+
+    async def head_handler(request):
+        tracker["current"] += 1
+        tracker["max"] = max(tracker["max"], tracker["current"])
+        await asyncio.sleep(0.05)
+        tracker["current"] -= 1
+        return web.Response(status=200)
+
+    app = web.Application()
+    app.router.add_route("HEAD", "/", head_handler)
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/"))
+    options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        await asyncio.gather(
+            *[crawler._link_status(session, url, 5, options) for _ in range(6)]
+        )
+    assert tracker["max"] <= 2
+
+
+@pytest.mark.asyncio
+async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
+    crawler._HOST_DELAYS.clear()
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(duration: float):
+        sleep_calls.append(duration)
+
+    async def fake_parse(url: str, timeout: int = 5):
+        return {"*": [("Crawl-delay", "2")]}
+
+    monkeypatch.setattr(crawler, "_parse_robots", fake_parse)
+    monkeypatch.setattr(crawler.asyncio, "sleep", fake_sleep)
+
+    async def html_handler(request):
+        return web.Response(text="<html><body>Hello</body></html>")
+
+    app = web.Application()
+    app.router.add_get("/", html_handler)
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/"))
+
+    options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
+    await crawler.analyse(url, timeout=5, options=options)
+
+    assert sleep_calls, "expected crawl-delay to trigger sleep"
+    assert all(pytest.approx(2.0, rel=0.05) == value for value in sleep_calls)
