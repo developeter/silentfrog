@@ -726,6 +726,23 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[8] == payload.images[0][8]
 
 
+def test_gentle_mode_controls_update_options(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    assert win._crawl_options.gentle_mode is False
+    assert win._crawl_options.max_concurrent_per_host == 2
+    win.chk_gentle.setChecked(True)
+    win.advanced_group.setChecked(True)
+    qtbot.keyClicks(win.txt_headers, "Authorization: Token 123")
+    qtbot.keyClicks(win.edit_cookies, "session=abc")
+    win.spin_parallel.setValue(3)
+    options = win._crawl_options
+    assert options.gentle_mode is True
+    assert options.max_concurrent_per_host == 3
+    assert options.extra_headers["Authorization"] == "Token 123"
+    assert options.extra_headers["Cookie"] == "session=abc"
+
+
 def test_populate_tables_reenables_controls(qtbot):
     win = WebpageSeoWindow()
     qtbot.addWidget(win)

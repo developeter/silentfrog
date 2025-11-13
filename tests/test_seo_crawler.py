@@ -245,3 +245,92 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
 
     assert sleep_calls, "expected crawl-delay to trigger sleep"
     assert all(pytest.approx(2.0, rel=0.05) == value for value in sleep_calls)
+
+
+@pytest.mark.asyncio
+async def test_backoff_retries_on_429(monkeypatch, aiohttp_server):
+    crawler._HOST_DELAYS.clear()
+    call_count = {"value": 0}
+
+    async def handler(request):
+        call_count["value"] += 1
+        status = 429 if call_count["value"] == 1 else 200
+        return web.Response(status=status, text="<html><head><title>X</title></head><body></body></html>")
+
+    app = web.Application()
+    app.router.add_get("/", handler)
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/"))
+
+    sleep_durations: list[float] = []
+
+    async def fake_sleep(duration: float):
+        sleep_durations.append(duration)
+
+    monkeypatch.setattr(crawler, "_BACKOFF_DELAY", 0.01)
+    monkeypatch.setattr(crawler.asyncio, "sleep", fake_sleep)
+
+    options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=1, respect_crawl_delay=False)
+    payload = await crawler.analyse(url, timeout=5, options=options)
+
+    assert payload.meta, "expected crawl to succeed after retry"
+    assert call_count["value"] >= 2
+    assert sleep_durations and pytest.approx(0.01, rel=0.1) == sleep_durations[0]
+
+
+@pytest.mark.asyncio
+async def test_custom_header_forwarded(aiohttp_server):
+    crawler._HOST_DELAYS.clear()
+    seen: list[str | None] = []
+
+    async def handler(request):
+        seen.append(request.headers.get("Authorization"))
+        return web.Response(text="<html><head><title>X</title></head><body></body></html>")
+
+    app = web.Application()
+    app.router.add_get("/", handler)
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/"))
+
+    options = CrawlOptions.from_ui(
+        gentle_mode=False,
+        max_parallel=4,
+        header_text="Authorization: Token 123",
+    )
+    payload = await crawler.analyse(url, timeout=5, options=options)
+    assert payload.meta
+    assert "Token 123" in seen
+
+
+@pytest.mark.asyncio
+async def test_gentle_mode_toggles_backoff_behavior(monkeypatch, aiohttp_server):
+    crawler._HOST_DELAYS.clear()
+    call_log: list[str] = []
+
+    async def handler(request):
+        call_log.append(request.headers.get("User-Agent", ""))
+        status = 429 if len(call_log) == 1 else 200
+        return web.Response(status=status, text="<html><head><title>X</title></head><body></body></html>")
+
+    app = web.Application()
+    app.router.add_get("/", handler)
+    server = await aiohttp_server(app)
+    url = str(server.make_url("/"))
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(duration: float):
+        sleep_calls.append(duration)
+
+    monkeypatch.setattr(crawler, "_BACKOFF_DELAY", 0.01)
+    monkeypatch.setattr(crawler.asyncio, "sleep", fake_sleep)
+
+    options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=1)
+    await crawler.analyse(url, timeout=5, options=options)
+    assert len(sleep_calls) >= 1
+    call_log.clear()
+    sleep_calls.clear()
+
+    fast_options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4)
+    await crawler.analyse(url, timeout=5, options=fast_options)
+    assert not sleep_calls  # no backoff when gentle mode is off

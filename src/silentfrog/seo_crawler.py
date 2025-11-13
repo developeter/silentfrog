@@ -89,6 +89,8 @@ _ACCEPT_LANGUAGE_DEFAULT = "en-US,en;q=0.9"
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
 _HOST_DELAYS: dict[str, float] = {}
+_BACKOFF_STATUSES = {403, 429}
+_BACKOFF_DELAY = 1.5
 
 
 def _host_key(url: str) -> str:
@@ -118,11 +120,14 @@ async def _throttle_host(host: str, options: CrawlOptions):
 
 
 def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
-    return {
+    base = {
         "User-Agent": options.user_agent,
         "Accept": _ACCEPT_DEFAULT,
         "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
     }
+    if not options.extra_headers:
+        return base
+    return {**base, **options.extra_headers}
 
 
 async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
@@ -152,7 +157,15 @@ async def _link_status(session: ClientSession, url: str, timeout: int, options: 
         delay = _HOST_DELAYS.get(host, 0.0) if options.gentle_mode and options.respect_crawl_delay else 0.0
         if delay > 0:
             await asyncio.sleep(delay)
-        return await head_status(session, url, timeout)
+        attempts = 2 if options.gentle_mode else 1
+        code = 0
+        for attempt in range(attempts):
+            code = await head_status(session, url, timeout)
+            should_retry = code in _BACKOFF_STATUSES and attempt < attempts - 1
+            if not should_retry:
+                break
+            await asyncio.sleep(_BACKOFF_DELAY)
+        return code
 
 
 def _guess_image_mime(url: str) -> str:
@@ -1543,11 +1556,14 @@ _ACCEPT_LANGUAGE_DEFAULT = "en-US,en;q=0.9"
 
 
 def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
-    return {
+    base = {
         "User-Agent": options.user_agent,
         "Accept": _ACCEPT_DEFAULT,
         "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
     }
+    if not options.extra_headers:
+        return base
+    return {**base, **options.extra_headers}
 
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
@@ -1562,7 +1578,16 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         _HOST_DELAYS[host_key] = active_delay
         if active_delay > 0:
             await asyncio.sleep(active_delay)
-        resp = await fetch_page(url, timeout, headers=_headers_from_options(crawl_options))
+        headers = _headers_from_options(crawl_options)
+        attempts = 2 if crawl_options.gentle_mode else 1
+        resp: HttpResponse | None = None
+        for attempt in range(attempts):
+            resp = await fetch_page(url, timeout, headers=headers)
+            should_retry = resp.status in _BACKOFF_STATUSES and attempt < attempts - 1
+            if not should_retry:
+                break
+            await asyncio.sleep(_BACKOFF_DELAY)
+        assert resp is not None
     soup = BeautifulSoup(resp.body, "html.parser")
     structured_data = _extract_schema_all(resp.body, resp.url)
     performance_metrics = await _collect_performance_metrics(resp, soup)
@@ -1578,7 +1603,8 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
 
     # recupera in parallelo gli HTTP status
     connector = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as _sess:
+    link_headers = _headers_from_options(crawl_options)
+    async with aiohttp.ClientSession(connector=connector, headers=link_headers) as _sess:
         coros = [_link_status(_sess, row[0], timeout, crawl_options) for row in links_rows]
         statuses = await asyncio.gather(*coros, return_exceptions=True)
 

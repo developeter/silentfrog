@@ -8,7 +8,7 @@ import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_types import CrawlPayload
-from .crawl_options import CrawlOptions
+from .crawl_options import CrawlOptions, parse_header_lines
 from .exporters import export_page_analysis
 from .tabs import (
     MetaTab,
@@ -147,6 +147,24 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         settings.addStretch()
         layout.addLayout(settings)
 
+        self.advanced_group = QtWidgets.QGroupBox("Advanced headers")
+        self.advanced_group.setCheckable(True)
+        self.advanced_group.setChecked(False)
+        advanced_layout = QtWidgets.QVBoxLayout(self.advanced_group)
+        self.headers_label = QtWidgets.QLabel("Custom headers (Key: Value per line)")
+        advanced_layout.addWidget(self.headers_label)
+        self.txt_headers = QtWidgets.QPlainTextEdit()
+        self.txt_headers.setPlaceholderText("Authorization: Bearer ...")
+        self.txt_headers.setEnabled(False)
+        self.txt_headers.setFixedHeight(80)
+        advanced_layout.addWidget(self.txt_headers)
+        cookie_label = QtWidgets.QLabel("Cookies (e.g. session=abc; theme=dark)")
+        advanced_layout.addWidget(cookie_label)
+        self.edit_cookies = QtWidgets.QLineEdit()
+        self.edit_cookies.setEnabled(False)
+        advanced_layout.addWidget(self.edit_cookies)
+        layout.addWidget(self.advanced_group)
+
         self.bar = QtWidgets.QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
@@ -156,6 +174,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         self.chk_gentle.toggled.connect(self._on_gentle_mode_toggled)
         self.spin_parallel.valueChanged.connect(self._on_parallel_changed)
+        self.advanced_group.toggled.connect(self._on_advanced_toggled)
+        self.txt_headers.textChanged.connect(self._on_header_inputs_changed)
+        self.edit_cookies.textChanged.connect(self._on_header_inputs_changed)
         self._refresh_crawl_options()
 
     def _start_analysis(self) -> None:
@@ -241,6 +262,15 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         if self.spin_parallel.isEnabled():
             self._refresh_crawl_options()
 
+    def _on_advanced_toggled(self, checked: bool) -> None:
+        self.txt_headers.setEnabled(checked)
+        self.edit_cookies.setEnabled(checked)
+        self._refresh_crawl_options()
+
+    def _on_header_inputs_changed(self) -> None:
+        if self.advanced_group.isChecked():
+            self._refresh_crawl_options()
+
     def _set_progress(self, value: int) -> None:
         clamped = max(0, min(100, value))
         if clamped == self._progress_value:
@@ -249,10 +279,21 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setValue(clamped)
 
     def _refresh_crawl_options(self) -> None:
+        header_text = self.txt_headers.toPlainText() if self.advanced_group.isChecked() else ""
+        headers_map, invalid = parse_header_lines(header_text)
+        self._update_header_warning(invalid)
+        header_text = header_text if self.advanced_group.isChecked() else ""
+        cookie_text = self.edit_cookies.text() if self.advanced_group.isChecked() else ""
         self._crawl_options = CrawlOptions.from_ui(
             gentle_mode=self.chk_gentle.isChecked(),
             max_parallel=self.spin_parallel.value(),
+            header_text=header_text,
+            cookie_text=cookie_text,
         )
+
+    def _update_header_warning(self, invalid: bool) -> None:
+        color = "#d32f2f" if invalid else ""
+        self.headers_label.setStyleSheet(f"color:{color};" if color else "")
 
     def _start_progress_drift(self, limit: int = 80) -> None:
         self._progress_limit = max(0, min(100, limit))
