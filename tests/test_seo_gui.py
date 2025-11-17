@@ -8,6 +8,8 @@ import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from silentfrog.crawl_types import CrawlPayload
+from silentfrog.crawl_options import CrawlOptions
+from silentfrog.settings_dialog import CrawlSettingsDialog
 from silentfrog.seo_gui import WebpageSeoWindow
 from silentfrog.tabs import (
     AiTab,
@@ -726,21 +728,59 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[8] == payload.images[0][8]
 
 
-def test_gentle_mode_controls_update_options(qtbot):
-    win = WebpageSeoWindow()
-    qtbot.addWidget(win)
-    assert win._crawl_options.gentle_mode is False
-    assert win._crawl_options.max_concurrent_per_host == 2
-    win.chk_gentle.setChecked(True)
-    win.advanced_group.setChecked(True)
-    qtbot.keyClicks(win.txt_headers, "Authorization: Token 123")
-    qtbot.keyClicks(win.edit_cookies, "session=abc")
-    win.spin_parallel.setValue(3)
-    options = win._crawl_options
+def test_crawl_settings_dialog_roundtrip(qtbot):
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+
+    assert dialog.chk_gentle.isChecked() is False
+    # Default preset should be standard (parallel 2) for new sessions.
+    assert dialog.spin_parallel.value() == 2
+
+    dialog.btn_preset_gentle.setChecked(True)
+    assert dialog.spin_parallel.value() == 2
+    dialog.btn_preset_standard.setChecked(True)
+    assert dialog.spin_parallel.value() == 4
+    dialog.btn_preset_custom.setChecked(True)
+
+    dialog.chk_gentle.setChecked(True)
+    dialog.spin_parallel.setValue(3)
+    dialog.adv_group.setChecked(True)
+    dialog.txt_headers.setPlainText("Authorization: Token 123")
+    dialog.edit_cookies.setText("session=abc")
+
+    options = dialog.options()
     assert options.gentle_mode is True
     assert options.max_concurrent_per_host == 3
     assert options.extra_headers["Authorization"] == "Token 123"
     assert options.extra_headers["Cookie"] == "session=abc"
+
+
+def test_window_applies_dialog_options(qtbot, monkeypatch):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    assert win._crawl_options.gentle_mode is False
+
+    desired = CrawlOptions.from_ui(
+        gentle_mode=True,
+        max_parallel=2,
+        header_text="X-Test: 1",
+    )
+
+    class DummyDialog:
+        def __init__(self, current, parent) -> None:
+            self._current = current
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.Accepted
+
+        def options(self) -> CrawlOptions:
+            return desired
+
+    monkeypatch.setattr("silentfrog.seo_gui.CrawlSettingsDialog", DummyDialog)
+    win._open_crawl_settings()
+
+    assert win._crawl_options.gentle_mode is True
+    assert win._crawl_options.extra_headers["X-Test"] == "1"
 
 
 def test_populate_tables_reenables_controls(qtbot):

@@ -8,7 +8,8 @@ import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_types import CrawlPayload
-from .crawl_options import CrawlOptions, parse_header_lines
+from .crawl_options import CrawlOptions
+from .settings_dialog import CrawlSettingsDialog
 from .exporters import export_page_analysis
 from .tabs import (
     MetaTab,
@@ -129,41 +130,20 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_img_dl.clicked.connect(self._start_img_analysis)
         controls.addWidget(self.btn_img_dl)
 
+        self.btn_settings = QtWidgets.QPushButton("Crawl settings…")
+        self.btn_settings.setToolTip("Adjust gentle crawl preferences")
+        self.btn_settings.clicked.connect(self._open_crawl_settings)
+        controls.addWidget(self.btn_settings)
+
+        self.lbl_settings_state = QtWidgets.QLabel("Standard")
+        font = self.lbl_settings_state.font()
+        font.setPointSizeF(font.pointSizeF() - 1)
+        self.lbl_settings_state.setFont(font)
+        self.lbl_settings_state.setStyleSheet("color:#6b6b6b;")
+        controls.addWidget(self.lbl_settings_state)
+
         controls.addStretch()
         layout.addLayout(controls)
-
-        settings = QtWidgets.QHBoxLayout()
-        self.chk_gentle = QtWidgets.QCheckBox("Gentle crawl mode")
-        self.chk_gentle.setChecked(False)
-        settings.addWidget(self.chk_gentle)
-        settings.addSpacing(8)
-
-        settings.addWidget(QtWidgets.QLabel("Max parallel requests"))
-        self.spin_parallel = QtWidgets.QSpinBox()
-        self.spin_parallel.setRange(1, 8)
-        self.spin_parallel.setValue(2)
-        self.spin_parallel.setEnabled(False)
-        settings.addWidget(self.spin_parallel)
-        settings.addStretch()
-        layout.addLayout(settings)
-
-        self.advanced_group = QtWidgets.QGroupBox("Advanced headers")
-        self.advanced_group.setCheckable(True)
-        self.advanced_group.setChecked(False)
-        advanced_layout = QtWidgets.QVBoxLayout(self.advanced_group)
-        self.headers_label = QtWidgets.QLabel("Custom headers (Key: Value per line)")
-        advanced_layout.addWidget(self.headers_label)
-        self.txt_headers = QtWidgets.QPlainTextEdit()
-        self.txt_headers.setPlaceholderText("Authorization: Bearer ...")
-        self.txt_headers.setEnabled(False)
-        self.txt_headers.setFixedHeight(80)
-        advanced_layout.addWidget(self.txt_headers)
-        cookie_label = QtWidgets.QLabel("Cookies (e.g. session=abc; theme=dark)")
-        advanced_layout.addWidget(cookie_label)
-        self.edit_cookies = QtWidgets.QLineEdit()
-        self.edit_cookies.setEnabled(False)
-        advanced_layout.addWidget(self.edit_cookies)
-        layout.addWidget(self.advanced_group)
 
         self.bar = QtWidgets.QProgressBar()
         self.bar.setRange(0, 100)
@@ -171,20 +151,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setFormat("%p%")
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
-
-        self.chk_gentle.toggled.connect(self._on_gentle_mode_toggled)
-        self.spin_parallel.valueChanged.connect(self._on_parallel_changed)
-        self.advanced_group.toggled.connect(self._on_advanced_toggled)
-        self.txt_headers.textChanged.connect(self._on_header_inputs_changed)
-        self.edit_cookies.textChanged.connect(self._on_header_inputs_changed)
-        self._refresh_crawl_options()
+        self._update_settings_label()
 
     def _start_analysis(self) -> None:
         url = self.url_edit.text().strip()
         if not url:
             QtWidgets.QMessageBox.warning(self, "URL mancante", "Inserisci un URL.")
             return
-        self._refresh_crawl_options()
         self._prepare_for_analysis()
 
         run_crawl(
@@ -208,6 +181,29 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             on_success=lambda result: self.dataReady.emit({"img_update": result}),
             on_error=lambda err: self.errorSig.emit(err),
         )
+
+    def _open_crawl_settings(self) -> None:
+        """Open the crawl settings dialog (single source of truth for crawl options)."""
+        dialog = CrawlSettingsDialog(self._crawl_options, self)
+        if dialog.exec() == QtWidgets.QDialog.Accepted:
+            self._crawl_options = dialog.options()
+            self._update_settings_label()
+
+
+    def _open_crawl_settings(self) -> None:
+        dialog = CrawlSettingsDialog(self._crawl_options, self)
+        if dialog.exec() == QtWidgets.QDialog.Accepted:
+            self._crawl_options = dialog.options()
+            self._update_settings_label()
+
+    def _update_settings_label(self) -> None:
+        if self._crawl_options.gentle_mode:
+            state = "Gentle crawl"
+        elif self._crawl_options.extra_headers:
+            state = "Custom crawl"
+        else:
+            state = "Standard crawl"
+        self.lbl_settings_state.setText(state)
 
     def _populate_tables(self, data: dict[str, Any]) -> None:
         if self._handle_image_update(data):
@@ -254,23 +250,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             if url and isinstance(url, str):
                 webbrowser.open(url)
 
-    def _on_gentle_mode_toggled(self, checked: bool) -> None:
-        self.spin_parallel.setEnabled(checked)
-        self._refresh_crawl_options()
-
-    def _on_parallel_changed(self, _: int) -> None:
-        if self.spin_parallel.isEnabled():
-            self._refresh_crawl_options()
-
-    def _on_advanced_toggled(self, checked: bool) -> None:
-        self.txt_headers.setEnabled(checked)
-        self.edit_cookies.setEnabled(checked)
-        self._refresh_crawl_options()
-
-    def _on_header_inputs_changed(self) -> None:
-        if self.advanced_group.isChecked():
-            self._refresh_crawl_options()
-
     def _set_progress(self, value: int) -> None:
         clamped = max(0, min(100, value))
         if clamped == self._progress_value:
@@ -278,22 +257,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._progress_value = clamped
         self.bar.setValue(clamped)
 
-    def _refresh_crawl_options(self) -> None:
-        header_text = self.txt_headers.toPlainText() if self.advanced_group.isChecked() else ""
-        headers_map, invalid = parse_header_lines(header_text)
-        self._update_header_warning(invalid)
-        header_text = header_text if self.advanced_group.isChecked() else ""
-        cookie_text = self.edit_cookies.text() if self.advanced_group.isChecked() else ""
-        self._crawl_options = CrawlOptions.from_ui(
-            gentle_mode=self.chk_gentle.isChecked(),
-            max_parallel=self.spin_parallel.value(),
-            header_text=header_text,
-            cookie_text=cookie_text,
-        )
-
-    def _update_header_warning(self, invalid: bool) -> None:
-        color = "#d32f2f" if invalid else ""
-        self.headers_label.setStyleSheet(f"color:{color};" if color else "")
 
     def _start_progress_drift(self, limit: int = 80) -> None:
         self._progress_limit = max(0, min(100, limit))
