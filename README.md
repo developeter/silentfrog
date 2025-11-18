@@ -90,6 +90,31 @@ Unset the variable (or set it to `1`) to re-enable the guidance.
 
 ---
 
+## Gentle crawl mode
+
+Silentfrog includes a **gentle crawl mode** for fragile staging sites or whenever you need to behave politely.
+
+### What it does
+
+* Caps concurrent requests per host (default 4 when off, 2 when gentle mode is on).
+* Respects `Crawl-delay` directives from `robots.txt`.
+* Serialises link-status checks so you don’t hammer servers with HEAD requests.
+* Retries politely on HTTP 403/429 with a short backoff.
+
+### How to use it
+
+1. Click **Crawl settings…** in the main window.
+2. Tick **Enable gentle crawl mode** to switch on polite throttling.
+3. Pick a preset or fine-tune:
+   * **Standard** – fast crawl, gentle features off.
+   * **Gentle** – safe defaults (2 parallel requests, retries on 403/429, crawl-delay respected).
+   * **Custom** – enable gentle mode but customise the `Max parallel requests` spinner and optional headers/cookies.
+4. Advanced users can supply headers (e.g. `Authorization: Bearer …`) or cookies; these are merged into every request while the crawl runs.
+
+> Unchecking the box resets the preset to **Standard** (parallel = 4) so the UI always reflects the active profile.
+
+---
+
 ## 3. Running the test suite
 
 ```bash
