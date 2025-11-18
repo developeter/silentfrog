@@ -17,7 +17,7 @@ class CrawlOptions:
     def default(cls) -> CrawlOptions:
         return cls(
             gentle_mode=False,
-            max_concurrent_per_host=2,
+            max_concurrent_per_host=4,
             respect_crawl_delay=False,
             user_agent=DEFAULT_USER_AGENT,
             extra_headers={},

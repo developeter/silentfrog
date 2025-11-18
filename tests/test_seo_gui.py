@@ -733,8 +733,7 @@ def test_crawl_settings_dialog_roundtrip(qtbot):
     qtbot.addWidget(dialog)
 
     assert dialog.chk_gentle.isChecked() is False
-    # Default preset should be standard (parallel 2) for new sessions.
-    assert dialog.spin_parallel.value() == 2
+    assert dialog.spin_parallel.value() == 4
 
     dialog.btn_preset_gentle.setChecked(True)
     assert dialog.spin_parallel.value() == 2
@@ -753,6 +752,24 @@ def test_crawl_settings_dialog_roundtrip(qtbot):
     assert options.max_concurrent_per_host == 3
     assert options.extra_headers["Authorization"] == "Token 123"
     assert options.extra_headers["Cookie"] == "session=abc"
+
+
+def test_crawl_settings_toggle_reset_to_standard(qtbot):
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    dialog.chk_gentle.setChecked(True)
+    dialog.spin_parallel.setValue(1)
+    dialog.chk_gentle.setChecked(False)
+    assert dialog.btn_preset_standard.isChecked()
+    assert dialog.spin_parallel.value() == 4
+
+
+def test_crawl_settings_spin_triggers_custom(qtbot):
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    dialog.chk_gentle.setChecked(True)
+    dialog.spin_parallel.setValue(3)
+    assert dialog.btn_preset_custom.isChecked()
 
 
 def test_window_applies_dialog_options(qtbot, monkeypatch):

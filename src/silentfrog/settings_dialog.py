@@ -4,6 +4,8 @@ import sys
 import ctypes
 from ctypes import wintypes
 
+from typing import Any
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
@@ -16,7 +18,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("Crawl settings")
         self.resize(420, 320)
-        self.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, True)
+        help_flag = getattr(QtCore.Qt, "WindowContextHelpButtonHint", QtCore.Qt.WindowType(0))
+        self.setWindowFlag(help_flag, True)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -68,7 +71,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.chk_gentle.toggled.connect(self._sync_state)
+        self.chk_gentle.toggled.connect(self._on_gentle_toggled)
         self.spin_parallel.valueChanged.connect(self._mark_custom)
         self.adv_group.toggled.connect(self._mark_custom)
         self.adv_group.toggled.connect(self._sync_state)
@@ -82,7 +85,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._load_from_options(options)
         self._sync_state()
 
-    def _load_from_options(self, options: CrawlOptions) -> None:
+    def _load_from_options(self, options: CrawlOptions) -> bool:
         headers_lines = [
             f"{key}: {value}"
             for key, value in options.extra_headers.items()
@@ -97,12 +100,20 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.edit_cookies.setText(cookie_text)
         self._select_initial_preset(options, advanced_on)
         self._validate_headers()
+        return advanced_on
 
     def _sync_state(self) -> None:
         is_gentle = self.chk_gentle.isChecked()
         self.spin_parallel.setEnabled(is_gentle)
         self.txt_headers.setEnabled(self.adv_group.isChecked())
         self.edit_cookies.setEnabled(self.adv_group.isChecked())
+
+    def _on_gentle_toggled(self, checked: bool) -> None:
+        if self._applying_preset:
+            return
+        if not checked:
+            self._apply_preset("standard")
+        self._sync_state()
 
     def _mark_custom(self) -> None:
         if self._applying_preset:
@@ -115,16 +126,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._validate_headers()
 
     def _validate_headers(self) -> None:
+        styles = {"invalid": "color:#d32f2f;", "valid": "color:#2e7d32;", "empty": ""}
         if not self.adv_group.isChecked():
-            self.headers_label.setStyleSheet("")
+            self.headers_label.setStyleSheet(styles["empty"])
             return
         _, invalid = parse_header_lines(self.txt_headers.toPlainText())
-        if invalid:
-            self.headers_label.setStyleSheet("color:#d32f2f;")
-        elif self.txt_headers.toPlainText().strip():
-            self.headers_label.setStyleSheet("color:#2e7d32;")
-        else:
-            self.headers_label.setStyleSheet("")
+        state = "invalid" if invalid else "valid" if self.txt_headers.toPlainText().strip() else "empty"
+        self.headers_label.setStyleSheet(styles[state])
 
     def options(self) -> CrawlOptions:
         header_text = self.txt_headers.toPlainText() if self.adv_group.isChecked() else ""
@@ -137,19 +145,23 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         )
 
     def _apply_preset(self, preset: str) -> None:
+        if self._applying_preset:
+            return
+        presets = {
+            "standard": {"gentle": False, "parallel": 4},
+            "gentle": {"gentle": True, "parallel": 2},
+            "custom": None,
+        }
+        config = presets.get(preset)
         self._applying_preset = True
-        if preset == "standard":
-            # Standard: fastest crawl, gentle mode off with higher parallelism.
-            self.chk_gentle.setChecked(False)
-            self.spin_parallel.setValue(4)
-            self.adv_group.setChecked(False)
-        elif preset == "gentle":
-            # Gentle preset keeps load tiny and suggests advanced controls remain off.
-            self.chk_gentle.setChecked(True)
-            self.spin_parallel.setValue(2)
-            self.adv_group.setChecked(False)
-        else:
+        if config is None:
             self.btn_preset_custom.setChecked(True)
+        else:
+            self.chk_gentle.setChecked(config["gentle"])
+            self.spin_parallel.setValue(config["parallel"])
+            self.adv_group.setChecked(False)
+            self.btn_preset_standard.setChecked(preset == "standard")
+            self.btn_preset_gentle.setChecked(preset == "gentle")
         self._applying_preset = False
         self._sync_state()
 
@@ -175,7 +187,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         )
 
     def event(self, event: QtCore.QEvent):
-        if event.type() == QtCore.QEvent.EnterWhatsThisMode:
+        enter_help = getattr(QtCore.QEvent, "EnterWhatsThisMode", QtCore.QEvent.Type(0))
+        if event.type() == enter_help:
             self._show_help()
             QtWidgets.QWhatsThis.leaveWhatsThisMode()
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -183,12 +196,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             return True
         return super().event(event)
 
-    def nativeEvent(self, eventType, message):
-        if sys.platform == "win32" and eventType == "windows_generic_MSG":
+    def nativeEvent(self, eventType: Any, message: Any) -> tuple[bool, int]:
+        is_windows = sys.platform == "win32"
+        is_help_msg = isinstance(eventType, (bytes, bytearray)) and bytes(eventType) == b"windows_generic_MSG"
+        if is_windows and is_help_msg and message:
             msg = wintypes.MSG.from_address(int(message))
-            WM_SYSCOMMAND = 0x0112
-            SC_CONTEXTHELP = 0xF180
-            if msg.message == WM_SYSCOMMAND and msg.wParam == SC_CONTEXTHELP:
+            if msg.message == 0x0112 and msg.wParam == 0xF180:
                 self._show_help()
                 return True, 0
-        return super().nativeEvent(eventType, message)
+        handled, result = super().nativeEvent(eventType, message)
+        return bool(handled), int(result)

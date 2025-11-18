@@ -6,7 +6,7 @@ from silentfrog.crawl_options import CrawlOptions, DEFAULT_USER_AGENT
 def test_crawl_options_default_values() -> None:
     options = CrawlOptions.default()
     assert options.gentle_mode is False
-    assert options.max_concurrent_per_host == 2
+    assert options.max_concurrent_per_host == 4
     assert options.respect_crawl_delay is False
     assert options.user_agent == DEFAULT_USER_AGENT
     assert options.extra_headers == {}
