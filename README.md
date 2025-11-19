@@ -45,10 +45,17 @@ $ poetry run pytest
 $ poetry run silentfrog
 ```
 
+## Support & project status
+
+- Silentfrog is Open source and currently developed by a single maintainer using GitHub + Codex-style tooling; there is **no commercial or priority support**.
+- Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs, feature requests, or security reports. Everything is tracked publicly.
+- Code is written from scratch for this project; if you suspect unintentional reuse, open an issue and it will be addressed.
+- The `dev` branch reflects ongoing work, while `main` only contains tagged releases.
+
 ## Exporting reports
 
-1. Run a page analysis with **Analizza**.
-2. Click **Esporta Excel** and pick a filename (the `.xlsx` extension is appended if missing).
+1. Run a page analysis with **Analyze**.
+2. Click **Export Excel** and pick a filename (the `.xlsx` extension is appended if missing).
 3. Each tab is exported to its own worksheet (Meta, Headers, Images, Links, Redirect, Canonical, Robots, Hreflang, AI crawl, Structured data, Performance, SERP preview/audit, Keywords, Keyword Alerts).
 4. Re-run the export after a new crawl to refresh the workbook.
 
@@ -178,7 +185,7 @@ silentfrog/
 | ---------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `ImportError: cannot import name '_ElementStringResult' from lxml.etree`     | lxml 5.x wheel + extruct 0.16 | Stick to Python 3.11/3.12 – wheel pulls **lxml 4.9.x** automatically, or `poetry add "lxml>=4.9,<5"` |
 | **Poetry fails building lxml 4.9 on macOS**                                  | Using Python 3.13 (no wheels) | `brew install python@3.12 && poetry env use $(which python3.12)`                                      |
-| GUI crashes when clicking **Analizza** and log shows `TypeError: list found` | Mixed schema row formats      | Upgrade to Silentfrog ≥ 0.1.3 (fix merged 2025-06-04)                                                 |
+| GUI crashes when clicking **Analyze** and log shows `TypeError: list found` | Mixed schema row formats      | Upgrade to Silentfrog ≥ 0.1.3 (fix merged 2025-06-04)                                                 |
 | `"Cannot load Qt platform plugin 'xcb'"` on Ubuntu                           | Missing Qt runtime libs       | `sudo apt install libxcb-xinerama0`                                                                   |
 
 ---
