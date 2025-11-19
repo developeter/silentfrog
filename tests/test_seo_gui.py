@@ -361,6 +361,27 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     ]
 
 
+def test_seo_window_shows_placeholder_before_first_crawl(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    assert win.is_showing_placeholder() is True
+    assert win.btn_export.isEnabled() is False
+    assert win.btn_img_dl.isEnabled() is False
+
+
+def test_seo_window_reveals_tabs_after_data(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    payload = _sample_payload()
+
+    win._populate_tables(payload.to_mapping())
+
+    assert win.is_showing_placeholder() is False
+    assert win.btn_export.isEnabled() is True
+    assert win.btn_img_dl.isEnabled() is True
+
+
 @pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
 def test_table_tab_update_sets_model_and_resizing(
     tab_cls: Type[QtWidgets.QWidget],
@@ -805,12 +826,10 @@ def test_populate_tables_reenables_controls(qtbot):
     qtbot.addWidget(win)
     payload = _sample_payload()
 
-    win.btn_go.setEnabled(False)
     win.bar.setVisible(True)
 
     win._populate_tables(payload.to_mapping())
 
-    assert win.btn_go.isEnabled()
     assert not win.bar.isVisible()
 
 

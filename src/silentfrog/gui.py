@@ -101,9 +101,7 @@ class HomeWindow(QMainWindow):
         self.main_layout.addWidget(logo)
 
         # ---------- three main buttons ----------
-        for idx, label in enumerate(
-            ("Massive Redirect Check", "SEO Webpage analysis", "coming soon...")
-        ):
+        for idx, label in enumerate(("Massive Redirect Check", "SEO Webpage analysis")):
             btn = QPushButton(label)
             font = btn.font()
             font.setPointSize(font.pointSize() + 4)  # bigger text
@@ -114,8 +112,6 @@ class HomeWindow(QMainWindow):
                 btn.clicked.connect(self.open_redirect)
             elif idx == 1:
                 btn.clicked.connect(self.open_seo)
-            else:
-                btn.setEnabled(False)
             self.main_layout.addWidget(btn)
 
         # ---------- settings gear bottom-right ----------

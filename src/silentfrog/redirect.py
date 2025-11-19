@@ -120,7 +120,7 @@ def check_redirects(
 
         df.loc[idx, "Status Code"] = status
         df.loc[idx, "Final URL"] = final
-        df.loc[idx, "Redirect Correct"] = "Sì" if ok else "No"
+        df.loc[idx, "Redirect Correct"] = "Yes" if ok else "No"
         df.loc[idx, "Redirect Chain Length"] = length
         df.loc[idx, "Redirect Chain URLs"] = chain
 

@@ -65,7 +65,7 @@ class RedirectWorker(QtCore.QThread):
             )
             self.finished.emit(str(out))
         except Exception as exc:  # noqa: BLE001
-            self.log.emit(f"Errore: {exc}")
+            self.log.emit(f"Error: {exc}")
             self.finished.emit("")
 
 
@@ -86,11 +86,11 @@ class RedirectWindow(QtWidgets.QWidget):
 
         # file
         top = QtWidgets.QHBoxLayout()
-        self.btn_file = QtWidgets.QPushButton("Carica xlsx")
+        self.btn_file = QtWidgets.QPushButton("Load XLSX")
         self.btn_file.clicked.connect(self._select_file)
         top.addWidget(self.btn_file)
 
-        self.lbl_file = QtWidgets.QLabel("Nessun file selezionato")
+        self.lbl_file = QtWidgets.QLabel("No file selected")
         self.lbl_file.setStyleSheet("color: grey")
         top.addWidget(self.lbl_file, stretch=1)
         lay.addLayout(top)
@@ -108,11 +108,11 @@ class RedirectWindow(QtWidgets.QWidget):
         self.spin_threads.setValue(5)
         form.addRow("Thread:", self.spin_threads)
 
-        self.chk_robots = QtWidgets.QCheckBox("Rispetta robots.txt")
+        self.chk_robots = QtWidgets.QCheckBox("Respect robots.txt")
         self.chk_robots.setChecked(True)
         form.addRow(self.chk_robots)
 
-        self.chk_ssl = QtWidgets.QCheckBox("Ignora errori SSL (meno sicuro)")
+        self.chk_ssl = QtWidgets.QCheckBox("Ignore SSL errors (less secure)")
         form.addRow(self.chk_ssl)
 
         lay.addLayout(form)
@@ -127,12 +127,12 @@ class RedirectWindow(QtWidgets.QWidget):
 
         # pulsanti
         btn_row = QtWidgets.QHBoxLayout()
-        self.btn_start = QtWidgets.QPushButton("Avvia")
+        self.btn_start = QtWidgets.QPushButton("Start")
         self.btn_start.setEnabled(False)
         self.btn_start.clicked.connect(self._launch)
         btn_row.addWidget(self.btn_start)
 
-        self.btn_pause = QtWidgets.QPushButton("Pausa")
+        self.btn_pause = QtWidgets.QPushButton("Pause")
         self.btn_pause.setEnabled(False)
         self.btn_pause.clicked.connect(self._toggle_pause)
         btn_row.addWidget(self.btn_pause)
@@ -143,7 +143,7 @@ class RedirectWindow(QtWidgets.QWidget):
     # ----- slot GUI ------------------------------------------------------ #
     def _select_file(self) -> None:
         fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Seleziona file", "", "Excel (*.xlsx *.xls)"
+            self, "Select file", "", "Excel (*.xlsx *.xls)"
         )
         if fname:
             self.excel_path = fname
@@ -178,14 +178,14 @@ class RedirectWindow(QtWidgets.QWidget):
     def _toggle_pause(self) -> None:
         self.worker.toggle_pause()
         if self.worker._pause.is_set():
-            self.btn_pause.setText("Riprendi")
+            self.btn_pause.setText("Resume")
             # riabilita le opzioni
             self.spin_timeout.setEnabled(True)
             self.spin_threads.setEnabled(True)
             self.chk_robots.setEnabled(True)
             self.chk_ssl.setEnabled(True)
         else:
-            self.btn_pause.setText("Pausa")
+            self.btn_pause.setText("Pause")
             self.spin_timeout.setEnabled(False)
             self.spin_threads.setEnabled(False)
             self.chk_robots.setEnabled(False)
@@ -193,14 +193,14 @@ class RedirectWindow(QtWidgets.QWidget):
 
     def _on_finish(self, out_path: str) -> None:
         self.btn_pause.setEnabled(False)
-        self.btn_pause.setText("Pausa")
+        self.btn_pause.setText("Pause")
         self.btn_file.setEnabled(True)
 
         if out_path:
             QtWidgets.QMessageBox.information(
-                self, "Finito", f"Risultati salvati in:\n{out_path}"
+                self, "Done", f"Results saved to:\n{out_path}"
             )
         else:
             QtWidgets.QMessageBox.warning(
-                self, "Errore", "Elaborazione interrotta o fallita."
+                self, "Error", "Processing interrupted or failed."
             )

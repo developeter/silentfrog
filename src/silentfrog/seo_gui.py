@@ -47,11 +47,12 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Analisi webpage SEO - Silentfrog")
+        self.setWindowTitle("Silentfrog - SEO webpage analysis")
         self.resize(950, 620)
         icon_path = Path(__file__).with_name("assets").joinpath("icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         self._latest_payload: CrawlPayload | None = None
+        self._dimmed_buttons: list[QtWidgets.QPushButton] = []
         self._crawl_options: CrawlOptions = CrawlOptions.default()
 
         self._build_ui()
@@ -73,13 +74,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.url_edit.setPlaceholderText("https://example.com")
         url_bar.addWidget(self.url_edit, 1)
 
-        self.btn_go = QtWidgets.QPushButton("Analizza")
+        self.btn_go = QtWidgets.QPushButton("Analyze")
         self.btn_go.clicked.connect(self._start_analysis)
         url_bar.addWidget(self.btn_go)
         layout.addLayout(url_bar)
 
         self.tabs = QtWidgets.QTabWidget()
-        layout.addWidget(self.tabs, 1)
+        self.body_stack = QtWidgets.QStackedWidget()
+        layout.addWidget(self.body_stack, 1)
+        self._intro_panel = self._build_intro_panel()
+        self.body_stack.addWidget(self._intro_panel)
 
         self.meta_tab = MetaTab()
         self.tabs.addTab(self.meta_tab, "Meta tag")
@@ -118,19 +122,22 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         self.serp_tab = SerpTab()
         self.tabs.addTab(self.serp_tab, "SERP")
+        self.body_stack.addWidget(self.tabs)
 
         controls = QtWidgets.QHBoxLayout()
-        self.btn_export = QtWidgets.QPushButton("Esporta Excel")
+        self.btn_export = QtWidgets.QPushButton("Export Excel")
         self.btn_export.setEnabled(False)
+        self._register_dimmed_button(self.btn_export)
         self.btn_export.clicked.connect(self._export_excel)
         controls.addWidget(self.btn_export)
 
-        self.btn_img_dl = QtWidgets.QPushButton("Analizza immagini")
+        self.btn_img_dl = QtWidgets.QPushButton("Analyze images")
         self.btn_img_dl.setEnabled(False)
+        self._register_dimmed_button(self.btn_img_dl)
         self.btn_img_dl.clicked.connect(self._start_img_analysis)
         controls.addWidget(self.btn_img_dl)
 
-        self.btn_settings = QtWidgets.QPushButton("Crawl settings…")
+        self.btn_settings = QtWidgets.QPushButton("Crawl settings...")
         self.btn_settings.setToolTip("Adjust gentle crawl preferences")
         self.btn_settings.clicked.connect(self._open_crawl_settings)
         controls.addWidget(self.btn_settings)
@@ -152,11 +159,90 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
         self._update_settings_label()
+        self._show_placeholder()
+        self._set_intro_state(False)
+        self._update_intro_colors()
+        self._refresh_dimmed_buttons()
+
+    def _build_intro_panel(self) -> QtWidgets.QWidget:
+        panel = QtWidgets.QWidget()
+        wrapper = QtWidgets.QVBoxLayout(panel)
+        wrapper.setSpacing(12)
+        wrapper.setAlignment(QtCore.Qt.AlignCenter)
+        wrapper.addStretch()
+
+        self._intro_default_title = "Ready to crawl a page?"
+        self._intro_default_hint = (
+            "Enter a URL above and press Analyze to launch the SEO scan.\n"
+            "Use Crawl settings to fine-tune the scan before you start."
+        )
+        self._intro_crawl_hint = "Hang tight while Silentfrog crawls the page."
+
+        self._intro_title = QtWidgets.QLabel(self._intro_default_title)
+        self._intro_title.setAlignment(QtCore.Qt.AlignCenter)
+        wrapper.addWidget(self._intro_title)
+
+        self._intro_hint = QtWidgets.QLabel(self._intro_default_hint)
+        self._intro_hint.setAlignment(QtCore.Qt.AlignCenter)
+        self._intro_hint.setWordWrap(True)
+        wrapper.addWidget(self._intro_hint)
+
+        wrapper.addStretch()
+        return panel
+
+    def _register_dimmed_button(self, button: QtWidgets.QPushButton) -> None:
+        self._dimmed_buttons.append(button)
+        self._apply_disabled_appearance(button)
+
+    def _apply_disabled_appearance(self, button: QtWidgets.QPushButton) -> None:
+        colors = {
+            "dark": ("#2b2b2b", "#9fa3ab", "#3a3a3a"),
+            "light": ("#dcdcdc", "#6a6a6a", "#b5b5b5"),
+        }
+        bg, fg, border = colors.get(self._resolve_theme(), colors["light"])
+        button.setStyleSheet(
+            "QPushButton:disabled {"
+            f" background-color: {bg};"
+            f" color: {fg};"
+            f" border: 1px solid {border};"
+            "}"
+        )
+
+    def _refresh_dimmed_buttons(self) -> None:
+        for button in self._dimmed_buttons:
+            self._apply_disabled_appearance(button)
+
+    def _show_placeholder(self) -> None:
+        if self.body_stack.currentWidget() is not self._intro_panel:
+            self.body_stack.setCurrentWidget(self._intro_panel)
+
+    def _show_results_panel(self) -> None:
+        if self.body_stack.currentWidget() is not self.tabs:
+            self.body_stack.setCurrentWidget(self.tabs)
+
+    def is_showing_placeholder(self) -> bool:
+        return self.body_stack.currentWidget() is self._intro_panel
+
+    def _set_intro_state(self, crawling: bool) -> None:
+        if not hasattr(self, "_intro_title"):
+            return
+        if crawling:
+            self._intro_title.setText("Crawling...")
+            self._intro_hint.setText(self._intro_crawl_hint)
+        else:
+            self._intro_title.setText(self._intro_default_title)
+            self._intro_hint.setText(self._intro_default_hint)
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() == QtCore.QEvent.PaletteChange:
+            self._update_intro_colors()
+            self._refresh_dimmed_buttons()
+        super().changeEvent(event)
 
     def _start_analysis(self) -> None:
         url = self.url_edit.text().strip()
         if not url:
-            QtWidgets.QMessageBox.warning(self, "URL mancante", "Inserisci un URL.")
+            QtWidgets.QMessageBox.warning(self, "Missing URL", "Enter a URL to analyze.")
             return
         self._prepare_for_analysis()
 
@@ -171,7 +257,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _start_img_analysis(self) -> None:
         rows = self.images_tab.rows()
         if not rows:
-            QtWidgets.QMessageBox.information(self, "Niente da fare", "Tabella immagini vuota.")
+            QtWidgets.QMessageBox.information(self, "Nothing to do", "Image table is empty.")
             return
 
         run_image_analysis(
@@ -222,6 +308,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._finalise_population()
 
     def _clear_results(self) -> None:
+        self._show_placeholder()
         self.meta_tab.clear()
         self.headers_tab.update([], None)
         self.images_tab.update([])
@@ -281,16 +368,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _reset_ui(self) -> None:
         self._stop_progress_drift()
         self.bar.setVisible(False)
-        self.btn_go.setEnabled(True)
 
     def _show_error(self, msg: str) -> None:
-        QtWidgets.QMessageBox.warning(self, "Errore", msg)
+        QtWidgets.QMessageBox.warning(self, "Error", msg)
         self._reset_ui()
+        self._set_intro_state(False)
 
     def _prepare_for_analysis(self) -> None:
         self._clear_results()
         self._latest_payload = None
-        self.btn_go.setEnabled(False)
+        self._set_intro_state(True)
         self.bar.setRange(0, 100)
         self._set_progress(5)
         self._start_progress_drift(60)
@@ -351,20 +438,45 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
         self._reset_ui()
+        self._set_intro_state(False)
+        self._show_results_panel()
+
+    def _update_intro_colors(self) -> None:
+        if not hasattr(self, "_intro_title"):
+            return
+        scheme = {
+            "dark": ("#f5f5f5", "#cfd2d8"),
+            "light": ("#1c1c1c", "#4a4a4a"),
+        }
+        title_color, hint_color = scheme.get(self._resolve_theme(), scheme["light"])
+        self._intro_title.setStyleSheet(
+            f"font-size: 18px; font-weight: 600; color: {title_color};"
+        )
+        self._intro_hint.setStyleSheet(
+            f"color: {hint_color}; max-width: 460px;"
+        )
+
+    def _resolve_theme(self) -> str:
+        app = QtWidgets.QApplication.instance()
+        stored = app.property("silentfrog_theme") if app else None
+        if stored in ("dark", "light"):
+            return stored
+        window_color = self.palette().color(QtGui.QPalette.Window)
+        return "dark" if window_color.lightness() < 128 else "light"
 
     def _export_excel(self) -> None:
         if not self._latest_payload:
             QtWidgets.QMessageBox.information(
                 self,
-                "Nessun dato",
-                "Esegui prima un'analisi per esportare i risultati.",
+                "No data",
+                "Run an analysis before exporting results.",
             )
             return
 
         suggested = Path.home() / "silentfrog_report.xlsx"
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Esporta report",
+            "Export report",
             str(suggested),
             "Excel files (*.xlsx)",
         )
@@ -380,14 +492,14 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             log.exception("Failed to export Excel")
             QtWidgets.QMessageBox.critical(
                 self,
-                "Esportazione fallita",
-                f"Impossibile esportare il report.\nDettagli: {exc}",
+                "Export failed",
+                f"Unable to export the report.\nDetails: {exc}",
             )
         else:
             QtWidgets.QMessageBox.information(
                 self,
-                "Esportazione completata",
-                "Report esportato correttamente.",
+                "Export completed",
+                "Report exported successfully.",
             )
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()

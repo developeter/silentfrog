@@ -28,5 +28,5 @@ def test_check_redirects(tmp_path: pathlib.Path):
         )
 
     out_df = pd.read_excel(out)
-    assert out_df.loc[0, "Redirect Correct"] == "Sì"
+    assert out_df.loc[0, "Redirect Correct"] == "Yes"
     assert out_df.loc[0, "Status Code"] == 200
