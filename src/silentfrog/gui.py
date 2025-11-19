@@ -162,6 +162,10 @@ class _SettingsDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Appearance")
+        # Remove the Windows "?" context-help button so only standard controls stay visible.
+        flags = self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint
+        self.setWindowFlags(flags)
+        self.resize(360, 150)
         lay = QVBoxLayout(self)
 
         self.dark_radio = QRadioButton("Dark theme")

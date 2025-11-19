@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import sys
-import ctypes
-from ctypes import wintypes
-
-from typing import Any
-
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
 
@@ -19,7 +13,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Crawl settings")
         self.resize(420, 320)
         help_flag = getattr(QtCore.Qt, "WindowContextHelpButtonHint", QtCore.Qt.WindowType(0))
-        self.setWindowFlag(help_flag, True)
+        self.setWindowFlags(self.windowFlags() & ~help_flag)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -53,6 +47,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         adv_layout = QtWidgets.QVBoxLayout(self.adv_group)
         self.headers_label = QtWidgets.QLabel("Custom headers (Key: Value per line)")
         adv_layout.addWidget(self.headers_label)
+        headers_help = QtWidgets.QLabel(
+            "Each line becomes an HTTP header (e.g. Authorization: Bearer token123). "
+            "Set them only when the site expects additional headers."
+        )
+        headers_help.setWordWrap(True)
+        headers_help.setStyleSheet("color:#666;")
+        adv_layout.addWidget(headers_help)
 
         self.txt_headers = QtWidgets.QPlainTextEdit()
         self.txt_headers.setPlaceholderText("Authorization: Bearer …")
@@ -60,6 +61,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         adv_layout.addWidget(self.txt_headers)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
+        cookies_help = QtWidgets.QLabel(
+            "Raw Cookie header, such as session=abc; theme=dark, if the crawl must mimic an authenticated visit."
+        )
+        cookies_help.setWordWrap(True)
+        cookies_help.setStyleSheet("color:#666;")
+        adv_layout.addWidget(cookies_help)
         self.edit_cookies = QtWidgets.QLineEdit()
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
         adv_layout.addWidget(self.edit_cookies)
@@ -67,6 +74,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
+        help_btn = buttons.addButton("Help", QtWidgets.QDialogButtonBox.HelpRole)
+        help_btn.clicked.connect(self._show_help)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -186,23 +195,3 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             ),
         )
 
-    def event(self, event: QtCore.QEvent):
-        enter_help = getattr(QtCore.QEvent, "EnterWhatsThisMode", QtCore.QEvent.Type(0))
-        if event.type() == enter_help:
-            self._show_help()
-            QtWidgets.QWhatsThis.leaveWhatsThisMode()
-            QtWidgets.QApplication.restoreOverrideCursor()
-            event.accept()
-            return True
-        return super().event(event)
-
-    def nativeEvent(self, eventType: Any, message: Any) -> tuple[bool, int]:
-        is_windows = sys.platform == "win32"
-        is_help_msg = isinstance(eventType, (bytes, bytearray)) and bytes(eventType) == b"windows_generic_MSG"
-        if is_windows and is_help_msg and message:
-            msg = wintypes.MSG.from_address(int(message))
-            if msg.message == 0x0112 and msg.wParam == 0xF180:
-                self._show_help()
-                return True, 0
-        handled, result = super().nativeEvent(eventType, message)
-        return bool(handled), int(result)
