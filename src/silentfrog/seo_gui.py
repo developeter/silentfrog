@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import sys
+from urllib.parse import urlparse
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -223,6 +224,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def is_showing_placeholder(self) -> bool:
         return self.body_stack.currentWidget() is self._intro_panel
 
+    @staticmethod
+    def _is_valid_url(url: str) -> bool:
+        if not url:
+            return False
+        parsed = urlparse(url.strip())
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
     def _set_intro_state(self, crawling: bool) -> None:
         if not hasattr(self, "_intro_title"):
             return
@@ -241,7 +249,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _start_analysis(self) -> None:
         url = self.url_edit.text().strip()
-        if not url:
+        if not self._is_valid_url(url):
             QtWidgets.QMessageBox.warning(self, "Missing URL", "Enter a URL to analyze.")
             return
         self._prepare_for_analysis()
