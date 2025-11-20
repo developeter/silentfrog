@@ -157,6 +157,8 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         self.bar.setFormat("%p%")
+        self.bar.setAlignment(QtCore.Qt.AlignCenter)
+        self.bar.setTextVisible(True)
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
         self._update_settings_label()

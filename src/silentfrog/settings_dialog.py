@@ -58,6 +58,10 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.txt_headers = QtWidgets.QPlainTextEdit()
         self.txt_headers.setPlaceholderText("Authorization: Bearer …")
         self.txt_headers.setFixedHeight(80)
+        self.txt_headers.setStyleSheet(
+            "QPlainTextEdit { background: palette(base); }"
+            "QPlainTextEdit:read-only { background: palette(base); color: palette(text); }"
+        )
         adv_layout.addWidget(self.txt_headers)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
@@ -69,6 +73,10 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         adv_layout.addWidget(cookies_help)
         self.edit_cookies = QtWidgets.QLineEdit()
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
+        self.edit_cookies.setStyleSheet(
+            "QLineEdit { background: palette(base); }"
+            "QLineEdit:read-only { background: palette(base); color: palette(text); }"
+        )
         adv_layout.addWidget(self.edit_cookies)
 
         buttons = QtWidgets.QDialogButtonBox(
@@ -114,8 +122,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _sync_state(self) -> None:
         is_gentle = self.chk_gentle.isChecked()
         self.spin_parallel.setEnabled(is_gentle)
-        self.txt_headers.setEnabled(self.adv_group.isChecked())
-        self.edit_cookies.setEnabled(self.adv_group.isChecked())
+        active = self.adv_group.isChecked()
+        self.txt_headers.setReadOnly(not active)
+        self.edit_cookies.setReadOnly(not active)
 
     def _on_gentle_toggled(self, checked: bool) -> None:
         if self._applying_preset:
