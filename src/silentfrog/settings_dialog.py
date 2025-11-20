@@ -58,10 +58,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.txt_headers = QtWidgets.QPlainTextEdit()
         self.txt_headers.setPlaceholderText("Authorization: Bearer …")
         self.txt_headers.setFixedHeight(80)
-        self.txt_headers.setStyleSheet(
-            "QPlainTextEdit { background: palette(base); }"
-            "QPlainTextEdit:read-only { background: palette(base); color: palette(text); }"
-        )
         adv_layout.addWidget(self.txt_headers)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
@@ -73,10 +69,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         adv_layout.addWidget(cookies_help)
         self.edit_cookies = QtWidgets.QLineEdit()
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
-        self.edit_cookies.setStyleSheet(
-            "QLineEdit { background: palette(base); }"
-            "QLineEdit:read-only { background: palette(base); color: palette(text); }"
-        )
         adv_layout.addWidget(self.edit_cookies)
 
         buttons = QtWidgets.QDialogButtonBox(
@@ -203,4 +195,3 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "Use presets for quick defaults or switch to Custom to fine-tune headers and cookies."
             ),
         )
-

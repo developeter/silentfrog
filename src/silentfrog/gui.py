@@ -70,7 +70,22 @@ def apply_theme(app, dark: bool = True) -> None:
     if app is not None:
         app.setStyleSheet(DARK_STYLESHEET if dark else LIGHT_STYLESHEET)
         app.setProperty("silentfrog_theme", "dark" if dark else "light")
-
+        palette = QtGui.QPalette()
+        base = QtGui.QColor("#1f1f1f") if dark else QtGui.QColor("#ffffff")
+        window = QtGui.QColor("#121212") if dark else QtGui.QColor("#f0f0f0")
+        text = QtGui.QColor("#f5f5f5") if dark else QtGui.QColor("#202124")
+        button = QtGui.QColor("#1e1e1e") if dark else QtGui.QColor("#ededed")
+        highlight = QtGui.QColor("#2ecc71") if dark else QtGui.QColor("#0f9d58")
+        palette.setColor(QtGui.QPalette.Window, window)
+        palette.setColor(QtGui.QPalette.Base, base)
+        palette.setColor(QtGui.QPalette.AlternateBase, base.darker(110))
+        palette.setColor(QtGui.QPalette.Text, text)
+        palette.setColor(QtGui.QPalette.WindowText, text)
+        palette.setColor(QtGui.QPalette.Button, button)
+        palette.setColor(QtGui.QPalette.ButtonText, text)
+        palette.setColor(QtGui.QPalette.Highlight, highlight)
+        palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor("#ffffff"))
+        app.setPalette(palette)
 
 icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
 

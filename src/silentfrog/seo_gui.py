@@ -165,6 +165,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._show_placeholder()
         self._set_intro_state(False)
         self._update_intro_colors()
+        self._style_progress_bar()
         self._refresh_dimmed_buttons()
 
     def _build_intro_panel(self) -> QtWidgets.QWidget:
@@ -247,6 +248,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         if event.type() == QtCore.QEvent.PaletteChange:
             self._update_intro_colors()
             self._refresh_dimmed_buttons()
+            self._style_progress_bar()
         super().changeEvent(event)
 
     def _start_analysis(self) -> None:
@@ -464,6 +466,25 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         )
         self._intro_hint.setStyleSheet(
             f"color: {hint_color}; max-width: 460px;"
+        )
+
+    def _style_progress_bar(self) -> None:
+        theme = self._resolve_theme()
+        if theme == "dark":
+            text_color = "#f5f5f5"
+            background = "#1f1f1f"
+        else:
+            text_color = "#202124"
+            background = "#f5f5f5"
+        chunk_color = "#2ecc71"
+        self.bar.setStyleSheet(
+            "QProgressBar {"
+            f" color: {text_color};"
+            f" background-color: {background};"
+            " border: 1px solid #4c4c4c;"
+            " border-radius: 4px;"
+            "}"
+            f"QProgressBar::chunk {{ background-color: {chunk_color}; }}"
         )
 
     def _resolve_theme(self) -> str:
