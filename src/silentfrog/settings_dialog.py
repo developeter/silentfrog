@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
 
@@ -93,6 +93,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._applying_preset = False
         self._load_from_options(options)
         self._sync_state()
+        self._apply_field_styles()
 
     def _load_from_options(self, options: CrawlOptions) -> bool:
         headers_lines = [
@@ -117,6 +118,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         active = self.adv_group.isChecked()
         self.txt_headers.setReadOnly(not active)
         self.edit_cookies.setReadOnly(not active)
+        self._apply_field_styles()
 
     def _on_gentle_toggled(self, checked: bool) -> None:
         if self._applying_preset:
@@ -195,3 +197,32 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "Use presets for quick defaults or switch to Custom to fine-tune headers and cookies."
             ),
         )
+
+    def _apply_field_styles(self) -> None:
+        colors = self._field_colors()
+        headers_style = (
+            "QPlainTextEdit {{ background:{bg}; color:{fg}; border:1px solid {border}; }}"
+            "QPlainTextEdit:read-only {{ background:{bg_disabled}; color:{fg_disabled}; border:1px solid {border}; }}"
+        ).format(**colors)
+        cookies_style = (
+            "QLineEdit {{ background:{bg}; color:{fg}; border:1px solid {border}; }}"
+            "QLineEdit:read-only {{ background:{bg_disabled}; color:{fg_disabled}; border:1px solid {border}; }}"
+        ).format(**colors)
+        self.txt_headers.setStyleSheet(headers_style)
+        self.edit_cookies.setStyleSheet(cookies_style)
+
+    def _field_colors(self) -> dict[str, str]:
+        base = self.palette().color(QtGui.QPalette.Base)
+        is_dark = base.value() < 160
+        return {
+            "bg": "#1f1f1f" if is_dark else "#ffffff",
+            "fg": "#f5f5f5" if is_dark else "#1f1f1f",
+            "border": "#444" if is_dark else "#b5b5b5",
+            "bg_disabled": "#151515" if is_dark else "#f4f4f4",
+            "fg_disabled": "#8e8e8e",
+        }
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() == QtCore.QEvent.PaletteChange:
+            self._apply_field_styles()
+        super().changeEvent(event)
