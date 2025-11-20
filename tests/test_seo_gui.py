@@ -43,6 +43,7 @@ def _normalize_html(html: str) -> str:
     cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", html, flags=re.IGNORECASE)
     cleaned = re.sub(r"<head>.*?</head>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<body[^>]*>", "<body>", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"font-weight:\d+(\.\d+)?", "font-weight:500", cleaned)
     cleaned = cleaned.replace("\xa0", "&nbsp;")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
