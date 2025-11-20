@@ -36,7 +36,14 @@ $ cd silentfrog
 $ poetry env use $(which python3.12)  # or python3.11
 
 # install (pre-built wheels, no compile step)
+# install (pre-built wheels, no compile step)
 $ poetry install --sync
+
+# NLTK stopwords corpus (required before running tests)
+$ poetry run python -m nltk.downloader stopwords
+# macOS: if you see CERTIFICATE_VERIFY_FAILED, run
+# open "/Applications/Python 3.12/Install Certificates.command"
+# and repeat the command above.
 
 # run tests
 $ poetry run pytest
@@ -81,7 +88,7 @@ The **Performance** tab (and the corresponding Excel worksheet) displays:
 - resource mix (per-type request counts and approximate weights for CSS, JS, images, fonts);
 - opportunity hints whenever payloads look heavy or script/stylesheet counts climb.
 
-Silentfrog can also suggest **open-source learning resources** (HTTP Archive Web Almanac, Google’s RAIL model, Web Vitals patterns). Toggle them with:
+Silentfrog can also suggest **open-source learning resources** (HTTP Archive Web Almanac, Google's RAIL model, Web Vitals patterns). Toggle them with:
 
 ```bash
 export SILENTFROG_PERF_GUIDES=0     # macOS / Linux

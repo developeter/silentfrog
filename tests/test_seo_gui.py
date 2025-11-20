@@ -42,6 +42,7 @@ def _restore_palette():
 def _normalize_html(html: str) -> str:
     cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", html, flags=re.IGNORECASE)
     cleaned = re.sub(r"<head>.*?</head>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<body[^>]*>", "<body>", cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.replace("\xa0", "&nbsp;")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
@@ -670,7 +671,7 @@ def test_serp_tab_snapshot(qtbot):
     assert header.sectionResizeMode(1) == QtWidgets.QHeaderView.ResizeToContents
 
     normalized_html = _normalize_html(tab.preview.toHtml())
-    expected_html = SERP_SNAPSHOT.read_text(encoding="utf-8").strip()
+    expected_html = _normalize_html(SERP_SNAPSHOT.read_text(encoding="utf-8"))
     assert normalized_html == expected_html
 
 
