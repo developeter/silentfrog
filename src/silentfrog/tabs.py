@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, cast
+import sys
 
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtGui import QPalette, QColor
@@ -50,8 +51,9 @@ class TableTab(QtWidgets.QWidget):
         super().__init__(parent)
         self._table = QtWidgets.QTableView()
         self._table.setSortingEnabled(sorting)
-        self._table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        self._table.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        policy = QtCore.Qt.ScrollBarAlwaysOn if sys.platform == "darwin" else QtCore.Qt.ScrollBarAsNeeded
+        self._table.setHorizontalScrollBarPolicy(policy)
+        self._table.setVerticalScrollBarPolicy(policy)
         self._table.setViewportMargins(0, 0, 14, 14)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

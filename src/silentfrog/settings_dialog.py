@@ -42,10 +42,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         general_layout.addRow("Presets", presets_widget)
         layout.addWidget(general_box)
 
-        self.chk_adv = QtWidgets.QCheckBox("Advanced headers")
-        layout.addWidget(self.chk_adv)
-
-        self.adv_group = QtWidgets.QGroupBox()
+        self.adv_group = QtWidgets.QGroupBox("Advanced headers")
         layout.addWidget(self.adv_group)
         adv_layout = QtWidgets.QVBoxLayout(self.adv_group)
         self.headers_label = QtWidgets.QLabel("Custom headers (Key: Value per line)")
@@ -87,8 +84,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.spin_parallel.valueChanged.connect(self._mark_custom)
         self.txt_headers.textChanged.connect(self._on_header_text_changed)
         self.edit_cookies.textChanged.connect(self._mark_custom)
-        self.chk_adv.toggled.connect(self._mark_custom)
-        self.chk_adv.toggled.connect(self._sync_state)
         self.btn_preset_standard.toggled.connect(lambda checked: checked and self._apply_preset("standard"))
         self.btn_preset_gentle.toggled.connect(lambda checked: checked and self._apply_preset("gentle"))
         self.btn_preset_custom.toggled.connect(lambda checked: checked and self._sync_state())
@@ -106,8 +101,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         headers_text = "\n".join(headers_lines)
         cookie_text = options.extra_headers.get("Cookie", "")
         advanced_on = bool(headers_text or cookie_text)
-
-        self.chk_adv.setChecked(advanced_on)
         self.txt_headers.setPlainText(headers_text)
         self.edit_cookies.setText(cookie_text)
         self._select_initial_preset(options, advanced_on)
@@ -117,10 +110,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _sync_state(self) -> None:
         is_gentle = self.chk_gentle.isChecked()
         self.spin_parallel.setEnabled(is_gentle)
-        active = self.chk_adv.isChecked()
-        self.adv_group.setVisible(active)
-        self.txt_headers.setReadOnly(not active)
-        self.edit_cookies.setReadOnly(not active)
 
     def _on_gentle_toggled(self, checked: bool) -> None:
         if self._applying_preset:
@@ -141,16 +130,17 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def _validate_headers(self) -> None:
         styles = {"invalid": "color:#d32f2f;", "valid": "color:#2e7d32;", "empty": ""}
-        if not self.chk_adv.isChecked():
+        text = self.txt_headers.toPlainText().strip()
+        if not text:
             self.headers_label.setStyleSheet(styles["empty"])
             return
-        _, invalid = parse_header_lines(self.txt_headers.toPlainText())
-        state = "invalid" if invalid else "valid" if self.txt_headers.toPlainText().strip() else "empty"
+        _, invalid = parse_header_lines(text)
+        state = "invalid" if invalid else "valid"
         self.headers_label.setStyleSheet(styles[state])
 
     def options(self) -> CrawlOptions:
-        header_text = self.txt_headers.toPlainText() if self.chk_adv.isChecked() else ""
-        cookie_text = self.edit_cookies.text() if self.chk_adv.isChecked() else ""
+        header_text = self.txt_headers.toPlainText().strip()
+        cookie_text = self.edit_cookies.text().strip()
         return CrawlOptions.from_ui(
             gentle_mode=self.chk_gentle.isChecked(),
             max_parallel=self.spin_parallel.value(),
@@ -173,7 +163,6 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         else:
             self.chk_gentle.setChecked(config["gentle"])
             self.spin_parallel.setValue(config["parallel"])
-            self.chk_adv.setChecked(False)
             self.btn_preset_standard.setChecked(preset == "standard")
             self.btn_preset_gentle.setChecked(preset == "gentle")
         self._applying_preset = False

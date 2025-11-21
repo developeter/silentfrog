@@ -766,7 +766,6 @@ def test_crawl_settings_dialog_roundtrip(qtbot):
 
     dialog.chk_gentle.setChecked(True)
     dialog.spin_parallel.setValue(3)
-    dialog.chk_adv.setChecked(True)
     dialog.txt_headers.setPlainText("Authorization: Token 123")
     dialog.edit_cookies.setText("session=abc")
 
