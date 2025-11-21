@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
 
@@ -14,6 +14,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.resize(420, 320)
         help_flag = getattr(QtCore.Qt, "WindowContextHelpButtonHint", QtCore.Qt.WindowType(0))
         self.setWindowFlags(self.windowFlags() & ~help_flag)
+        self._apply_style()
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -198,3 +199,39 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "Use presets for quick defaults or switch to Custom to fine-tune headers and cookies."
             ),
         )
+
+    def _apply_style(self) -> None:
+        style = QtWidgets.QStyleFactory.create("Fusion")
+        if style:
+            self.setStyle(style)
+        app = QtWidgets.QApplication.instance()
+        theme = app.property("silentfrog_theme") if app else None
+        dark = theme != "light"
+        palette = QtGui.QPalette()
+        if dark:
+            window = QtGui.QColor("#121212")
+            base = QtGui.QColor("#1b1b1b")
+            text = QtGui.QColor("#f0f0f0")
+            button = QtGui.QColor("#1a1a1a")
+            highlight = QtGui.QColor("#2ecc71")
+        else:
+            window = QtGui.QColor("#f4f4f4")
+            base = QtGui.QColor("#ffffff")
+            text = QtGui.QColor("#1e1e1e")
+            button = QtGui.QColor("#e5e5e5")
+            highlight = QtGui.QColor("#0f9d58")
+        palette.setColor(QtGui.QPalette.Window, window)
+        palette.setColor(QtGui.QPalette.Base, base)
+        palette.setColor(QtGui.QPalette.AlternateBase, base)
+        palette.setColor(QtGui.QPalette.Text, text)
+        palette.setColor(QtGui.QPalette.WindowText, text)
+        palette.setColor(QtGui.QPalette.Button, button)
+        palette.setColor(QtGui.QPalette.ButtonText, text)
+        palette.setColor(QtGui.QPalette.Highlight, highlight)
+        palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor("#ffffff"))
+        self.setPalette(palette)
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        if event.type() == QtCore.QEvent.PaletteChange:
+            self._apply_style()
+        super().changeEvent(event)
