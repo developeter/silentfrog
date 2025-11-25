@@ -1,9 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 import sys
 
 from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
 from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics
 from .models import (
@@ -30,7 +31,7 @@ def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
     app = QtWidgets.QApplication.instance()
-    if app is not None:
+    if isinstance(app, QtWidgets.QApplication):
         theme = app.property("silentfrog_theme")
         if theme in {"dark", "light"}:
             return theme == "dark"
@@ -51,13 +52,20 @@ class TableTab(QtWidgets.QWidget):
         super().__init__(parent)
         self._table = QtWidgets.QTableView()
         self._table.setSortingEnabled(sorting)
-        policy = QtCore.Qt.ScrollBarAlwaysOn if sys.platform == "darwin" else QtCore.Qt.ScrollBarAsNeeded
-        self._table.setHorizontalScrollBarPolicy(policy)
-        self._table.setVerticalScrollBarPolicy(policy)
-        self._table.setViewportMargins(0, 0, 14, 14)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._table)
+        self._table.setViewportMargins(0, 0, 18, 18)
+        self._table.setStyleSheet("QTableView { padding-right: 18px; padding-bottom: 18px; }")
+        self._layout: QtWidgets.QVBoxLayout = QtWidgets.QVBoxLayout(self)
+        if sys.platform == "darwin":
+            fusion = QtWidgets.QStyleFactory.create("Fusion")
+            if fusion:
+                self._table.setStyle(fusion)
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        else:
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.addWidget(self._table)
         self._model: QtCore.QAbstractTableModel | None = None
 
     @property
@@ -132,7 +140,8 @@ class LinksTab(TableTab):
 
 class RedirectTab(TableTab):
     def update(self, data: Dict[str, object]) -> None:
-        chain = " ? ".join(data.get("chain", []) or [])
+        chain_items = data.get("chain", []) or []
+        chain = " → ".join(str(item) for item in chain_items)
         rows = [
             ["Redirect chain", chain or ""],
             ["Hop count", str(data.get("hops", ""))],
@@ -189,9 +198,7 @@ class KeywordsTab(TableTab):
         self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self._entries: List[KeywordEntry] = []
         self._applying_palette = False
-        layout = self.layout()
-        if layout is not None:
-            layout.insertWidget(0, self._summary)
+        self._layout.insertWidget(0, self._summary)
 
     def update(self, rows: List[object]) -> None:
         entries: List[KeywordEntry] = []
@@ -310,12 +317,10 @@ class PerformanceTab(TableTab):
         self._offender_view.setAlternatingRowColors(True)
         self._current_metrics = PerformanceMetrics.empty()
         self._is_rendering = False
-        layout = self.layout()
-        if layout is not None:
-            layout.insertWidget(0, self._summary)
-            layout.insertWidget(1, self._scripts)
-            layout.addWidget(self._opportunities)
-            layout.addWidget(self._offender_view)
+        self._layout.insertWidget(0, self._summary)
+        self._layout.insertWidget(1, self._scripts)
+        self._layout.addWidget(self._opportunities)
+        self._layout.addWidget(self._offender_view)
 
     def update(self, data: object) -> None:
         metrics = PerformanceMetrics.empty()

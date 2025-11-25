@@ -208,6 +208,14 @@ def _normalize_fetchpriority(value: str) -> str:
         return "False"
     return text
 
+
+def _normalize_loading(value: str) -> str:
+    text = (value or "").strip().lower()
+    mapping = {"lazy": "Lazy", "eager": "Eager", "auto": "Auto"}
+    if not text:
+        return ""
+    return mapping.get(text, value.strip().title())
+
 # -- robots.txt helper ---------------------------------------------------
 async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
     parsed = urlparse(url)
@@ -619,7 +627,7 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
         alt = _attr(img, "alt")
         title = _attr(img, "title")
         loading_attr = (_attr(img, "loading") or "").lower()
-        has_lazy = loading_attr == "lazy"
+        loading_value = _normalize_loading(loading_attr)
         mime = _guess_image_mime(src)
         width_attr = _attr(img, "width")
         height_attr = _attr(img, "height")
@@ -634,7 +642,7 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
                 width_attr,
                 height_attr,
                 size_placeholder,
-                "Yes" if has_lazy else "No",
+                loading_value,
                 fetch_priority,
             ]
         )

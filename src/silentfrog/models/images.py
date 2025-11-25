@@ -13,24 +13,23 @@ from .base import GenericModel
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
         normalized: List[List[str]] = []
-        self._lazy_rows: set[int] = set()
+        self._loading_rows: set[int] = set()
         self._dimension_rows: set[int] = set()
         for idx, row in enumerate(rows):
             padded = (row + [""] * 9)[:9]
-            src, alt, title, mime, width, height, size, lazy, fetch_priority = padded
-            lazy_text = str(lazy).strip().lower()
-            lazy_value = "Yes" if lazy_text in {"yes", "1", "true"} else "No"
+            src, alt, title, mime, width, height, size, loading, fetch_priority = padded
+            loading_value = str(loading).strip().title()
             fetch_text = str(fetch_priority).strip()
             normalized.append(
-                [src, alt, title, mime, width, height, size, lazy_value, fetch_text]
+                [src, alt, title, mime, width, height, size, loading_value, fetch_text]
             )
-            if lazy_value == "Yes":
-                self._lazy_rows.add(idx)
+            if loading_value:
+                self._loading_rows.add(idx)
             if str(width).strip() and str(height).strip():
                 self._dimension_rows.add(idx)
 
         super().__init__(
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy", "Fetch priority"],
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Loading", "Fetch priority"],
             normalized,
         )
         self._brushes: StatusBrushPalette = status_brushes()
@@ -101,17 +100,15 @@ class ImagesModel(GenericModel):
             return None
         if column == 6:
             return self._color_size(self._rows[row][column])
-        if column == 0 and row not in self._lazy_rows:
+        if column == 0 and row not in self._loading_rows:
             return self._brushes.warn
         if column in (4, 5) and row not in self._dimension_rows:
             return self._brushes.warn
-        if column == 7 and row not in self._lazy_rows:
+        if column == 7 and row not in self._loading_rows:
             return self._brushes.warn
         if column == 8:
             status = ImagesModel._priority_status(self._rows[row][column])
             if status == "missing":
                 return self._brushes.warn
-            if status == "high":
-                return self._brushes.good
             return None
         return None

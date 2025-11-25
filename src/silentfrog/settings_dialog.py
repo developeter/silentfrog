@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
 
@@ -14,7 +14,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.resize(420, 320)
         help_flag = getattr(QtCore.Qt, "WindowContextHelpButtonHint", QtCore.Qt.WindowType(0))
         self.setWindowFlags(self.windowFlags() & ~help_flag)
-        self._apply_style()
+        style = QtWidgets.QStyleFactory.create("Fusion")
+        if style:
+            self.setStyle(style)
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            self.setPalette(app.palette())
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -22,6 +27,17 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         general_layout = QtWidgets.QFormLayout(general_box)
         self.chk_gentle = QtWidgets.QCheckBox("Enable gentle crawl mode")
         self.chk_gentle.setChecked(options.gentle_mode)
+        self.chk_gentle.setStyleSheet(
+            "QCheckBox::indicator { width:16px; height:16px; border:1px solid rgba(90,90,90,0.8); "
+            "border-radius:3px; background: palette(base); } "
+            "QCheckBox::indicator:checked { background:#2ecc71; border:1px solid #2ecc71; }"
+        )
+        checkbox_style = (
+            "QCheckBox::indicator { width:16px; height:16px; border:1px solid rgba(90,90,90,0.8);"
+            " border-radius:3px; background: palette(base); }"
+            "QCheckBox::indicator:checked { background:#2ecc71; border:1px solid #2ecc71; }"
+        )
+        self.chk_gentle.setStyleSheet(checkbox_style)
         general_layout.addRow(self.chk_gentle)
 
         self.spin_parallel = QtWidgets.QSpinBox()
@@ -58,6 +74,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.txt_headers = QtWidgets.QPlainTextEdit()
         self.txt_headers.setPlaceholderText("Authorization: Bearer …")
         self.txt_headers.setFixedHeight(80)
+        self.txt_headers.setStyleSheet(
+            "QPlainTextEdit { border: 1px solid rgba(90,90,90,0.7); border-radius: 4px; padding: 4px;"
+            "background: palette(base); color: palette(text); }"
+            "QPlainTextEdit:focus { border: 1px solid #2ecc71; }"
+        )
         adv_layout.addWidget(self.txt_headers)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
@@ -69,6 +90,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         adv_layout.addWidget(cookies_help)
         self.edit_cookies = QtWidgets.QLineEdit()
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
+        self.edit_cookies.setStyleSheet(
+            "QLineEdit { border: 1px solid rgba(90,90,90,0.7); border-radius: 4px; padding: 4px;"
+            "background: palette(base); color: palette(text); }"
+            "QLineEdit:focus { border: 1px solid #2ecc71; }"
+        )
         adv_layout.addWidget(self.edit_cookies)
 
         buttons = QtWidgets.QDialogButtonBox(
@@ -188,39 +214,3 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "Use presets for quick defaults or switch to Custom to fine-tune headers and cookies."
             ),
         )
-
-    def _apply_style(self) -> None:
-        style = QtWidgets.QStyleFactory.create("Fusion")
-        if style:
-            self.setStyle(style)
-        app = QtWidgets.QApplication.instance()
-        theme = app.property("silentfrog_theme") if app else None
-        dark = theme != "light"
-        palette = QtGui.QPalette()
-        if dark:
-            window = QtGui.QColor("#121212")
-            base = QtGui.QColor("#1b1b1b")
-            text = QtGui.QColor("#f0f0f0")
-            button = QtGui.QColor("#1a1a1a")
-            highlight = QtGui.QColor("#2ecc71")
-        else:
-            window = QtGui.QColor("#f4f4f4")
-            base = QtGui.QColor("#ffffff")
-            text = QtGui.QColor("#1e1e1e")
-            button = QtGui.QColor("#e5e5e5")
-            highlight = QtGui.QColor("#0f9d58")
-        palette.setColor(QtGui.QPalette.Window, window)
-        palette.setColor(QtGui.QPalette.Base, base)
-        palette.setColor(QtGui.QPalette.AlternateBase, base)
-        palette.setColor(QtGui.QPalette.Text, text)
-        palette.setColor(QtGui.QPalette.WindowText, text)
-        palette.setColor(QtGui.QPalette.Button, button)
-        palette.setColor(QtGui.QPalette.ButtonText, text)
-        palette.setColor(QtGui.QPalette.Highlight, highlight)
-        palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor("#ffffff"))
-        self.setPalette(palette)
-
-    def changeEvent(self, event: QtCore.QEvent) -> None:
-        if event.type() == QtCore.QEvent.PaletteChange:
-            self._apply_style()
-        super().changeEvent(event)
