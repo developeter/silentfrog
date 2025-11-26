@@ -25,7 +25,7 @@ It lets you quickly:
 
 ---
 
-## 2. Quick start
+## 2. Quick start (recommended: Poetry)
 
 ```bash
 # clone
@@ -36,8 +36,7 @@ $ cd silentfrog
 $ poetry env use $(which python3.12)  # or python3.11
 
 # install (pre-built wheels, no compile step)
-# install (pre-built wheels, no compile step)
-$ poetry install --sync
+$ poetry install
 
 # NLTK stopwords corpus (required before running tests)
 $ poetry run python -m nltk.downloader stopwords
@@ -48,9 +47,26 @@ $ poetry run python -m nltk.downloader stopwords
 # run tests
 $ poetry run pytest
 
-# launch GUI
+# launch GUI (preferred)
 $ poetry run silentfrog
+# or, from the project root:
+$ poetry run python -m silentfrog
 ```
+
+### Running without Poetry
+
+```bash
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
+python3 -m silentfrog
+```
+
+Use Python 3.11 or 3.12; PyQt 5.15 wheels are available for those versions.
+
+**macOS first-run notes**
+- If `nltk.downloader` fails with `CERTIFICATE_VERIFY_FAILED`, run:  
+  `open "/Applications/Python 3.12/Install Certificates.command"` and retry the stopwords download.
+- Use `python3.12` (PyQt 5.15 has universal2 wheels); avoid 3.13 until lxml/extruct wheels land.
 
 ## Support & project status
 
