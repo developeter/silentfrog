@@ -35,16 +35,8 @@ def _is_dark(widget: QtWidgets.QWidget) -> bool:
         theme = app.property("silentfrog_theme")
         if theme in {"dark", "light"}:
             return theme == "dark"
-    # fall back to palette inspection
-    if widget.testAttribute(QtCore.Qt.WidgetAttribute.WA_SetPalette):
-        base = widget.palette().color(QPalette.Base)
-        if base.isValid():
-            return base.value() < 128
-    if app is not None:
-        window_color = app.palette().color(QPalette.Window)
-        if window_color.isValid():
-            return window_color.value() < 128
-    return widget.palette().color(QPalette.Base).value() < 128
+    base = widget.palette().color(QPalette.Base)
+    return base.isValid() and base.value() < 128
 
 
 class TableTab(QtWidgets.QWidget):
@@ -59,11 +51,11 @@ class TableTab(QtWidgets.QWidget):
             fusion = QtWidgets.QStyleFactory.create("Fusion")
             if fusion:
                 self._table.setStyle(fusion)
-            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         else:
-            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.addWidget(self._table)
         self._model: QtCore.QAbstractTableModel | None = None
@@ -140,8 +132,13 @@ class LinksTab(TableTab):
 
 class RedirectTab(TableTab):
     def update(self, data: Dict[str, object]) -> None:
-        chain_items = data.get("chain", []) or []
-        chain = " → ".join(str(item) for item in chain_items)
+        chain_raw = data.get("chain", [])
+        chain_list: List[str] = []
+        if isinstance(chain_raw, list):
+            chain_list = [str(item) for item in chain_raw]
+        elif chain_raw:
+            chain_list = [str(chain_raw)]
+        chain = " → ".join(chain_list)
         rows = [
             ["Redirect chain", chain or ""],
             ["Hop count", str(data.get("hops", ""))],
@@ -310,7 +307,7 @@ class PerformanceTab(TableTab):
         self._scripts = QtWidgets.QLabel()
         self._scripts.setWordWrap(True)
         self._scripts.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        self._offender_view = QtWidgets.QTableView()
+        self._offender_view: QtWidgets.QTableView = QtWidgets.QTableView()
         self._offender_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._offender_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._offender_view.setSortingEnabled(True)
@@ -605,8 +602,12 @@ class PerformanceTab(TableTab):
             QtCore.QEvent.Type.ApplicationPaletteChange,
         ):
             self._render(self._current_metrics)
-            self._offender_view.viewport().update()
-            self.view.viewport().update()
+            offender_vp = self._offender_view.viewport() if self._offender_view else None
+            main_vp = self.view.viewport()
+            if offender_vp:
+                offender_vp.update()
+            if main_vp:
+                main_vp.update()
         super().changeEvent(event)
 
     def _apply_table_palette(self, view: QtWidgets.QTableView) -> None:
@@ -933,7 +934,9 @@ class SerpTab(QtWidgets.QWidget):
         self._model = SerpAuditModel(["Check", "Result"], rows)
         self.table.setModel(self._model)
         self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header = self.table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
 
 __all__ = [
     "TableTab",
