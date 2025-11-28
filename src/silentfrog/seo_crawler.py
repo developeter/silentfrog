@@ -650,19 +650,23 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
 
 
 def _link_section(tag: Tag) -> str:
+    role_labels = {
+        "navigation": "Navigation",
+    }
+    name_labels = {
+        "nav": "Navigation",
+        "header": "Header",
+        "footer": "Footer",
+        "aside": "Aside",
+    }
     for ancestor in tag.parents:
         if not isinstance(ancestor, Tag):
             continue
         name = ancestor.name.lower()
         role = (ancestor.get("role") or "").lower()
-        if name == "nav" or role == "navigation":
-            return "Navigation"
-        if name == "header":
-            return "Header"
-        if name == "footer":
-            return "Footer"
-        if name == "aside":
-            return "Aside"
+        label = role_labels.get(role) or name_labels.get(name)
+        if label:
+            return label
     return "Body"
 
 
@@ -988,23 +992,25 @@ async def _collect_performance_metrics(
                 script_stats[key]["count"] += 1
                 script_entry_map[normalized] = {"kind": key, "entry": entry}
 
-    for link in soup.find_all("link"):
-        rel_tokens = {token.lower() for token in (link.get("rel") or [])}
-        href = link.get("href") or ""
+    for raw_link in soup.find_all("link"):
+        link = cast(Tag, raw_link)
+        rel_tokens = {str(token).lower() for token in (link.get("rel") or [])}
+        href = str(link.get("href") or "")
         if not href:
             continue
-        if "stylesheet" in rel_tokens or (link.get("type") or "").lower() == "text/css":
+        if "stylesheet" in rel_tokens or str(link.get("type") or "").lower() == "text/css":
             _register("css", href)
             continue
         if "preload" in rel_tokens:
-            target = (link.get("as") or "").lower()
+            target = str(link.get("as") or "").lower()
             if target in resources:
                 _register(target, href)
                 continue
         if any("font" in token for token in rel_tokens):
             _register("font", href)
 
-    for script in soup.find_all("script"):
+    for raw_script in soup.find_all("script"):
+        script = cast(Tag, raw_script)
         src = script.get("src")
         if src:
             is_blocking = not (script.has_attr("async") or script.has_attr("defer"))
@@ -1025,7 +1031,8 @@ async def _collect_performance_metrics(
                     }
                 )
 
-    for img in soup.find_all("img"):
+    for raw_img in soup.find_all("img"):
+        img = cast(Tag, raw_img)
         src = img.get("src")
         if src:
             _register("img", src)
@@ -1556,22 +1563,6 @@ def _extract_keywords(soup: BeautifulSoup, text: str, top_n: int = 20) -> list[d
             results.append(entry)
 
     return results
-
-
-# --------------------------------------------------------------------- #
-_ACCEPT_DEFAULT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-_ACCEPT_LANGUAGE_DEFAULT = "en-US,en;q=0.9"
-
-
-def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
-    base = {
-        "User-Agent": options.user_agent,
-        "Accept": _ACCEPT_DEFAULT,
-        "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
-    }
-    if not options.extra_headers:
-        return base
-    return {**base, **options.extra_headers}
 
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:

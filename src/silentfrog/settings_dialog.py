@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from PyQt5 import QtCore, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
@@ -11,15 +13,15 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def __init__(self, options: CrawlOptions, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Crawl settings")
-        self.resize(420, 320)
-        help_flag = getattr(QtCore.Qt, "WindowContextHelpButtonHint", QtCore.Qt.WindowType(0))
-        self.setWindowFlags(self.windowFlags() & ~help_flag)
+        # Slightly taller minimum to avoid cramped content on macOS/Windows
+        self.setMinimumSize(440, 520)
+        help_flag = QtCore.Qt.WindowType.WindowContextHelpButtonHint
+        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowFlags(help_flag))
         style = QtWidgets.QStyleFactory.create("Fusion")
         if style:
             self.setStyle(style)
-        app = QtWidgets.QApplication.instance()
-        if app is not None:
-            self.setPalette(app.palette())
+        app = cast(QtWidgets.QApplication, QtWidgets.QApplication.instance())
+        self.setPalette(app.palette())
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -100,11 +102,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
-        help_btn = buttons.addButton("Help", QtWidgets.QDialogButtonBox.HelpRole)
+        help_btn = cast(QtWidgets.QAbstractButton, buttons.addButton("Help", QtWidgets.QDialogButtonBox.HelpRole))
         help_btn.clicked.connect(self._show_help)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        # Let the dialog grow to fit content across platforms while honoring the minimum.
+        self.resize(self.sizeHint().expandedTo(self.minimumSize()))
 
         self.chk_gentle.toggled.connect(self._on_gentle_toggled)
         self.spin_parallel.valueChanged.connect(self._mark_custom)
