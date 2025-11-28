@@ -6,7 +6,7 @@ from typing import Dict, List
 import pytest
 from bs4 import BeautifulSoup
 
-from silentfrog import seo_crawler as crawler
+from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
 
 
 @pytest.fixture

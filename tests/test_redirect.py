@@ -1,9 +1,9 @@
 import pathlib
 import pandas as pd
-import requests_mock
+import requests_mock  # type: ignore[reportMissingImports]
 import pytest
 
-from silentfrog.redirect import check_redirects
+from silentfrog.redirect import check_redirects  # type: ignore[reportMissingImports]
 
 
 def test_check_redirects(tmp_path: pathlib.Path):

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from silentfrog.crawl_types import CrawlPayload
-from silentfrog.exporters import export_page_analysis
+from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
+from silentfrog.exporters import export_page_analysis  # type: ignore[reportMissingImports]
 
 
 def _sample_payload() -> CrawlPayload:

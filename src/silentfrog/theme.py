@@ -16,8 +16,9 @@ def _theme_key(dark: bool | None) -> str:
     if dark is not None:
         return "dark" if dark else "light"
     app = QtWidgets.QApplication.instance()
-    if app is not None:
-        base = app.palette().color(QtGui.QPalette.Base)
+    if isinstance(app, QtWidgets.QApplication):
+        palette = app.palette()
+        base = palette.color(QtGui.QPalette.Base)
         return "dark" if base.value() < 128 else "light"
     return "light"
 

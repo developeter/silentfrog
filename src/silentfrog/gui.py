@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QButtonGroup,
 )
+from typing import cast
 from .redirect_gui import RedirectWindow
 
 # ---------- THEMES --------------------------------------------------- #
@@ -174,7 +175,10 @@ class _SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Appearance")
         # Remove the Windows "?" context-help button so only standard controls stay visible.
-        flags = self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint
+        flags = cast(
+            QtCore.Qt.WindowFlags,
+            self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint,
+        )
         self.setWindowFlags(flags)
         self.resize(360, 150)
         lay = QVBoxLayout(self)

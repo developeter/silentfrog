@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Tuple, Type
+from typing import Any, Dict, Tuple, Type, cast
 
 import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from silentfrog.crawl_types import CrawlPayload
-from silentfrog.crawl_options import CrawlOptions
-from silentfrog.settings_dialog import CrawlSettingsDialog
-from silentfrog.seo_gui import WebpageSeoWindow
-from silentfrog.tabs import (
+from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
+from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
+from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
+from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImports]
+from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     AiTab,
     CanonicalTab,
     HeadersTab,
@@ -33,10 +33,10 @@ SERP_SNAPSHOT = SNAPSHOT_DIR / "serp_preview.html"
 @pytest.fixture(autouse=True)
 def _restore_palette():
     app = QtWidgets.QApplication.instance()
-    original = QtGui.QPalette(app.palette()) if app is not None else None
+    original = QtGui.QPalette(cast(QtWidgets.QApplication, app).palette()) if app is not None else None
     yield
     if app is not None and original is not None:
-        app.setPalette(original)
+        cast(QtWidgets.QApplication, app).setPalette(original)
 
 
 def _normalize_html(html: str) -> str:
@@ -54,14 +54,14 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
     if app is None:
         return
     color = QtGui.QColor(value, value, value)
-    palette = QtGui.QPalette(app.palette())
+    palette = QtGui.QPalette(cast(QtWidgets.QApplication, app).palette())
     palette.setColor(QtGui.QPalette.Base, color)
     palette.setColor(QtGui.QPalette.Window, color)
     text = QtGui.QColor(240, 240, 240) if value < 128 else QtGui.QColor(32, 33, 36)
     palette.setColor(QtGui.QPalette.Text, text)
     palette.setColor(QtGui.QPalette.WindowText, text)
-    app.setPalette(palette)
-    app.setProperty("silentfrog_theme", "dark" if value < 128 else "light")
+    cast(QtWidgets.QApplication, app).setPalette(palette)
+    cast(QtWidgets.QApplication, app).setProperty("silentfrog_theme", "dark" if value < 128 else "light")
 
 
 def _row_count(view: QtWidgets.QTableView) -> int:
@@ -433,12 +433,12 @@ def test_schema_tab_theme_toggle(qtbot):
     light_palette = tab.palette()
     light_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(255, 255, 255))
     tab.setPalette(light_palette)
-    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
     assert "#ffffff" in tab.styleSheet()
 
     dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
     tab.setPalette(dark_palette)
-    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
     assert "#1e1e1e" in tab.styleSheet()
 
 
@@ -468,12 +468,12 @@ def test_keywords_tab_theme_toggle(qtbot):
     light_palette = tab.palette()
     light_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(255, 255, 255))
     tab.setPalette(light_palette)
-    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
     assert "#ffffff" in tab.view.styleSheet()
 
     dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
     tab.setPalette(dark_palette)
-    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.PaletteChange))
+    tab.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
     assert "#1e1e1e" in tab.view.styleSheet()
 
 

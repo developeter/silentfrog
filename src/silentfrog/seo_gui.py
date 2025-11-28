@@ -157,7 +157,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         self.bar.setFormat("%p%")
-        self.bar.setAlignment(QtCore.Qt.AlignCenter)
+        self.bar.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.bar.setTextVisible(True)
         self.bar.setVisible(False)
         layout.addWidget(self.bar)
@@ -172,7 +172,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         panel = QtWidgets.QWidget()
         wrapper = QtWidgets.QVBoxLayout(panel)
         wrapper.setSpacing(12)
-        wrapper.setAlignment(QtCore.Qt.AlignCenter)
+        wrapper.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         wrapper.addStretch()
 
         self._intro_default_title = "Ready to crawl a page?"
@@ -183,11 +183,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._intro_crawl_hint = "Hang tight while Silentfrog crawls the page."
 
         self._intro_title = QtWidgets.QLabel(self._intro_default_title)
-        self._intro_title.setAlignment(QtCore.Qt.AlignCenter)
+        self._intro_title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         wrapper.addWidget(self._intro_title)
 
         self._intro_hint = QtWidgets.QLabel(self._intro_default_hint)
-        self._intro_hint.setAlignment(QtCore.Qt.AlignCenter)
+        self._intro_hint.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._intro_hint.setWordWrap(True)
         wrapper.addWidget(self._intro_hint)
 
@@ -245,7 +245,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             self._intro_hint.setText(self._intro_default_hint)
 
     def changeEvent(self, event: QtCore.QEvent) -> None:
-        if event.type() == QtCore.QEvent.PaletteChange:
+        if event.type() == QtCore.QEvent.Type.PaletteChange:
             self._update_intro_colors()
             self._refresh_dimmed_buttons()
             self._style_progress_bar()
@@ -279,14 +279,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             on_success=lambda result: self.dataReady.emit({"img_update": result}),
             on_error=lambda err: self.errorSig.emit(err),
         )
-
-    def _open_crawl_settings(self) -> None:
-        """Open the crawl settings dialog (single source of truth for crawl options)."""
-        dialog = CrawlSettingsDialog(self._crawl_options, self)
-        if dialog.exec() == QtWidgets.QDialog.Accepted:
-            self._crawl_options = dialog.options()
-            self._update_settings_label()
-
 
     def _open_crawl_settings(self) -> None:
         dialog = CrawlSettingsDialog(self._crawl_options, self)

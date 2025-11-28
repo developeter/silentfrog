@@ -603,11 +603,11 @@ def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
     for raw_tag in soup.find_all("meta"):
         tag = cast(Tag, raw_tag)
         name = _attr(tag, "name") or _attr(tag, "property") or _attr(tag, "http-equiv")
-        content_str = str(_attr(tag, "content"))
+        content = _attr(tag, "content")
         if not name and tag.has_attr("charset"):
             name = "charset"
-            content_str = str(tag.get("charset", ""))
-        out.append([name, content_str, str(len(content_str))])
+            content = tag.get("charset", "")
+        out.append([name, content, str(len(content))])
     return out
 
 
@@ -665,7 +665,7 @@ def _link_section(tag: Tag) -> str:
         if not isinstance(ancestor, Tag):
             continue
         name = ancestor.name.lower()
-        role = str(ancestor.get("role") or "").lower()
+        role = (ancestor.get("role") or "").lower()
         label = role_labels.get(role) or name_labels.get(name)
         if label:
             return label
@@ -1339,9 +1339,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
     try:
         soup2 = BeautifulSoup(html_text, "html.parser")
         hits = 0
-        for script_node in soup2.find_all("script"):
-            script = cast(Tag, script_node)
-            raw = str(getattr(script, "string", None) or script.get_text() or "")
+        for script in soup2.find_all("script"):
+            raw = script.string or script.get_text()
             if not raw:
                 continue
             parsed = _safe_load(raw)
@@ -1510,7 +1509,7 @@ def _extract_keywords(soup: BeautifulSoup, text: str, top_n: int = 20) -> list[d
         "description": _tokenize(
             next(
                 (
-                    str(cast(Tag, meta).get("content", ""))
+                    cast(Tag, meta).get("content", "")
                     for meta in soup.find_all("meta")
                     if str(cast(Tag, meta).get("name", "")).lower() == "description"
                 ),

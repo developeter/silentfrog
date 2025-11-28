@@ -1,13 +1,13 @@
 import asyncio
 import pytest
 import warnings
-import aiohttp
-from aiohttp import web
+import aiohttp  # type: ignore[reportMissingImports]
+from aiohttp import web  # type: ignore[reportMissingImports]
 from pathlib import Path
 
-from silentfrog import seo_crawler as crawler
-from silentfrog.seo_crawler import analyse, analyse_images
-from silentfrog.crawl_options import CrawlOptions
+from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
+from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
+from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
 
 # ------------------------------------------------------------------
 # Silence third-party warning inside pyRdfa only

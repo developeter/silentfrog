@@ -340,18 +340,16 @@ class StructuredDataPayload:
         if isinstance(value, Mapping):
             summary = StructuredDataSummary.from_raw(value.get("summary", {}))
             blocks = cls._coerce_blocks(value.get("blocks"))
-            extra_errors_source = value.get("issues", [])
-            extra_errors: Iterable[str] = (
-                extra_errors_source
-                if isinstance(extra_errors_source, Iterable) and not isinstance(extra_errors_source, (str, bytes))
-                else []
+            issues_raw = value.get("issues", [])
+            issues_iter: Iterable[str] = (
+                issues_raw if isinstance(issues_raw, Iterable) and not isinstance(issues_raw, (str, bytes)) else []
             )
-            summary = summary.with_errors(extra_errors)
+            summary = summary.with_errors(issues_iter)
             fallback_raw = cls._coerce_fallback(value.get("fallback_raw"))
             return cls(blocks=blocks, summary=summary, fallback_raw=fallback_raw)
         if isinstance(value, list):
             summary_raw: Mapping[str, Any] | None = None
-            extra_errors: List[str] = []
+            issues_list: List[str] = []
             blocks: List[Any] = []
             fallback: List[str] = []
             for item in value:
@@ -363,7 +361,7 @@ class StructuredDataPayload:
                     for issue in item.get("_schema_issues") or []:
                         text = str(issue).strip()
                         if text:
-                            extra_errors.append(text)
+                            issues_list.append(text)
                     continue
                 if isinstance(item, list):
                     if item:
@@ -373,7 +371,7 @@ class StructuredDataPayload:
                     continue
                 blocks.append(item)
             summary = StructuredDataSummary.from_raw(summary_raw or {})
-            summary = summary.with_errors(extra_errors)
+            summary = summary.with_errors(issues_list)
             return cls(blocks=blocks, summary=summary, fallback_raw=fallback)
         return cls.empty()
 

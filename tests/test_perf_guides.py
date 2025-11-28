@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from silentfrog.perf_guides import PerformanceContext, open_source_hints
+from silentfrog.perf_guides import PerformanceContext, open_source_hints  # type: ignore[reportMissingImports]
 
 
 def test_open_source_hints_toggle(monkeypatch):
@@ -23,4 +23,3 @@ def test_open_source_hints_toggle(monkeypatch):
     monkeypatch.setenv("SILENTFROG_PERF_GUIDES", "0")
     hints_disabled = open_source_hints(context)
     assert hints_disabled == []
-
