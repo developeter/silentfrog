@@ -117,6 +117,7 @@ Unset the variable (or set it to `1`) to re-enable the guidance.
 
 * **Gatekeeper** – if the window will not open: `xattr -dr com.apple.quarantine silentfrog`
 * **lxml build fails** with CPython 3.13 – use Python 3.12 **or** follow the manual-compile instructions in §7.
+* **PyInstaller** – standalone bundles are deferred until the NLTK stopwords dependency is fully packaged; use `poetry run silentfrog` for now.
 
 ---
 
@@ -180,8 +181,14 @@ silentfrog/
 │   ├── tabs/             # Per-tab Qt widgets
 │   ├── models/           # Table models feeding tabs
 │   ├── crawl_types.py    # Typed crawl payloads
+│   ├── crawl_constants.py# Shared accept headers, stopwords, density threshold
+│   ├── crawl_http.py     # Throttling, robots, backoff helpers
+│   ├── parsers_meta.py   # Meta/headers/images/links/hreflang/canonical/SERP helpers
+│   ├── schema_extractor.py # Structured data extraction and validators
+│   ├── perf_metrics.py   # Resource/weight/opportunity calculation
+│   ├── keywords.py       # Keyword tokenization and density analysis
 │   ├── workers.py        # Thread helpers wrapping async tasks
-│   └── seo_crawler.py    # Async crawler (aiohttp + BeautifulSoup)
+│   └── seo_crawler.py    # Orchestrator wiring the modules above
 ├── tests/
 │   ├── test_seo_gui.py
 │   ├── test_seo_crawler.py
@@ -198,7 +205,8 @@ silentfrog/
 | OS      | Command                                    | Output                |
 | ------- | ------------------------------------------ | --------------------- |
 | Windows | `poetry run pyinstaller silentfrog.spec`   | `dist/Silentfrog.exe` |
-| macOS   | `poetry run pyinstaller --windowed gui.py` | `dist/Silentfrog.app` |
+
+> Bundling is currently blocked by the NLTK stopwords download (first-run dependency). We’ll revisit once it’s fully packaged; in the meantime run via `poetry run silentfrog`.
 
 ---
 
