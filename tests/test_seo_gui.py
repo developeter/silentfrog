@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple, Type, cast
 
 import pytest
 from PyQt5 import QtCore, QtGui, QtWidgets
+from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
@@ -53,15 +54,8 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
     app = QtWidgets.QApplication.instance()
     if app is None:
         return
-    color = QtGui.QColor(value, value, value)
-    palette = QtGui.QPalette(cast(QtWidgets.QApplication, app).palette())
-    palette.setColor(QtGui.QPalette.Base, color)
-    palette.setColor(QtGui.QPalette.Window, color)
-    text = QtGui.QColor(240, 240, 240) if value < 128 else QtGui.QColor(32, 33, 36)
-    palette.setColor(QtGui.QPalette.Text, text)
-    palette.setColor(QtGui.QPalette.WindowText, text)
-    cast(QtWidgets.QApplication, app).setPalette(palette)
-    cast(QtWidgets.QApplication, app).setProperty("silentfrog_theme", "dark" if value < 128 else "light")
+    apply_theme(cast(QtWidgets.QApplication, app), value < 128)
+    widget.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
 
 
 def _row_count(view: QtWidgets.QTableView) -> int:
@@ -581,6 +575,9 @@ def test_schema_tab_dark_palette(qtbot):
     tab = SchemaTab()
     qtbot.addWidget(tab)
     _set_base(tab, 16)
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert app.property("silentfrog_theme") == "dark"
     items = [{"@context": "https://schema.org", "_extracted_via": "json-ld"}]
     tab.update(items)
 
@@ -594,6 +591,9 @@ def test_schema_tab_light_palette(qtbot):
     tab = SchemaTab()
     qtbot.addWidget(tab)
     _set_base(tab, 255)
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert app.property("silentfrog_theme") == "light"
     items = [{"@context": "https://schema.org", "_extracted_via": "json-ld"}]
     tab.update(items)
 

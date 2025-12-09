@@ -149,7 +149,7 @@ Silentfrog includes a **gentle crawl mode** for fragile staging sites or wheneve
 ## 3. Running the test suite
 
 ```bash
-poetry run pytest -q  # ~4 s, 100 % pass
+poetry run pytest -q 
 ```
 
 The first run downloads the NLTK stop-word corpus. If outbound traffic is blocked run:

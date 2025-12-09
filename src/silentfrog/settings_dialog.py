@@ -5,6 +5,7 @@ from typing import cast
 from PyQt5 import QtCore, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
+from .theme import current_theme
 
 
 class CrawlSettingsDialog(QtWidgets.QDialog):
@@ -20,8 +21,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         style = QtWidgets.QStyleFactory.create("Fusion")
         if style:
             self.setStyle(style)
-        app = cast(QtWidgets.QApplication, QtWidgets.QApplication.instance())
-        self.setPalette(app.palette())
+        app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
+        theme = current_theme(app)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -29,17 +30,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         general_layout = QtWidgets.QFormLayout(general_box)
         self.chk_gentle = QtWidgets.QCheckBox("Enable gentle crawl mode")
         self.chk_gentle.setChecked(options.gentle_mode)
-        self.chk_gentle.setStyleSheet(
-            "QCheckBox::indicator { width:16px; height:16px; border:1px solid rgba(90,90,90,0.8); "
-            "border-radius:3px; background: palette(base); } "
-            "QCheckBox::indicator:checked { background:#2ecc71; border:1px solid #2ecc71; }"
-        )
-        checkbox_style = (
-            "QCheckBox::indicator { width:16px; height:16px; border:1px solid rgba(90,90,90,0.8);"
-            " border-radius:3px; background: palette(base); }"
-            "QCheckBox::indicator:checked { background:#2ecc71; border:1px solid #2ecc71; }"
-        )
-        self.chk_gentle.setStyleSheet(checkbox_style)
+        self.chk_gentle.setStyleSheet(self._checkbox_stylesheet(theme))
         general_layout.addRow(self.chk_gentle)
 
         self.spin_parallel = QtWidgets.QSpinBox()
@@ -70,17 +61,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "Set them only when the site expects additional headers."
         )
         headers_help.setWordWrap(True)
-        headers_help.setStyleSheet("color:#666;")
+        headers_help.setStyleSheet(f"color:{'#9fa3ab' if theme == 'dark' else '#666'};")
         adv_layout.addWidget(headers_help)
 
         self.txt_headers = QtWidgets.QPlainTextEdit()
         self.txt_headers.setPlaceholderText("Authorization: Bearer …")
         self.txt_headers.setFixedHeight(80)
-        self.txt_headers.setStyleSheet(
-            "QPlainTextEdit { border: 1px solid rgba(90,90,90,0.7); border-radius: 4px; padding: 4px;"
-            "background: palette(base); color: palette(text); }"
-            "QPlainTextEdit:focus { border: 1px solid #2ecc71; }"
-        )
+        self.txt_headers.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.txt_headers)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
@@ -88,15 +75,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "Raw Cookie header, such as session=abc; theme=dark, if the crawl must mimic an authenticated visit."
         )
         cookies_help.setWordWrap(True)
-        cookies_help.setStyleSheet("color:#666;")
+        cookies_help.setStyleSheet(f"color:{'#9fa3ab' if theme == 'dark' else '#666'};")
         adv_layout.addWidget(cookies_help)
         self.edit_cookies = QtWidgets.QLineEdit()
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
-        self.edit_cookies.setStyleSheet(
-            "QLineEdit { border: 1px solid rgba(90,90,90,0.7); border-radius: 4px; padding: 4px;"
-            "background: palette(base); color: palette(text); }"
-            "QLineEdit:focus { border: 1px solid #2ecc71; }"
-        )
+        self.edit_cookies.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.edit_cookies)
 
         buttons = QtWidgets.QDialogButtonBox(
@@ -121,6 +104,28 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._applying_preset = False
         self._load_from_options(options)
         self._sync_state()
+
+    @staticmethod
+    def _checkbox_stylesheet(theme: str) -> str:
+        base = "#1f1f1f" if theme == "dark" else "#ffffff"
+        border = "rgba(90,90,90,0.8)" if theme == "dark" else "#b5b5b5"
+        return (
+            "QCheckBox::indicator { width:16px; height:16px; border:1px solid "
+            f"{border}; border-radius:3px; background:{base}; }}"
+            "QCheckBox::indicator:checked { background:#2ecc71; border:1px solid #2ecc71; }"
+        )
+
+    @staticmethod
+    def _field_stylesheet(theme: str) -> str:
+        base = "#1e1e1e" if theme == "dark" else "#ffffff"
+        text = "#f0f0f0" if theme == "dark" else "#202124"
+        border = "rgba(90,90,90,0.7)" if theme == "dark" else "#b5b5b5"
+        return (
+            "QPlainTextEdit, QLineEdit {"
+            f" border: 1px solid {border}; border-radius: 4px; padding: 4px;"
+            f" background: {base}; color: {text}; }}"
+            "QPlainTextEdit:focus, QLineEdit:focus { border: 1px solid #2ecc71; }"
+        )
 
     def _load_from_options(self, options: CrawlOptions) -> bool:
         headers_lines = [

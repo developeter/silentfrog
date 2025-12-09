@@ -6,6 +6,7 @@ import sys
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
+from .theme import current_theme
 from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics
 from .models import (
     MetaModel,
@@ -30,13 +31,11 @@ def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
 
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
-    app = QtWidgets.QApplication.instance()
-    if isinstance(app, QtWidgets.QApplication):
-        theme = app.property("silentfrog_theme")
-        if theme in {"dark", "light"}:
-            return theme == "dark"
     base = widget.palette().color(QPalette.Base)
-    return base.isValid() and base.value() < 128
+    if base.isValid():
+        return base.value() < 128
+    app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
+    return current_theme(app) == "dark"
 
 
 class TableTab(QtWidgets.QWidget):
