@@ -8,7 +8,7 @@ import asyncio
 from typing import Any, cast
 from urllib.parse import urljoin
 
-import aiohttp  # type: ignore
+import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from bs4 import BeautifulSoup, Comment
 
 from .crawl_options import CrawlOptions

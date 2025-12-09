@@ -6,19 +6,19 @@ import os
 import re
 import html as _html
 from collections import Counter
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List
 
 import bs4
 from bs4 import BeautifulSoup
 
-from .crawler_utils import _attr
+from .crawler_utils import _attr, as_tag
 
 Tag = bs4.element.Tag
 
 # Safe import of extruct (fallback if lxml is broken)
 try:
-    import extruct  # type: ignore
-    from w3lib.html import get_base_url  # type: ignore
+    import extruct  # type: ignore[import]  # upstream lacks type hints
+    from w3lib.html import get_base_url  # type: ignore[import]  # upstream lacks type hints
 
     USE_EXTRUCT = True
 except Exception:
@@ -337,8 +337,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
         soup2 = BeautifulSoup(html_text, "html.parser")
         hits = 0
         for script_node in soup2.find_all("script"):
-            script = cast(Tag, script_node)
-            raw = str(getattr(script, "string", None) or script.get_text() or "")
+            script = as_tag(script_node)
+            raw = str(getattr(script, "string", None) or script.get_text() or "") if script else ""
             if not raw:
                 continue
             parsed = _safe_load(raw)
@@ -361,7 +361,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
     if USE_EXTRUCT:
         def _extract_lxml() -> dict[str, Any]:
             try:
-                data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+                data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]  # third-party API lacks typing
                 _log_schema("extruct:lxml ok")
                 return data
             except Exception as e:
@@ -370,10 +370,10 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
 
         def _extract_html5lib() -> dict[str, Any]:
             try:
-                from extruct.utils import parse_html as _parse_html  # type: ignore
+                from extruct.utils import parse_html as _parse_html  # type: ignore[import]  # extruct utils untyped
 
                 tree = _parse_html(html_text, treebuilder="html5lib")
-                data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+                data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]  # third-party API lacks typing
                 _log_schema("extruct:html5lib ok")
                 return data
             except Exception as e:

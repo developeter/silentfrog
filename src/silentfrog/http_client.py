@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import ssl
 from typing import Optional
 
-import aiohttp  # type: ignore
-from aiohttp import ClientSession, ClientTimeout  # type: ignore
+import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from time import perf_counter
 

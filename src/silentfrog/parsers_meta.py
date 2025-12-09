@@ -1,18 +1,71 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Tuple, cast
+from dataclasses import dataclass
+from typing import Any, Tuple
 from urllib.parse import urljoin, urlparse
 
 import bs4
 from bs4 import BeautifulSoup
-import aiohttp  # type: ignore
-from aiohttp import ClientTimeout  # type: ignore
+import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
-from .crawler_utils import _attr, _hr_size
+from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
 
 Tag = bs4.element.Tag
 NavigableString = bs4.element.NavigableString
+
+
+@dataclass(slots=True)
+class ImageInfo:
+    src: str
+    alt: str
+    title: str
+    mime: str
+    width: str
+    height: str
+    size: str
+    loading: str
+    fetchpriority: str
+
+    def to_row(self) -> list[str]:
+        return [
+            self.src,
+            self.alt,
+            self.title,
+            self.mime,
+            self.width,
+            self.height,
+            self.size,
+            self.loading,
+            self.fetchpriority,
+        ]
+
+
+@dataclass(slots=True)
+class LinkInfo:
+    href: str
+    anchor: str
+    kind: str
+    rel_display: str
+    status: str
+    status_note: str
+    section: str
+    heading: str
+    tld: str
+
+    def to_row(self) -> list[str]:
+        return [
+            self.href,
+            self.anchor,
+            self.kind,
+            self.rel_display,
+            self.status,
+            self.status_note,
+            self.section,
+            self.heading,
+            self.tld,
+        ]
 
 
 def _guess_image_mime(url: str) -> str:
@@ -66,18 +119,20 @@ def _normalize_loading(value: str) -> str:
 
 def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
-    title_tag = cast(Tag | None, soup.find("title"))
+    title_tag = soup.find("title")
     if title_tag is not None:
         title_text = str(title_tag.string or "").strip()
         out.append(["title", title_text, str(len(title_text))])
 
     for raw_tag in soup.find_all("meta"):
-        tag = cast(Tag, raw_tag)
+        tag = raw_tag
         name = _attr(tag, "name") or _attr(tag, "property") or _attr(tag, "http-equiv")
         content_str = str(_attr(tag, "content"))
-        if not name and tag.has_attr("charset"):
-            name = "charset"
-            content_str = str(tag.get("charset", ""))
+        if not name:
+            charset = safe_attr(tag, "charset")
+            if charset:
+                name = "charset"
+                content_str = charset
         out.append([name, content_str, str(len(content_str))])
     return out
 
@@ -85,8 +140,7 @@ def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
 def _extract_headers(soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
     for level in range(1, 7):
-        for raw_tag in soup.find_all(f"h{level}"):
-            tag = cast(Tag, raw_tag)
+        for tag in soup.find_all(f"h{level}"):
             text = " ".join(tag.stripped_strings)
             out.append([f"h{level}", text])
     return out
@@ -95,30 +149,21 @@ def _extract_headers(soup: BeautifulSoup) -> list[list[str]]:
 def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
     rows: list[list[str]] = []
     for tag in soup.find_all("img"):
-        img = cast(bs4.element.Tag, tag)
-        src = urljoin(base, _attr(img, "src"))
-        alt = _attr(img, "alt")
-        title = _attr(img, "title")
-        loading_attr = (_attr(img, "loading") or "").lower()
-        loading_value = _normalize_loading(loading_attr)
-        mime = _guess_image_mime(src)
-        width_attr = _attr(img, "width")
-        height_attr = _attr(img, "height")
-        size_placeholder = ""
-        fetch_priority = _normalize_fetchpriority(_attr(img, "fetchpriority"))
-        rows.append(
-            [
-                src,
-                alt,
-                title,
-                mime,
-                width_attr,
-                height_attr,
-                size_placeholder,
-                loading_value,
-                fetch_priority,
-            ]
+        img = tag
+        src_raw = safe_attr(img, "src") or ""
+        src = urljoin(base, src_raw)
+        info = ImageInfo(
+            src=src,
+            alt=safe_attr(img, "alt") or "",
+            title=safe_attr(img, "title") or "",
+            mime=_guess_image_mime(src),
+            width=safe_attr(img, "width") or "",
+            height=safe_attr(img, "height") or "",
+            size="",
+            loading=_normalize_loading(safe_attr(img, "loading") or ""),
+            fetchpriority=_normalize_fetchpriority(safe_attr(img, "fetchpriority") or ""),
         )
+        rows.append(info.to_row())
     return rows
 
 
@@ -157,17 +202,17 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
     base_host = urlparse(base).netloc
     for raw in soup.find_all("a", href=True):
-        a = cast(bs4.element.Tag, raw)
-        href_val = _attr(a, "href")
+        a = raw
+        href_val = safe_attr(a, "href") or ""
         href = urljoin(base, href_val)
         rel_val: Any = a.get("rel")
         rel_tokens = [str(token) for token in rel_val] if isinstance(rel_val, list) else []
         nf = "nofollow" in rel_tokens
         same_host = urlparse(href).netloc == base_host
         typ = "Interno" if same_host else "Esterno"
-        anchor_text = " ".join(a.stripped_strings).strip()
+        anchor_text = normalize_text(" ".join(a.stripped_strings))
         if not anchor_text:
-            anchor_text = (_attr(a, "title") or href).strip()
+            anchor_text = (safe_attr(a, "title") or href).strip()
         tokens = [token for token in rel_tokens if token]
         if nf and "nofollow" not in tokens:
             tokens.append("nofollow")
@@ -177,19 +222,18 @@ def _extract_links(base: str, soup: BeautifulSoup) -> list[list[str]]:
         section = _link_section(a)
         heading = _link_heading(a)
         _domain, tld = _link_domain_info(href)
-        out.append(
-            [
-                href,
-                anchor_text,
-                typ,
-                rel_display,
-                "",
-                "",
-                section or "",
-                heading,
-                tld,
-            ]
+        info = LinkInfo(
+            href=href,
+            anchor=anchor_text,
+            kind=typ,
+            rel_display=rel_display,
+            status="",
+            status_note="",
+            section=section or "",
+            heading=heading,
+            tld=tld,
         )
+        out.append(info.to_row())
     return out
 
 
@@ -331,7 +375,7 @@ async def _to_data_uri(img_url: str) -> str:
                     return img_url
                 raw = await response.read()
                 from io import BytesIO
-                from PIL import Image, ImageDraw  # type: ignore
+                from PIL import Image, ImageDraw  # type: ignore[import]  # pillow stubs missing
 
                 with Image.open(BytesIO(raw)).convert("RGBA") as image:
                     image = image.resize((16, 16), Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS)

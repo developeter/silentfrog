@@ -6,8 +6,8 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse, urljoin
 from urllib.robotparser import RobotFileParser
 
-import aiohttp  # type: ignore
-from aiohttp import ClientSession, ClientTimeout  # type: ignore
+import aiohttp  # type: ignore[import]  # aiohttp lacks complete stubs in our environment
+from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .http_client import head_status, fetch_text
 from .crawl_options import CrawlOptions

@@ -4,8 +4,8 @@ import asyncio
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse, urlunparse, urljoin
 
-import aiohttp  # type: ignore
-from aiohttp import ClientTimeout  # type: ignore
+import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .perf_guides import PerformanceContext, open_source_hints
 
