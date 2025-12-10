@@ -193,7 +193,11 @@ silentfrog/
 │   ├── test_seo_gui.py
 │   ├── test_seo_crawler.py
 │   ├── test_export_excel.py
-│   └── ...
+│   ├── test_keywords_unit.py
+│   ├── test_schema_extractor_unit.py
+│   ├── test_perf_metrics_unit.py
+│   ├── test_crawl_http_unit.py
+│   ├── ...
 └── assets/
     └── icon.png
 ```
