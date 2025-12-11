@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 from dataclasses import replace
+import importlib.resources
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle("Silentfrog - SEO webpage analysis")
         self.resize(950, 620)
-        icon_path = Path(__file__).with_name("assets").joinpath("icon.png")
+        icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         self._latest_payload: CrawlPayload | None = None
         self._dimmed_buttons: list[QtWidgets.QPushButton] = []

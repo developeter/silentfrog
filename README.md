@@ -35,14 +35,8 @@ $ cd silentfrog
 # pick the right interpreter
 $ poetry env use $(which python3.12)  # or python3.11
 
-# install (pre-built wheels, no compile step)
+# install (pre-built wheels, no compile step; stopwords are bundled locally)
 $ poetry install
-
-# NLTK stopwords corpus (required before running tests)
-$ poetry run python -m nltk.downloader stopwords
-# macOS: if you see CERTIFICATE_VERIFY_FAILED, run
-# open "/Applications/Python 3.12/Install Certificates.command"
-# and repeat the command above.
 
 # run tests
 $ poetry run pytest
@@ -52,6 +46,11 @@ $ poetry run silentfrog
 # or, from the project root:
 $ poetry run python -m silentfrog
 ```
+
+### Entry points (explicit)
+
+- Preferred: `poetry run silentfrog`
+- Alternative: `poetry run python -m silentfrog`
 
 ### Running without Poetry
 
@@ -208,9 +207,12 @@ silentfrog/
 
 | OS      | Command                                    | Output                |
 | ------- | ------------------------------------------ | --------------------- |
-| Windows | `poetry run pyinstaller silentfrog.spec`   | `dist/Silentfrog.exe` |
+| Windows | `poetry run pyinstaller --name Silentfrog --add-data "src/silentfrog/assets;silentfrog/assets" --add-data "src/silentfrog/resources;silentfrog/resources" -w -m silentfrog.gui` | `dist/Silentfrog.exe` |
 
-> Bundling is currently blocked by the NLTK stopwords download (first-run dependency). We’ll revisit once it’s fully packaged; in the meantime run via `poetry run silentfrog`.
+PyInstaller hints (not a full spec):
+- Bundle package data: `silentfrog/assets` and `silentfrog/resources` so icons and stopwords ship with the app.
+- Entry point: `silentfrog.gui:main` (or `python -m silentfrog`); sample command above uses `-m silentfrog.gui`.
+- No runtime downloads: stopwords are bundled locally; code avoids writing outside the app directory.
 
 ---
 
