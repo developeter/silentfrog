@@ -21,6 +21,26 @@ def _sample_payload() -> CrawlPayload:
         "images": [
             ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "2h", "Yes", "High"]
         ],
+        "social": {
+            "open_graph": {
+                "title": "OG Title",
+                "description": "OG Desc",
+                "image": "https://example.com/og.png",
+                "site_name": "Example",
+                "url": "https://example.com",
+                "card": "",
+                "issues": ["Missing description"],
+            },
+            "twitter": {
+                "title": "TW Title",
+                "description": "TW Desc",
+                "image": "https://example.com/tw.png",
+                "site_name": "Example",
+                "url": "https://example.com",
+                "card": "summary_large_image",
+                "issues": [],
+            },
+        },
         "links": [
             [
                 "https://example.com",
@@ -146,6 +166,7 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert "Structured summary" in workbook.sheetnames
         assert "Structured data" in workbook.sheetnames
         assert "Performance" in workbook.sheetnames
+        assert "Social" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
         assert meta_sheet["A2"].value == "title"
@@ -154,6 +175,10 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert meta_sheet["A3"].value == "description"
         assert meta_sheet["B3"].value == "Foo"
         assert meta_sheet["C3"].fill.start_color.rgb == "FFFFF3CD"
+
+        social_sheet = workbook["Social"]
+        assert social_sheet["A2"].value == "OpenGraph"
+        assert "Missing description" in (social_sheet["I2"].value or "")
 
         summary_sheet = workbook["Structured summary"]
         assert summary_sheet["A2"].value == "Total items"

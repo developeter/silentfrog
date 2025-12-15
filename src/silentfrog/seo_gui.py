@@ -17,6 +17,7 @@ from .tabs import (
     MetaTab,
     HeadersTab,
     ImagesTab,
+    SocialTab,
     LinksTab,
     RedirectTab,
     CanonicalTab,
@@ -94,7 +95,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.headers_tab, "Header H1-H6")
 
         self.images_tab = ImagesTab()
+        self.social_tab = SocialTab()
         self.tabs.addTab(self.images_tab, "Images")
+        self.tabs.addTab(self.social_tab, "Social")
 
         self.links_tab = LinksTab()
         self.tabs.addTab(self.links_tab, "Link")
@@ -322,6 +325,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.canonical_tab.update({})
         self.robots_tab.update("", {})
         self.hreflang_tab.update([])
+        self.social_tab.update({})
         self.keywords_tab.update([])
         self.ai_tab.update([])
         self.performance_tab.update({})
@@ -422,6 +426,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.ai_tab.update, data.get("ai_crawl", [])),
             (self.performance_tab.update, data.get("performance", {})),
             (self.schema_tab.update, data.get("schema", {})),
+            (self.social_tab.update, data.get("social", {})),
         ]
         start, end = span
         steps = len(list_tabs) or 1

@@ -7,7 +7,7 @@ from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
 from .theme import current_theme
-from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics
+from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
 from .models import (
     MetaModel,
     ImagesModel,
@@ -20,6 +20,7 @@ from .models import (
     LinksModel,
     GenericModel,
     KeywordModel,
+    SocialIssuesModel,
 )
 
 import html as _html
@@ -71,6 +72,97 @@ class TableTab(QtWidgets.QWidget):
         model.layoutChanged.emit()
         self._table.resizeColumnsToContents()
         self._table.setSortingEnabled(was_sorted)
+
+
+class SocialTab(QtWidgets.QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self._og_preview = QtWidgets.QTextBrowser()
+        self._tw_preview = QtWidgets.QTextBrowser()
+        for view in (self._og_preview, self._tw_preview):
+            view.setOpenExternalLinks(True)
+            view.setMaximumHeight(320)
+            view.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        self._issues = QtWidgets.QTableView()
+        self._issues.setSortingEnabled(True)
+        layout = QtWidgets.QVBoxLayout(self)
+        previews = QtWidgets.QHBoxLayout()
+        og_box = QtWidgets.QVBoxLayout()
+        og_label = QtWidgets.QLabel("OpenGraph preview")
+        og_label.setStyleSheet("font-weight:600;")
+        og_box.addWidget(og_label)
+        og_box.addWidget(self._og_preview)
+
+        tw_box = QtWidgets.QVBoxLayout()
+        tw_label = QtWidgets.QLabel("Twitter Card preview")
+        tw_label.setStyleSheet("font-weight:600;")
+        tw_box.addWidget(tw_label)
+        tw_box.addWidget(self._tw_preview)
+
+        previews.addLayout(og_box)
+        previews.addLayout(tw_box)
+        layout.addLayout(previews)
+        layout.addWidget(self._issues)
+
+    @property
+    def view(self) -> QtWidgets.QTableView:
+        return self._issues
+
+    def _card_html(
+        self,
+        title: str,
+        desc: str,
+        url: str,
+        site: str,
+        img_src: str,
+        link_url: str,
+        theme: str,
+    ) -> str:
+        bg = "#ffffff" if theme == "light" else "#2b2b2b"
+        fg = "#202124" if theme == "light" else "#e0e0e0"
+        border = "#d0d0d0" if theme == "light" else "#444444"
+        img_html = (
+            f'<a href="{link_url}"><img src="{img_src}" alt="" width="240" '
+            f'style="border-radius:4px;border:1px solid {border};"/></a>'
+            if img_src
+            else ""
+        )
+        return (
+            f"<div style='background:{bg};color:{fg};border:1px solid {border};padding:8px;"
+            f"font-family:\"Segoe UI\",sans-serif; font-size:12px;'>"
+            f"<div style='display:flex;gap:8px;align-items:flex-start;'>"
+            f"{img_html}"
+            f"<div>"
+            f"<div style='font-weight:600;margin-bottom:4px;'>{_html.escape(title) or 'No title'}</div>"
+            f"<div style='margin-bottom:6px;'>{_html.escape(desc) or 'No description'}</div>"
+            f"<div style='color:{border};font-size:11px;'>{_html.escape(site or url)}</div>"
+            f"</div></div></div>"
+        )
+
+    def update(self, data: Dict[str, object]) -> None:
+        app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
+        theme = current_theme(app)
+        payload = SocialPayload.from_raw(data if isinstance(data, dict) else {})
+        og = payload.open_graph
+        tw = payload.twitter
+        og_img = og.image_data or og.image
+        tw_img = tw.image_data or tw.image
+        self._og_preview.setHtml(
+            self._card_html(og.title, og.description, og.url, og.site_name, og_img, og.image or og.url, theme)
+        )
+        self._tw_preview.setHtml(
+            self._card_html(tw.title, tw.description, tw.url, tw.site_name, tw_img, tw.image or tw.url, theme)
+        )
+        rows: List[List[str]] = []
+        for source, issues in (("OpenGraph", og.issues), ("Twitter", tw.issues)):
+            for issue in issues:
+                rows.append([source, issue])
+        if not rows:
+            rows = [["Info", "No social issues detected"]]
+        self._issues.setModel(SocialIssuesModel(rows))
+        header = cast(QtWidgets.QHeaderView, self._issues.horizontalHeader())
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
 
 class MetaTab(TableTab):
@@ -953,4 +1045,5 @@ __all__ = [
     "PerformanceTab",
     "SchemaTab",
     "SerpTab",
+    "SocialTab",
 ]

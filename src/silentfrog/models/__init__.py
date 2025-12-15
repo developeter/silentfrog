@@ -9,6 +9,7 @@ from .serp_audit import SerpAuditModel
 from .headers import HeaderModel
 from .links import LinksModel
 from .keywords import KeywordModel
+from .social import SocialIssuesModel
 
 __all__ = [
     "GenericModel",
@@ -23,4 +24,5 @@ __all__ = [
     "HeaderModel",
     "LinksModel",
     "KeywordModel",
+    "SocialIssuesModel",
 ]

@@ -67,6 +67,25 @@ def _stringify_rows(data: Sequence[Sequence[object]]) -> List[List[str]]:
     return [[str(cell) for cell in row] for row in data]
 
 
+def _social_rows(payload: CrawlPayload) -> List[List[str]]:
+    rows: List[List[str]] = []
+    for source, card in (("OpenGraph", payload.social.open_graph), ("Twitter", payload.social.twitter)):
+        rows.append(
+            [
+                source,
+                card.title or "-",
+                card.description or "-",
+                card.image or "-",
+                card.card or "-",
+                card.image_type or "-",
+                _parse_size(card.image_bytes),
+                f"{card.image_width}x{card.image_height}" if card.image_width and card.image_height else "-",
+                "; ".join(card.issues) if card.issues else "",
+            ]
+        )
+    return rows or [["OpenGraph", "No social data", "-", "-", "-", "-", "-", "-", ""]]
+
+
 def _parse_int(text: object) -> int | None:
     try:
         return int(str(text))
@@ -75,7 +94,7 @@ def _parse_int(text: object) -> int | None:
 
 
 def _parse_size(text: str) -> int:
-    text = text.strip().lower()
+    text = str(text).strip().lower()
     if not text:
         return -1
     parts = text.split()
@@ -372,6 +391,21 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache", "Lazy", "Fetch priority"],
             images_rows,
             _images_formatter,
+        )
+
+        social_rows = _social_rows(payload)
+
+        def _social_formatter(row_idx: int, col_idx: int, value: str):
+            if col_idx == 8 and value:
+                return formats.warn
+            return None
+
+        _write_sheet(
+            workbook,
+            "Social",
+            ["Source", "Title", "Description", "Image", "Card", "Type", "Size (B)", "Dims", "Issues"],
+            social_rows,
+            _social_formatter,
         )
 
         links_rows = _stringify_rows(payload.links)

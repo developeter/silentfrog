@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Tuple
 from urllib.parse import urljoin, urlparse
@@ -14,6 +15,7 @@ from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
 
 Tag = bs4.element.Tag
 NavigableString = bs4.element.NavigableString
+_ALLOWED_TWITTER_CARDS = {"summary", "summary_large_image", "app", "player"}
 
 
 @dataclass(slots=True)
@@ -189,6 +191,108 @@ def _link_heading(tag: Tag) -> str:
     if isinstance(heading, Tag):
         return heading.get_text(" ", strip=True)
     return ""
+
+
+async def _fetch_image_details(url: str, timeout: int = 5) -> tuple[int, int, int, str, str]:
+    if not url:
+        return 0, 0, 0, "-", ""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=ClientTimeout(total=timeout)) as r:
+                raw = await r.read()
+                size_b = len(raw)
+                content_type = (r.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+                data_uri = ""
+                if size_b and size_b <= 200_000 and content_type.startswith("image/"):
+                    from base64 import b64encode
+
+                    data_uri = f"data:{content_type};base64,{b64encode(raw).decode()}"
+                try:
+                    from io import BytesIO
+                    from PIL import Image  # type: ignore
+
+                    with Image.open(BytesIO(raw)) as im:
+                        w, h = im.size
+                        if not content_type and im.format:
+                            content_type = f"image/{im.format.lower()}"
+                except Exception:
+                    w, h = 0, 0
+                return int(w or 0), int(h or 0), int(size_b or 0), content_type or "-", data_uri
+    except Exception:
+        return 0, 0, 0, "-", ""
+
+
+def _social_issues(card: dict[str, Any], kind: str) -> list[str]:
+    issues: list[str] = []
+    required = ["title", "description", "image"]
+    for key in required:
+        if not card.get(key):
+            issues.append(f"Missing {kind} {key}")
+
+    if kind == "twitter":
+        card_type = str(card.get("card") or "").lower()
+        if card_type and card_type not in _ALLOWED_TWITTER_CARDS:
+            issues.append(f"Unsupported twitter:card '{card_type}'")
+
+    img_bytes = int(card.get("image_bytes") or 0)
+    if img_bytes > 5 * 1024 * 1024:
+        issues.append(f"{kind.title()} image over 5MB")
+    width = int(card.get("image_width") or 0)
+    height = int(card.get("image_height") or 0)
+    if (width and width < 120) or (height and height < 120):
+        issues.append(f"{kind.title()} image very small")
+    return issues
+
+
+async def _extract_social_cards(base: str, soup: BeautifulSoup, timeout: int = 5) -> dict[str, dict[str, Any]]:
+    def _tag_value(names: tuple[str, ...]) -> str:
+        for tag in soup.find_all("meta"):
+            prop = _attr(tag, "property").lower()
+            name = _attr(tag, "name").lower()
+            if prop in names or name in names:
+                content = _attr(tag, "content").strip()
+                if content:
+                    return content
+        return ""
+
+    og_image = _tag_value(("og:image",))
+    tw_image = _tag_value(("twitter:image", "twitter:image:src"))
+
+    og = {
+        "title": _tag_value(("og:title",)),
+        "description": _tag_value(("og:description",)),
+        "image": urljoin(base, og_image) if og_image else "",
+        "site_name": _tag_value(("og:site_name",)),
+        "url": _tag_value(("og:url",)) or base,
+    }
+    twitter = {
+        "title": _tag_value(("twitter:title",)) or og["title"],
+        "description": _tag_value(("twitter:description",)) or og["description"],
+        "image": urljoin(base, tw_image) if tw_image else og["image"],
+        "site_name": _tag_value(("twitter:site", "twitter:creator")),
+        "card": _tag_value(("twitter:card",)),
+        "url": base,
+    }
+
+    async def _enrich(card: dict[str, Any]) -> None:
+        if not card.get("image"):
+            card.update({"image_width": 0, "image_height": 0, "image_bytes": 0, "image_type": "-"})
+            return
+        w, h, size_b, ctype, data_uri = await _fetch_image_details(card["image"], timeout=timeout)
+        card.update(
+            {
+                "image_width": w,
+                "image_height": h,
+                "image_bytes": size_b,
+                "image_type": ctype,
+                "image_data": data_uri,
+            }
+        )
+
+    await asyncio.gather(_enrich(og), _enrich(twitter))
+    og["issues"] = _social_issues(og, "open graph")
+    twitter["issues"] = _social_issues(twitter, "twitter")
+    return {"open_graph": og, "twitter": twitter}
 
 
 def _link_domain_info(url: str) -> Tuple[str, str]:

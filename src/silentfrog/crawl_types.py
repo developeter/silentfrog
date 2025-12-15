@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from urllib.parse import urlparse
 
 
 def _is_iterable_of_iterables(value: Any) -> bool:
@@ -37,6 +38,13 @@ def _normalize_robots(value: Any) -> Dict[str, List[Tuple[str, str]]]:
                     bucket.append((str(directive[0]), str(directive[1])))
         normalized[str(agent)] = bucket
     return normalized
+
+
+def _parse_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)
@@ -575,6 +583,90 @@ class SerpAudit:
 
 
 @dataclass(frozen=True)
+class SocialCard:
+    title: str
+    description: str
+    image: str
+    image_data: str
+    site_name: str
+    url: str
+    card: str
+    image_width: int
+    image_height: int
+    image_bytes: int
+    image_type: str
+    issues: List[str]
+
+    @classmethod
+    def from_raw(cls, data: Mapping[str, Any]) -> SocialCard:
+        return cls(
+            title=str(data.get("title", "")),
+            description=str(data.get("description", "")),
+            image=str(data.get("image", "")),
+            image_data=str(data.get("image_data", "")),
+            site_name=str(data.get("site_name", "")),
+            url=str(data.get("url", "")),
+            card=str(data.get("card", "")),
+            image_width=_parse_int(data.get("image_width")) or 0,
+            image_height=_parse_int(data.get("image_height")) or 0,
+            image_bytes=_parse_int(data.get("image_bytes")) or 0,
+            image_type=str(data.get("image_type", "")),
+            issues=[str(item) for item in data.get("issues", []) if isinstance(item, (str, int))],
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "image": self.image,
+            "image_data": self.image_data,
+            "site_name": self.site_name,
+            "url": self.url,
+            "card": self.card,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "image_bytes": self.image_bytes,
+            "image_type": self.image_type,
+            "issues": list(self.issues),
+        }
+
+
+@dataclass(frozen=True)
+class SocialPayload:
+    open_graph: SocialCard
+    twitter: SocialCard
+
+    @classmethod
+    def empty(cls) -> SocialPayload:
+        empty = SocialCard(
+            title="",
+            description="",
+            image="",
+            site_name="",
+            url="",
+            card="",
+            image_width=0,
+            image_height=0,
+            image_bytes=0,
+            image_type="",
+            image_data="",
+            issues=[],
+        )
+        return cls(open_graph=empty, twitter=empty)
+
+    @classmethod
+    def from_raw(cls, data: Mapping[str, Any]) -> SocialPayload:
+        if not data:
+            return cls.empty()
+        og_raw = _ensure_mapping(data.get("open_graph", {}), "open_graph")
+        tw_raw = _ensure_mapping(data.get("twitter", {}), "twitter")
+        return cls(open_graph=SocialCard.from_raw(og_raw), twitter=SocialCard.from_raw(tw_raw))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"open_graph": self.open_graph.to_dict(), "twitter": self.twitter.to_dict()}
+
+
+@dataclass(frozen=True)
 class CrawlPayload:
     meta: List[List[str]]
     headers: List[List[str]]
@@ -591,6 +683,7 @@ class CrawlPayload:
     serp_audit: SerpAudit
     keywords: List[KeywordEntry]
     performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
+    social: SocialPayload = field(default_factory=SocialPayload.empty)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -618,6 +711,7 @@ class CrawlPayload:
         redirect_raw = _ensure_mapping(data["redirect"], "redirect")
         serp_raw = _ensure_mapping(data["serp"], "serp")
         serp_audit_raw = _ensure_mapping(data["serp_audit"], "serp_audit")
+        social_raw = _ensure_mapping(data.get("social", {}), "social") if isinstance(data, Mapping) else {}
 
         return cls(
             meta=_normalize_rows(data["meta"], label="meta"),
@@ -635,6 +729,7 @@ class CrawlPayload:
             serp_audit=SerpAudit.from_raw(serp_audit_raw),
             keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
+            social=SocialPayload.from_raw(social_raw),
         )
 
     def to_mapping(self) -> Dict[str, Any]:
@@ -654,6 +749,7 @@ class CrawlPayload:
             "serp_audit": self.serp_audit.to_dict(),
             "keywords": [entry.to_dict() for entry in self.keywords],
             "performance": self.performance.to_dict(),
+            "social": self.social.to_dict(),
         }
 
     def __getitem__(self, key: str) -> Any:

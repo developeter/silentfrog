@@ -43,6 +43,7 @@ from .parsers_meta import (
     _title_audit,
     _update_link_statuses,
     _check_canonical,
+    _extract_social_cards,
 )
 from .perf_metrics import _collect_performance_metrics
 from .schema_extractor import _extract_schema_all
@@ -100,6 +101,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     ai_rows = _ai_crawl_matrix(robots_map, meta_robots, resp.url)
     serp_snippet = await _make_serp_snippet(soup, resp.url)
     title_audit = _title_audit(serp_snippet["title"], _extract_headers(soup))
+    social_cards = await _extract_social_cards(resp.url, soup, timeout=timeout)
 
     raw_payload = {
         "meta": _extract_meta(soup),
@@ -127,6 +129,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "serp_audit": title_audit,
         "keywords": _extract_keywords(soup, plain),
         "performance": performance_metrics,
+        "social": social_cards,
     }
     return CrawlPayload.from_raw(raw_payload)
 

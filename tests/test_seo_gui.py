@@ -26,6 +26,7 @@ from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     RobotsTab,
     SchemaTab,
     SerpTab,
+    SocialTab,
 )
 
 SNAPSHOT_DIR = Path(__file__).with_name("snapshots")
@@ -234,8 +235,49 @@ TABLE_TAB_CASES: Tuple[
     ),
     (
         ImagesTab,
-        ([["https://example.com/img.png", "Alt", "Title", "640", "480", "18 KB"]],),
+        (
+            [
+                [
+                    "https://example.com/img.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "640",
+                    "480",
+                    "18 KB",
+                    "2h",
+                    "Yes",
+                    "High",
+                ]
+            ],
+        ),
         {0: QtWidgets.QHeaderView.Interactive},
+    ),
+    (
+        SocialTab,
+        (
+            {
+                "open_graph": {
+                    "title": "OG Title",
+                    "description": "OG Desc",
+                    "image": "https://example.com/og.png",
+                    "site_name": "Example",
+                    "url": "https://example.com",
+                    "card": "",
+                    "issues": ["Missing description"],
+                },
+                "twitter": {
+                    "title": "TW Title",
+                    "description": "TW Desc",
+                    "image": "https://example.com/tw.png",
+                    "site_name": "Example",
+                    "url": "https://example.com",
+                    "card": "summary_large_image",
+                    "issues": [],
+                },
+            },
+        ),
+        {},
     ),
     (
         LinksTab,
@@ -349,12 +391,13 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    assert win.tabs.count() == 13
+    assert win.tabs.count() == 14
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
         "Meta tag",
         "Header H1-H6",
         "Images",
+        "Social",
         "Link",
         "Redirect",
         "Canonical",
