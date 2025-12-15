@@ -142,10 +142,10 @@ async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) ->
         if isinstance(o, Exception):
             msg = str(o)
             url = msg.split(" ", 1)[0] if "http" in msg else "Errore"
-            result.append([url, "", "", "", "-"])
+            result.append([url, "", "", "", "-", ""])
         else:
-            url, w, h, size_b, ctype = cast(tuple[str, int, int, int, str], o)
-            result.append([url, str(w), str(h), _hr_size(size_b), ctype])
+            url, w, h, size_b, ctype, cache = cast(tuple[str, int, int, int, str, str], o)
+            result.append([url, str(w), str(h), _hr_size(size_b), ctype, cache or ""])
 
     return result
 

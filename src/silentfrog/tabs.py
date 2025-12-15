@@ -95,19 +95,20 @@ class ImagesTab(TableTab):
         self._rows: List[List[str]] = []
 
     def update(self, rows: List[List[str]]) -> None:
-        if rows and len(rows[0]) == 5 and self._rows:
+        if rows and len(rows[0]) == 6 and self._rows:
             updates = {row[0]: row for row in rows}
             merged: List[List[str]] = []
             for current in self._rows:
                 url = current[0]
                 update = updates.get(url)
                 if update:
-                    _, width, height, human, mime = update
+                    _, width, height, human, mime, cache = update
                     if mime and mime != "-":
                         current[3] = mime
                     current[4] = str(width) if width else current[4]
                     current[5] = str(height) if height else current[5]
                     current[6] = human or current[6]
+                    current[7] = cache or current[7]
                 merged.append(list(current))
             rows = merged
         else:

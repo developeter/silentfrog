@@ -92,7 +92,8 @@ async def test_analyse(local_server):
     # Images tab: absolute URL, alt preserved
     assert payload.images[0][0].endswith("/logo.png")
     assert payload.images[0][1] == "logo"
-    assert payload.images[0][8] == ""
+    assert payload.images[0][7] == ""
+    assert payload.images[0][9] == ""
 
     # Links tab: rel + status populated with context
     rel_value = payload.links[0][3].lower()
@@ -179,18 +180,19 @@ async def test_analyse(local_server):
 
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):
-    input_rows = [["/logo.png", "", "", "-", "", "", "", "No", ""]]
+    input_rows = [["/logo.png", "", "", "-", "", "", "", "", "No", ""]]
     out = await analyse_images(local_server, input_rows, timeout=5)
 
     assert isinstance(out, list)
     assert len(out) == 1
 
-    url, width, height, hr_size, content_type = out[0]
+    url, width, height, hr_size, content_type, cache_hint = out[0]
     assert url.endswith("/logo.png")
     assert isinstance(width, str) and width.isdigit()
     assert isinstance(height, str) and height.isdigit()
     assert isinstance(hr_size, str) and hr_size.endswith("B")
     assert content_type == "image/png"
+    assert isinstance(cache_hint, str)
 
 
 @pytest.mark.asyncio

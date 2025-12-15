@@ -19,7 +19,7 @@ def _sample_payload() -> CrawlPayload:
         ],
         "headers": [["h1", "Title"]],
         "images": [
-            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes", "High"]
+            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "2h", "Yes", "High"]
         ],
         "links": [
             [

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlparse, urlunparse, urljoin
 from urllib.robotparser import RobotFileParser
+import re
 
 import aiohttp  # type: ignore[import]  # aiohttp lacks complete stubs in our environment
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
@@ -63,6 +66,7 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
 
         size_b = len(raw)
         content_type = (r.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        cache_hint = _cache_hint(r.headers)
         try:
             from io import BytesIO
             from PIL import Image  # type: ignore
@@ -74,9 +78,47 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
         except Exception:
             w, h = 0, 0
 
-        return url, w, h, size_b, content_type or "-"
+        return url, w, h, size_b, content_type or "-", cache_hint
     except Exception:
-        return "Errore", 0, 0, 0, "-"
+        return "Errore", 0, 0, 0, "-", ""
+
+
+def _cache_hint(headers: Any) -> str:
+    cache_control = str(headers.get("Cache-Control", "") or "")
+    match = re.search(r"max-age\\s*=\\s*(\\d+)", cache_control, re.I)
+    if match:
+        return _human_duration(int(match.group(1)))
+
+    expires = headers.get("Expires")
+    if expires:
+        try:
+            dt = parsedate_to_datetime(str(expires))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            remaining = int((dt - datetime.now(timezone.utc)).total_seconds())
+            if remaining > 0:
+                return _human_duration(remaining)
+        except Exception:
+            return ""
+    return ""
+
+
+def _human_duration(seconds: int) -> str:
+    if seconds <= 0:
+        return ""
+    parts = []
+    units = [("d", 86400), ("h", 3600), ("m", 60)]
+    remaining = seconds
+    for suffix, span in units:
+        if remaining >= span:
+            value = remaining // span
+            remaining %= span
+            parts.append(f"{value}{suffix}")
+        if len(parts) == 2:
+            break
+    if not parts:
+        return f"{remaining}s"
+    return " ".join(parts)
 
 
 async def _link_status(session: ClientSession, url: str, timeout: int, options: CrawlOptions) -> int:

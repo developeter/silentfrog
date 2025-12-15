@@ -353,12 +353,12 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
                 return formats.good
             if col_idx in (4, 5) and not images_rows[row_idx][col_idx].strip():
                 return formats.warn
-            if col_idx == 0 and images_rows[row_idx][7].strip().lower() != "yes":
+            if col_idx == 0 and images_rows[row_idx][8].strip().lower() != "yes":
                 return formats.warn
-            if col_idx == 7:
-                return formats.good if images_rows[row_idx][7].strip().lower() == "yes" else formats.warn
             if col_idx == 8:
-                value_norm = images_rows[row_idx][8].strip().lower()
+                return formats.good if images_rows[row_idx][8].strip().lower() == "yes" else formats.warn
+            if col_idx == 9:
+                value_norm = images_rows[row_idx][9].strip().lower()
                 if not value_norm:
                     return formats.warn
                 if value_norm in {"high", "true"}:
@@ -369,7 +369,7 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         _write_sheet(
             workbook,
             "Images",
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Lazy", "Fetch priority"],
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache", "Lazy", "Fetch priority"],
             images_rows,
             _images_formatter,
         )

@@ -25,6 +25,7 @@ class ImageInfo:
     width: str
     height: str
     size: str
+    cache: str
     loading: str
     fetchpriority: str
 
@@ -37,6 +38,7 @@ class ImageInfo:
             self.width,
             self.height,
             self.size,
+            self.cache,
             self.loading,
             self.fetchpriority,
         ]
@@ -160,6 +162,7 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
             width=safe_attr(img, "width") or "",
             height=safe_attr(img, "height") or "",
             size="",
+            cache="",
             loading=_normalize_loading(safe_attr(img, "loading") or ""),
             fetchpriority=_normalize_fetchpriority(safe_attr(img, "fetchpriority") or ""),
         )

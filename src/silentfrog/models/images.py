@@ -16,12 +16,12 @@ class ImagesModel(GenericModel):
         self._loading_rows: set[int] = set()
         self._dimension_rows: set[int] = set()
         for idx, row in enumerate(rows):
-            padded = (row + [""] * 9)[:9]
-            src, alt, title, mime, width, height, size, loading, fetch_priority = padded
+            padded = (row + [""] * 10)[:10]
+            src, alt, title, mime, width, height, size, cache_hint, loading, fetch_priority = padded
             loading_value = str(loading).strip().title()
             fetch_text = str(fetch_priority).strip()
             normalized.append(
-                [src, alt, title, mime, width, height, size, loading_value, fetch_text]
+                [src, alt, title, mime, width, height, size, cache_hint, loading_value, fetch_text]
             )
             if loading_value:
                 self._loading_rows.add(idx)
@@ -29,7 +29,7 @@ class ImagesModel(GenericModel):
                 self._dimension_rows.add(idx)
 
         super().__init__(
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Loading", "Fetch priority"],
+            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache", "Loading", "Fetch priority"],
             normalized,
         )
         self._brushes: StatusBrushPalette = status_brushes()
@@ -104,9 +104,9 @@ class ImagesModel(GenericModel):
             return self._brushes.warn
         if column in (4, 5) and row not in self._dimension_rows:
             return self._brushes.warn
-        if column == 7 and row not in self._loading_rows:
+        if column == 8 and row not in self._loading_rows:
             return self._brushes.warn
-        if column == 8:
+        if column == 9:
             status = ImagesModel._priority_status(self._rows[row][column])
             if status == "missing":
                 return self._brushes.warn

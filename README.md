@@ -207,14 +207,9 @@ silentfrog/
 
 | OS      | Command                                    | Output                |
 | ------- | ------------------------------------------ | --------------------- |
-| Windows | `poetry run pyinstaller --name Silentfrog --paths src --add-data "src/silentfrog/assets;silentfrog/assets" --add-data "src/silentfrog/resources;silentfrog/resources" -w src/silentfrog/gui.py` | `dist/Silentfrog.exe` |
+| Windows | Packaging via PyInstaller is currently deferred (pending xlsxwriter/PyQt bundling); run via Poetry for now: `poetry run silentfrog` | |
 
-PyInstaller hints (not a full spec):
-- Bundle package data: `silentfrog/assets` and `silentfrog/resources` so icons and stopwords ship with the app.
-- Entry point: `silentfrog.gui:main` (or `python -m silentfrog`); sample command above uses `-m silentfrog.gui`.
-- No runtime downloads: stopwords are bundled locally; code avoids writing outside the app directory.
-
----
+--- 
 
 ## 6. Troubleshooting
 

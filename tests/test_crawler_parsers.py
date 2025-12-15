@@ -68,6 +68,7 @@ def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> No
             "",
             "",
             "",
+            "",
         ]
     ]
 

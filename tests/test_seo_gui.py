@@ -74,7 +74,18 @@ def _sample_payload() -> CrawlPayload:
         ],
         "headers": [["h1", "Title"]],
         "images": [
-            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "Yes", "High"]
+            [
+                "https://example.com/logo.png",
+                "Alt",
+                "Title",
+                "image/png",
+                "100",
+                "200",
+                "10 KB",
+                "2h",
+                "Yes",
+                "High",
+            ]
         ],
         "links": [
             [
@@ -552,11 +563,11 @@ def test_images_tab_merges_worker_results(qtbot):
     tab = ImagesTab()
     qtbot.addWidget(tab)
     initial_rows = [
-        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "No", ""]
+        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "No", ""]
     ]
     tab.update(initial_rows)
 
-    worker_rows = [["https://example.com/img.png", 640, 480, "18 KB", "image/png"]]
+    worker_rows = [["https://example.com/img.png", 640, 480, "18 KB", "image/png", "1h"]]
     tab.update(worker_rows)
 
     model = tab.view.model()
@@ -735,7 +746,7 @@ def test_image_analysis_updates_payload_rows(qtbot):
     payload = _sample_payload()
     win._populate_tables(payload.to_mapping())
 
-    update_rows = [[payload.images[0][0], 640, 320, "42 KB", "image/png"]]
+    update_rows = [[payload.images[0][0], 640, 320, "42 KB", "image/png", "30m"]]
     win._populate_tables({"img_update": update_rows})
 
     assert win._latest_payload is not None
@@ -747,8 +758,9 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[4] == "640"
     assert image_row[5] == "320"
     assert image_row[6] == "42 KB"
-    assert image_row[7] == "Yes"
+    assert image_row[7] == "30m"
     assert image_row[8] == payload.images[0][8]
+    assert image_row[9] == payload.images[0][9]
 
 
 def test_crawl_settings_dialog_roundtrip(qtbot):
