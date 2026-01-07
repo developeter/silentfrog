@@ -58,11 +58,20 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
     apply_theme(cast(QtWidgets.QApplication, app), value < 128)
     widget.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
 
+def _configure_settings(tmp_path: Path) -> None:
+    QtCore.QSettings.setDefaultFormat(QtCore.QSettings.IniFormat)
+    QtCore.QSettings.setPath(QtCore.QSettings.IniFormat, QtCore.QSettings.Scope.UserScope, str(tmp_path))
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        app.setOrganizationName("SilentfrogTests")
+        app.setApplicationName("SilentfrogTests")
+
 
 def _row_count(view: QtWidgets.QTableView) -> int:
     model = view.model()
     assert model is not None
     return model.rowCount()
+
 
 def _sample_payload() -> CrawlPayload:
     raw = {
@@ -409,6 +418,25 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Performance",
         "SERP",
     ]
+
+def test_recent_urls_persisted_and_ordered(qtbot, tmp_path: Path) -> None:
+    _configure_settings(tmp_path)
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._remember_url("https://example.com/one")
+    win._remember_url("https://example.com/two")
+    win._remember_url("https://example.com/one")
+    win._settings.sync()
+
+    assert win.url_edit.itemText(0) == "https://example.com/one"
+    assert win.url_edit.itemText(1) == "https://example.com/two"
+    assert win.url_edit.count() == 2
+
+    win2 = WebpageSeoWindow()
+    qtbot.addWidget(win2)
+    assert win2.url_edit.itemText(0) == "https://example.com/one"
+    assert win2.url_edit.itemText(1) == "https://example.com/two"
+    assert win2.url_edit.count() == 2
 
 
 def test_seo_window_shows_placeholder_before_first_crawl(qtbot):

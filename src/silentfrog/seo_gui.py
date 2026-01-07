@@ -35,6 +35,39 @@ import webbrowser
 import logging
 
 
+class _RecentUrls:
+    def __init__(self, max_items: int = 10) -> None:
+        self._max_items = max_items
+        self._items: list[str] = []
+
+    def items(self) -> list[str]:
+        return list(self._items)
+
+    def load(self, settings: QtCore.QSettings) -> None:
+        raw = settings.value("recent_urls", [])
+        values = raw if isinstance(raw, list) else [raw] if raw else []
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        seen: set[str] = set()
+        unique: list[str] = []
+        for value in cleaned:
+            if value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+        self._items = unique[: self._max_items]
+
+    def save(self, settings: QtCore.QSettings) -> None:
+        settings.setValue("recent_urls", self._items)
+
+    def add(self, url: str) -> None:
+        normalized = url.strip()
+        if not normalized:
+            return
+        self._items = [item for item in self._items if item != normalized]
+        self._items.insert(0, normalized)
+        self._items = self._items[: self._max_items]
+
+
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -59,6 +92,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._crawl_options: CrawlOptions = CrawlOptions.default()
 
         self._build_ui()
+        app = QtWidgets.QApplication.instance()
+        org = app.organizationName() or "Silentfrog" if app else "Silentfrog"
+        name = app.applicationName() or "Silentfrog" if app else "Silentfrog"
+        self._settings = QtCore.QSettings(org, name)
+        self._recent_urls = _RecentUrls(max_items=10)
+        self._recent_urls.load(self._settings)
+        self._sync_recent_urls("")
         self._progress_value = 0
         self._progress_limit = 100
         self._progress_timer: QtCore.QTimer | None = None
@@ -73,8 +113,15 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
 
         url_bar = QtWidgets.QHBoxLayout()
-        self.url_edit = QtWidgets.QLineEdit()
-        self.url_edit.setPlaceholderText("https://example.com")
+        self.url_edit = QtWidgets.QComboBox()
+        self.url_edit.setEditable(True)
+        self.url_edit.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.url_edit.setMaxVisibleItems(10)
+        self.url_edit.setToolTip("Recent URLs")
+        line_edit = self.url_edit.lineEdit()
+        if line_edit:
+            line_edit.setPlaceholderText("https://example.com")
+            line_edit.setToolTip("Recent URLs")
         url_bar.addWidget(self.url_edit, 1)
 
         self.btn_go = QtWidgets.QPushButton("Analyze")
@@ -256,10 +303,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         super().changeEvent(event)
 
     def _start_analysis(self) -> None:
-        url = self.url_edit.text().strip()
+        url = self.url_edit.currentText().strip()
         if not self._is_valid_url(url):
             QtWidgets.QMessageBox.warning(self, "Missing URL", "Enter a URL to analyze.")
             return
+        self._remember_url(url)
         self._prepare_for_analysis()
 
         run_crawl(
@@ -277,12 +325,24 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             return
 
         run_image_analysis(
-            self.url_edit.text(),
+            self.url_edit.currentText(),
             rows,
             timeout=15,
             on_success=lambda result: self.dataReady.emit({"img_update": result}),
             on_error=lambda err: self.errorSig.emit(err),
         )
+
+    def _remember_url(self, url: str) -> None:
+        self._recent_urls.add(url)
+        self._recent_urls.save(self._settings)
+        self._sync_recent_urls(url)
+
+    def _sync_recent_urls(self, current: str) -> None:
+        self.url_edit.blockSignals(True)
+        self.url_edit.clear()
+        self.url_edit.addItems(self._recent_urls.items())
+        self.url_edit.blockSignals(False)
+        self.url_edit.setEditText(current)
 
     def _open_crawl_settings(self) -> None:
         dialog = CrawlSettingsDialog(self._crawl_options, self)

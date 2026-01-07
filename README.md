@@ -186,6 +186,8 @@ silentfrog/
 │   ├── schema_extractor.py # Structured data extraction and validators
 │   ├── perf_metrics.py   # Resource/weight/opportunity calculation
 │   ├── keywords.py       # Keyword tokenization and density analysis
+│   ├── social.py         # Social card previews/issues (OpenGraph/Twitter)
+│   ├── resources/        # Bundled stopword lists
 │   ├── workers.py        # Thread helpers wrapping async tasks
 │   └── seo_crawler.py    # Orchestrator wiring the modules above
 ├── tests/
@@ -194,6 +196,7 @@ silentfrog/
 │   ├── test_export_excel.py
 │   ├── test_keywords_unit.py
 │   ├── test_schema_extractor_unit.py
+│   ├── test_social_extract.py
 │   ├── test_perf_metrics_unit.py
 │   ├── test_crawl_http_unit.py
 │   ├── ...
