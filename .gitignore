@@ -5,3 +5,6 @@ src/silentfrog/__pycache__/
 *.pyc
 src/silentfrog/assets/icon1.png
 src/silentfrog/assets/icon-old.png
+.pytest_cache/
+.pytest_runtime_tmp/
+.pytest_runtime_cache/

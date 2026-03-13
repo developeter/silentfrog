@@ -41,6 +41,9 @@ $ poetry install
 # run tests
 $ poetry run pytest
 
+# run doctor (env + compile + tests)
+$ poetry run python tools/doctor.py
+
 # launch GUI (preferred)
 $ poetry run silentfrog
 # or, from the project root:
@@ -151,10 +154,16 @@ Silentfrog includes a **gentle crawl mode** for fragile staging sites or wheneve
 poetry run pytest -q 
 ```
 
-The first run downloads the NLTK stop-word corpus. If outbound traffic is blocked run:
+For a full quality gate (environment checks + compile + tests), use:
 
 ```bash
-poetry run python -m nltk.downloader stopwords
+poetry run python tools/doctor.py
+```
+
+Install automatic hooks once if you want tests to run on commit/push:
+
+```bash
+poetry run python tools/install_hooks.py
 ```
 
 ---
@@ -163,8 +172,15 @@ poetry run python -m nltk.downloader stopwords
 
 ```
 silentfrog/
+├── AGENTS.md
 ├── pyproject.toml
 ├── README.md
+├── tools/
+│   ├── doctor.py          # Env/dependency/resource/compile/test checks
+│   └── install_hooks.py   # Configures git to use .githooks/
+├── .githooks/
+│   ├── pre-commit         # Runs doctor --quick automatically
+│   └── pre-push           # Runs full doctor automatically
 ├── docs/
 │   └── tests/
 │       ├── README.md

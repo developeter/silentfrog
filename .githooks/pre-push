@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[silentfrog pre-push] Running full doctor checks..."
+poetry run python tools/doctor.py
