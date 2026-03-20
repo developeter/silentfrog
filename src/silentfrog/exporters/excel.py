@@ -9,6 +9,8 @@ from typing import Any, Callable, List, Sequence
 import xlsxwriter
 
 from ..crawl_types import CrawlPayload, PerformanceMetrics
+from ..content_quality import build_content_quality_rows
+from ..indexability import build_indexability_rows
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
 
@@ -531,6 +533,74 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             _canonical_formatter,
         )
 
+        indexability_rows = build_indexability_rows(
+            payload.redirect.to_dict(),
+            payload.canonical.to_dict(),
+            payload.meta_robots,
+            payload.robots,
+        )
+
+        def _indexability_formatter(row_idx: int, col_idx: int, value: str):
+            if col_idx != 1 or row_idx >= len(indexability_rows):
+                return None
+            key = indexability_rows[row_idx][0].lower()
+            val = str(indexability_rows[row_idx][1] or "")
+            lower_val = val.lower()
+            if key == "final status":
+                code = _parse_int(val)
+                if code is None:
+                    return formats.bad
+                if 200 <= code < 300:
+                    return formats.good
+                if 300 <= code < 400:
+                    return formats.warn
+                return formats.bad
+            if key == "redirect hops":
+                hops = _parse_int(val)
+                if hops is None:
+                    return formats.bad
+                return formats.good if hops == 0 else formats.warn
+            if key == "crawl allowed by robots.txt":
+                return formats.good if lower_val.startswith("y") else formats.bad
+            if key == "meta / x-robots-tag":
+                if lower_val == "-":
+                    return formats.warn
+                if "noindex" in lower_val or lower_val == "none":
+                    return formats.bad
+                if "nofollow" in lower_val:
+                    return formats.warn
+                return formats.good
+            if key == "index directive":
+                return formats.good if lower_val == "index" else formats.bad
+            if key == "follow directive":
+                return formats.good if lower_val == "follow" else formats.warn
+            if key == "canonical url":
+                return formats.good if val and val != "-" else formats.warn
+            if key == "canonical self-reference":
+                return formats.good if lower_val.startswith("y") else formats.warn
+            if key == "canonical status":
+                code = _parse_int(val)
+                if code is None:
+                    return formats.warn if val == "-" else formats.bad
+                return formats.good if 200 <= code < 400 else formats.bad
+            if key == "multiple canonicals":
+                return formats.bad if lower_val.startswith("y") else formats.good
+            if key == "overall verdict":
+                if lower_val == "indexable":
+                    return formats.good
+                if lower_val in {"redirected", "canonicalized elsewhere", "indexable with warnings"}:
+                    return formats.warn
+                return formats.bad
+            return None
+
+        _write_sheet(
+            workbook,
+            "Indexability",
+            ["Check", "Value"],
+            indexability_rows,
+            _indexability_formatter,
+        )
+
         robots_rows: List[List[str]] = [
             ["Meta robots", payload.meta_robots or "-"],
         ]
@@ -703,6 +773,68 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             "Structured data",
             ["#", "Source", "Type", "Errors", "Raw"],
             detail_rows,
+        )
+
+        content_quality_rows = build_content_quality_rows(payload.content_quality)
+
+        def _content_quality_formatter(row_idx: int, col_idx: int, value: str):
+            if col_idx != 1 or row_idx >= len(content_quality_rows):
+                return None
+            key = content_quality_rows[row_idx][0].lower()
+            val = str(content_quality_rows[row_idx][1] or "")
+            lower_val = val.lower()
+            if key == "page language":
+                return formats.warn if lower_val == "not declared" else None
+            if key == "title present":
+                return formats.good if lower_val == "yes" else formats.bad
+            if key == "meta description present":
+                return formats.good if lower_val == "yes" else formats.warn
+            if key == "h1 count":
+                if val == "1":
+                    return formats.good
+                if val == "0":
+                    return formats.bad
+                return formats.warn
+            if key == "h2-h6 count":
+                return formats.warn if val == "0" else None
+            if key == "title / h1 alignment":
+                if lower_val in {"aligned", "exact match"}:
+                    return formats.good
+                if lower_val == "different":
+                    return formats.warn
+                if lower_val == "missing":
+                    return formats.bad
+            if key == "intro paragraph":
+                return formats.good if lower_val == "present" else formats.warn
+            if key == "thin-content risk":
+                if lower_val == "low":
+                    return formats.good
+                if lower_val == "medium":
+                    return formats.warn
+                if lower_val == "high":
+                    return formats.bad
+            if key == "heading structure":
+                if lower_val == "good":
+                    return formats.good
+                if lower_val in {"multiple h1s", "no subheadings"}:
+                    return formats.warn
+                if lower_val == "missing h1":
+                    return formats.bad
+            if key == "overall verdict":
+                if lower_val == "strong":
+                    return formats.good
+                if lower_val == "needs work":
+                    return formats.warn
+                if lower_val == "weak":
+                    return formats.bad
+            return None
+
+        _write_sheet(
+            workbook,
+            "Content quality",
+            ["Check", "Value"],
+            content_quality_rows,
+            _content_quality_formatter,
         )
 
         serp = payload.serp

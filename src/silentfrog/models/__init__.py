@@ -3,7 +3,9 @@ from .meta import MetaModel
 from .images import ImagesModel
 from .robots import RobotsModel
 from .canonical import CanonicalModel
+from .content_quality import ContentQualityModel
 from .redirect import RedirectModel
+from .indexability import IndexabilityModel
 from .hreflang import HreflangModel
 from .serp_audit import SerpAuditModel
 from .headers import HeaderModel
@@ -18,7 +20,9 @@ __all__ = [
     "ImagesModel",
     "RobotsModel",
     "CanonicalModel",
+    "ContentQualityModel",
     "RedirectModel",
+    "IndexabilityModel",
     "HreflangModel",
     "SerpAuditModel",
     "HeaderModel",

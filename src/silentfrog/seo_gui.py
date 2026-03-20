@@ -2,7 +2,7 @@
 from dataclasses import replace
 import importlib.resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import sys
 from urllib.parse import urlparse
@@ -21,6 +21,8 @@ from .tabs import (
     LinksTab,
     RedirectTab,
     CanonicalTab,
+    IndexabilityTab,
+    ContentQualityTab,
     RobotsTab,
     HreflangTab,
     AiTab,
@@ -45,15 +47,9 @@ class _RecentUrls:
 
     def load(self, settings: QtCore.QSettings) -> None:
         raw = settings.value("recent_urls", [])
-        values = raw if isinstance(raw, list) else [raw] if raw else []
+        values = raw if isinstance(raw, list) else ([raw] if raw else [])
         cleaned = [str(value).strip() for value in values if str(value).strip()]
-        seen: set[str] = set()
-        unique: list[str] = []
-        for value in cleaned:
-            if value in seen:
-                continue
-            seen.add(value)
-            unique.append(value)
+        unique = list(dict.fromkeys(cleaned))
         self._items = unique[: self._max_items]
 
     def save(self, settings: QtCore.QSettings) -> None:
@@ -66,6 +62,62 @@ class _RecentUrls:
         self._items = [item for item in self._items if item != normalized]
         self._items.insert(0, normalized)
         self._items = self._items[: self._max_items]
+
+    def remove(self, url: str) -> None:
+        normalized = url.strip()
+        if not normalized:
+            return
+        self._items = [item for item in self._items if item != normalized]
+
+    def remove_at(self, index: int) -> None:
+        try:
+            self._items.pop(index)
+        except IndexError:
+            return
+
+
+class _RecentUrlsDelegate(QtWidgets.QStyledItemDelegate):
+    _remove_size = 16
+    _remove_margin = 6
+
+    @classmethod
+    def remove_rect(cls, rect: QtCore.QRect) -> QtCore.QRect:
+        x = rect.right() - cls._remove_size - cls._remove_margin
+        return QtCore.QRect(x, rect.top(), cls._remove_size, rect.height())
+
+    def sizeHint(self, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> QtCore.QSize:
+        hint = super().sizeHint(option, index)
+        hint.setWidth(hint.width() + 26)
+        return hint
+
+    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> None:
+        super().paint(painter, option, index)
+        rect = self.remove_rect(option.rect)
+        painter.save()
+        font = QtGui.QFont(option.font)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor("#2ecc71"))
+        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, "X")
+        painter.restore()
+
+class _RecentUrlsView(QtWidgets.QListView):
+    def __init__(
+        self,
+        on_remove: Callable[[int, str], None],
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._on_remove = on_remove
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        index = self.indexAt(event.pos())
+        rect = self.visualRect(index) if index.isValid() else QtCore.QRect()
+        is_remove = index.isValid() and _RecentUrlsDelegate.remove_rect(rect).contains(event.pos())
+        if is_remove:
+            self._on_remove(index.row(), str(index.data()))
+            return
+        return super().mouseReleaseEvent(event)
 
 
 logging.basicConfig(
@@ -118,14 +170,27 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.url_edit.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
         self.url_edit.setMaxVisibleItems(10)
         self.url_edit.setToolTip("Recent URLs")
+        self.url_edit.setMinimumHeight(30)
+        font = self.url_edit.font()
+        font.setPointSize(font.pointSize() + 1)
+        self.url_edit.setFont(font)
+        self._recent_delegate = _RecentUrlsDelegate(self.url_edit)
+        self._recent_view = _RecentUrlsView(self._remove_recent_url, self.url_edit)
+        self._recent_view.setFont(font)
+        self._recent_view.setStyleSheet("QListView::item { padding-right: 26px; }")
+        self._recent_view.setItemDelegate(self._recent_delegate)
+        self.url_edit.setView(self._recent_view)
         line_edit = self.url_edit.lineEdit()
         if line_edit:
             line_edit.setPlaceholderText("https://example.com")
             line_edit.setToolTip("Recent URLs")
+            line_edit.setFont(font)
+            line_edit.setMinimumHeight(30)
         url_bar.addWidget(self.url_edit, 1)
 
         self.btn_go = QtWidgets.QPushButton("Analyze")
         self.btn_go.clicked.connect(self._start_analysis)
+        self.btn_go.setMinimumHeight(30)
         url_bar.addWidget(self.btn_go)
         layout.addLayout(url_bar)
 
@@ -155,6 +220,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.canonical_tab = CanonicalTab()
         self.tabs.addTab(self.canonical_tab, "Canonical")
 
+        self.indexability_tab = IndexabilityTab()
+        self.tabs.addTab(self.indexability_tab, "Indexability")
+
         self.robots_tab = RobotsTab()
         self.tabs.addTab(self.robots_tab, "Robots")
 
@@ -163,6 +231,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         self.schema_tab = SchemaTab()
         self.tabs.addTab(self.schema_tab, "Structured data")
+
+        self.content_quality_tab = ContentQualityTab()
+        self.tabs.addTab(self.content_quality_tab, "Content quality")
 
         self.keywords_tab = KeywordsTab()
         self.tabs.addTab(self.keywords_tab, "Keywords")
@@ -344,6 +415,31 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.url_edit.blockSignals(False)
         self.url_edit.setEditText(current)
 
+    def _remove_recent_url(self, row: int, url: str) -> None:
+        current = self.url_edit.currentText().strip()
+        if 0 <= row < len(self._recent_urls.items()):
+            self._recent_urls.remove_at(row)
+        else:
+            self._recent_urls.remove(url)
+        self._recent_urls.save(self._settings)
+        self._sync_recent_urls("" if current == url else current)
+
+    def _remove_rect_for_index(self, index: QtCore.QModelIndex) -> QtCore.QRect:
+        rect = self._recent_view.visualRect(index)
+        size = 16
+        margin = 6
+        x = rect.right() - size - margin
+        return QtCore.QRect(x, rect.top(), size, rect.height())
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if obj is self._recent_view.viewport() and event.type() == QtCore.QEvent.Type.MouseButtonRelease:
+            if isinstance(event, QtGui.QMouseEvent):
+                index = self._recent_view.indexAt(event.pos())
+                if index.isValid() and self._remove_rect_for_index(index).contains(event.pos()):
+                    self._remove_recent_url(index.row(), str(index.data()))
+                    return True
+        return super().eventFilter(obj, event)
+
     def _open_crawl_settings(self) -> None:
         dialog = CrawlSettingsDialog(self._crawl_options, self)
         if dialog.exec() == QtWidgets.QDialog.Accepted:
@@ -383,9 +479,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.links_tab.update([])
         self.redirect_tab.update({})
         self.canonical_tab.update({})
+        self.indexability_tab.update({}, {}, "", {})
         self.robots_tab.update("", {})
         self.hreflang_tab.update([])
         self.social_tab.update({})
+        self.content_quality_tab.update({})
         self.keywords_tab.update([])
         self.ai_tab.update([])
         self.performance_tab.update({})
@@ -482,6 +580,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.images_tab.update, data.get("images", [])),
             (self.links_tab.update, data.get("links", [])),
             (self.hreflang_tab.update, data.get("hreflang", [])),
+            (self.content_quality_tab.update, data.get("content_quality", {})),
             (self.keywords_tab.update, data.get("keywords", [])),
             (self.ai_tab.update, data.get("ai_crawl", [])),
             (self.performance_tab.update, data.get("performance", {})),
@@ -498,6 +597,12 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             self._set_progress(int(progress_value))
         self.redirect_tab.update(data.get("redirect", {}))
         self.canonical_tab.update(data.get("canonical", {}))
+        self.indexability_tab.update(
+            data.get("redirect", {}),
+            data.get("canonical", {}),
+            str(data.get("meta_robots", "")),
+            data.get("robots", {}),
+        )
         self.robots_tab.update(data.get("meta_robots", ""), data.get("robots", {}))
         self.serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
         self._set_progress(end)

@@ -463,6 +463,97 @@ class KeywordEntry:
 
 
 @dataclass(frozen=True)
+class ContentQuality:
+    language: str
+    word_count: int
+    paragraph_count: int
+    substantial_paragraph_count: int
+    average_words_per_paragraph: float
+    title_present: bool
+    meta_description_present: bool
+    h1_count: int
+    h2_h6_count: int
+    title_h1_alignment: str
+    intro_paragraph: str
+    thin_content_risk: str
+    heading_structure: str
+    verdict: str
+
+    @classmethod
+    def empty(cls) -> "ContentQuality":
+        return cls(
+            language="",
+            word_count=0,
+            paragraph_count=0,
+            substantial_paragraph_count=0,
+            average_words_per_paragraph=0.0,
+            title_present=False,
+            meta_description_present=False,
+            h1_count=0,
+            h2_h6_count=0,
+            title_h1_alignment="",
+            intro_paragraph="",
+            thin_content_risk="",
+            heading_structure="",
+            verdict="",
+        )
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "ContentQuality":
+        if not isinstance(value, Mapping):
+            return cls.empty()
+
+        def _to_float(raw: Any) -> float:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _to_int(raw: Any) -> int:
+            try:
+                if isinstance(raw, bool):
+                    return 0
+                return int(raw)
+            except (TypeError, ValueError):
+                return 0
+
+        return cls(
+            language=str(value.get("language", "")),
+            word_count=_to_int(value.get("word_count", 0)),
+            paragraph_count=_to_int(value.get("paragraph_count", 0)),
+            substantial_paragraph_count=_to_int(value.get("substantial_paragraph_count", 0)),
+            average_words_per_paragraph=_to_float(value.get("average_words_per_paragraph", 0.0)),
+            title_present=bool(value.get("title_present", False)),
+            meta_description_present=bool(value.get("meta_description_present", False)),
+            h1_count=_to_int(value.get("h1_count", 0)),
+            h2_h6_count=_to_int(value.get("h2_h6_count", 0)),
+            title_h1_alignment=str(value.get("title_h1_alignment", "")),
+            intro_paragraph=str(value.get("intro_paragraph", "")),
+            thin_content_risk=str(value.get("thin_content_risk", "")),
+            heading_structure=str(value.get("heading_structure", "")),
+            verdict=str(value.get("verdict", "")),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "language": self.language,
+            "word_count": self.word_count,
+            "paragraph_count": self.paragraph_count,
+            "substantial_paragraph_count": self.substantial_paragraph_count,
+            "average_words_per_paragraph": self.average_words_per_paragraph,
+            "title_present": self.title_present,
+            "meta_description_present": self.meta_description_present,
+            "h1_count": self.h1_count,
+            "h2_h6_count": self.h2_h6_count,
+            "title_h1_alignment": self.title_h1_alignment,
+            "intro_paragraph": self.intro_paragraph,
+            "thin_content_risk": self.thin_content_risk,
+            "heading_structure": self.heading_structure,
+            "verdict": self.verdict,
+        }
+
+
+@dataclass(frozen=True)
 class CanonicalInfo:
     target: str
     is_self: bool
@@ -682,6 +773,7 @@ class CrawlPayload:
     serp: SerpPreview
     serp_audit: SerpAudit
     keywords: List[KeywordEntry]
+    content_quality: ContentQuality = field(default_factory=ContentQuality.empty)
     performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
     social: SocialPayload = field(default_factory=SocialPayload.empty)
 
@@ -728,6 +820,7 @@ class CrawlPayload:
             serp=SerpPreview.from_raw(serp_raw),
             serp_audit=SerpAudit.from_raw(serp_audit_raw),
             keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
+            content_quality=ContentQuality.from_raw(data.get("content_quality", {})),
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
             social=SocialPayload.from_raw(social_raw),
         )
@@ -748,6 +841,7 @@ class CrawlPayload:
             "serp": self.serp.to_dict(),
             "serp_audit": self.serp_audit.to_dict(),
             "keywords": [entry.to_dict() for entry in self.keywords],
+            "content_quality": self.content_quality.to_dict(),
             "performance": self.performance.to_dict(),
             "social": self.social.to_dict(),
         }
@@ -767,6 +861,7 @@ __all__ = [
     "StructuredDataPayload",
     "StructuredDataSummary",
     "KeywordEntry",
+    "ContentQuality",
     "PerformanceOffender",
     "PerformanceOpportunity",
     "PerformanceScripts",

@@ -3,17 +3,21 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, cast
 import sys
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
+from .content_quality import build_content_quality_rows
+from .indexability import build_indexability_rows
 from .theme import current_theme
-from .crawl_types import KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
+from .crawl_types import ContentQuality, KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
 from .models import (
     MetaModel,
     ImagesModel,
     RobotsModel,
     CanonicalModel,
+    ContentQualityModel,
     RedirectModel,
+    IndexabilityModel,
     HreflangModel,
     SerpAuditModel,
     HeaderModel,
@@ -39,10 +43,26 @@ def _is_dark(widget: QtWidgets.QWidget) -> bool:
     return current_theme(app) == "dark"
 
 
+class _TooltipTableView(QtWidgets.QTableView):
+    def viewportEvent(self, event: QtCore.QEvent) -> bool:
+        if event.type() != QtCore.QEvent.Type.ToolTip:
+            return super().viewportEvent(event)
+        help_event = cast(QtGui.QHelpEvent, event)
+        index = self.indexAt(help_event.pos())
+        model = self.model()
+        tooltip = model.data(index, Qt.ItemDataRole.ToolTipRole) if model and index.isValid() else ""
+        if tooltip:
+            QtWidgets.QToolTip.showText(help_event.globalPos(), str(tooltip), self.viewport(), self.visualRect(index))
+            return True
+        QtWidgets.QToolTip.hideText()
+        event.ignore()
+        return True
+
+
 class TableTab(QtWidgets.QWidget):
     def __init__(self, sorting: bool = True, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self._table = QtWidgets.QTableView()
+        self._table = _TooltipTableView()
         self._table.setSortingEnabled(sorting)
         self._table.setViewportMargins(0, 0, 18, 18)
         self._table.setStyleSheet("QTableView { padding-right: 18px; padding-bottom: 18px; }")
@@ -250,6 +270,29 @@ class CanonicalTab(TableTab):
             ["Canonical status", data.get("status", "") or ""],
         ]
         self.set_model(CanonicalModel(["Check", "Value"], rows))
+
+
+class IndexabilityTab(TableTab):
+    def update(
+        self,
+        redirect: Dict[str, object],
+        canonical: Dict[str, object],
+        meta_robots: str,
+        robots_map: Dict[str, List[tuple[str, str]]],
+    ) -> None:
+        rows = build_indexability_rows(redirect, canonical, meta_robots, robots_map)
+        self.set_model(IndexabilityModel(["Check", "Value"], rows))
+        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+
+
+class ContentQualityTab(TableTab):
+    def update(self, data: object) -> None:
+        source = data if isinstance(data, dict) else {}
+        quality = data if isinstance(data, ContentQuality) else ContentQuality.from_raw(source)
+        payload = quality.to_dict()
+        rows = build_content_quality_rows(payload if any(payload.values()) else {})
+        self.set_model(ContentQualityModel(["Check", "Value"], rows))
+        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
 
 
 class RobotsTab(TableTab):
@@ -1038,6 +1081,7 @@ __all__ = [
     "LinksTab",
     "RedirectTab",
     "CanonicalTab",
+    "ContentQualityTab",
     "RobotsTab",
     "HreflangTab",
     "AiTab",

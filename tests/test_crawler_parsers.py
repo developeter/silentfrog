@@ -73,6 +73,38 @@ def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> No
     ]
 
 
+def test_extract_images_uses_picture_source_when_img_src_is_empty(base_url: str) -> None:
+    html = """
+    <html>
+      <body>
+        <picture>
+          <source media="(min-width: 1024px)" srcset="/images/hero-large.webp">
+          <source srcset="/images/hero-mobile.webp">
+          <img src="" width="640" height="480" alt="Hero image" title="Hero title">
+        </picture>
+      </body>
+    </html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    images = crawler._extract_images(base_url, soup)
+
+    assert images == [
+        [
+            "https://example.com/images/hero-mobile.webp",
+            "Hero image",
+            "Hero title",
+            "image/webp",
+            "640",
+            "480",
+            "",
+            "",
+            "",
+            "",
+        ]
+    ]
+
+
 def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup) -> None:
     links = crawler._extract_links(base_url, soup)
     assert links[0][:4] == [

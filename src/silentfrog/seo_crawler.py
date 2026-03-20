@@ -29,6 +29,7 @@ from .crawl_http import (
     _trace_redirects,
     _image_info,
 )
+from .content_quality import extract_content_quality
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
@@ -128,6 +129,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "serp": serp_snippet,
         "serp_audit": title_audit,
         "keywords": _extract_keywords(soup, plain),
+        "content_quality": extract_content_quality(soup),
         "performance": performance_metrics,
         "social": social_cards,
     }

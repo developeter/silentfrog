@@ -15,8 +15,10 @@ from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImp
 from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     AiTab,
     CanonicalTab,
+    ContentQualityTab,
     HeadersTab,
     ImagesTab,
+    IndexabilityTab,
     HreflangTab,
     KeywordsTab,
     PerformanceTab,
@@ -145,6 +147,22 @@ def _sample_payload() -> CrawlPayload:
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
         "ai_crawl": [["GPTBot", "Yes", "No", "Allowed"]],
+        "content_quality": {
+            "language": "Italian (it-IT)",
+            "word_count": 420,
+            "paragraph_count": 6,
+            "substantial_paragraph_count": 4,
+            "average_words_per_paragraph": 26.5,
+            "title_present": True,
+            "meta_description_present": True,
+            "h1_count": 1,
+            "h2_h6_count": 3,
+            "title_h1_alignment": "Aligned",
+            "intro_paragraph": "Present",
+            "thin_content_risk": "Low",
+            "heading_structure": "Good",
+            "verdict": "Strong",
+        },
         "serp": {
             "title": "Example Title",
             "description": "Example description",
@@ -332,6 +350,48 @@ TABLE_TAB_CASES: Tuple[
         {},
     ),
     (
+        IndexabilityTab,
+        (
+            {
+                "chain": ["https://example.com"],
+                "hops": 0,
+                "final_status": "200",
+                "loop": False,
+            },
+            {
+                "target": "https://example.com",
+                "self": True,
+                "multiple": False,
+                "status": "200",
+            },
+            "index, follow",
+            {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
+        ),
+        {1: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
+        ContentQualityTab,
+        (
+            {
+                "language": "Italian (it-IT)",
+                "word_count": 420,
+                "paragraph_count": 6,
+                "substantial_paragraph_count": 4,
+                "average_words_per_paragraph": 26.5,
+                "title_present": True,
+                "meta_description_present": True,
+                "h1_count": 1,
+                "h2_h6_count": 3,
+                "title_h1_alignment": "Aligned",
+                "intro_paragraph": "Present",
+                "thin_content_risk": "Low",
+                "heading_structure": "Good",
+                "verdict": "Strong",
+            },
+        ),
+        {1: QtWidgets.QHeaderView.Stretch},
+    ),
+    (
         RobotsTab,
         (
             "noindex",
@@ -400,7 +460,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    assert win.tabs.count() == 14
+    assert win.tabs.count() == 16
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
         "Meta tag",
@@ -410,9 +470,11 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Link",
         "Redirect",
         "Canonical",
+        "Indexability",
         "Robots",
         "Hreflang",
         "Structured data",
+        "Content quality",
         "Keywords",
         "AI crawl",
         "Performance",
@@ -437,6 +499,146 @@ def test_recent_urls_persisted_and_ordered(qtbot, tmp_path: Path) -> None:
     assert win2.url_edit.itemText(0) == "https://example.com/one"
     assert win2.url_edit.itemText(1) == "https://example.com/two"
     assert win2.url_edit.count() == 2
+
+def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
+    _configure_settings(tmp_path)
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._remember_url("https://example.com/one")
+    win._remember_url("https://example.com/two")
+    win.show()
+
+    win.url_edit.showPopup()
+    qtbot.wait(50)
+    view = win._recent_view
+    model = view.model()
+    assert model is not None
+    index = model.index(0, 0)
+    rect = view.visualRect(index)
+    click_pos = QtCore.QPoint(rect.right() - 8, rect.center().y())
+    qtbot.mouseClick(view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=click_pos)
+
+    assert win.url_edit.count() == 1
+    assert win.url_edit.itemText(0) == "https://example.com/one"
+
+
+def test_indexability_tab_flags_noindex(qtbot) -> None:
+    tab = IndexabilityTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "chain": ["https://example.com"],
+            "hops": 0,
+            "final_status": "200",
+            "loop": False,
+        },
+        {
+            "target": "https://example.com",
+            "self": True,
+            "multiple": False,
+            "status": "200",
+        },
+        "noindex, nofollow",
+        {"*": [("Allow", "/")]},
+    )
+
+    model = tab.view.model()
+    assert model is not None
+    rows = {
+        model.index(row, 0).data(): model.index(row, 1).data()
+        for row in range(model.rowCount())
+    }
+    assert rows["Index directive"] == "Noindex"
+    assert rows["Follow directive"] == "Nofollow"
+    assert rows["Overall verdict"] == "Noindex"
+
+
+def test_content_quality_tab_shows_strong_page(qtbot) -> None:
+    tab = ContentQualityTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "language": "Spanish (es-ES)",
+            "word_count": 380,
+            "paragraph_count": 5,
+            "substantial_paragraph_count": 4,
+            "average_words_per_paragraph": 22.4,
+            "title_present": True,
+            "meta_description_present": True,
+            "h1_count": 1,
+            "h2_h6_count": 2,
+            "title_h1_alignment": "Aligned",
+            "intro_paragraph": "Present",
+            "thin_content_risk": "Low",
+            "heading_structure": "Good",
+            "verdict": "Strong",
+        }
+    )
+
+    model = tab.view.model()
+    assert model is not None
+    rows = {
+        model.index(row, 0).data(): model.index(row, 1).data()
+        for row in range(model.rowCount())
+    }
+    assert rows["Page language"] == "Spanish (es-ES)"
+    assert rows["Thin-content risk"] == "Low"
+    assert rows["Overall verdict"] == "Strong"
+
+    tooltip_row = next(
+        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language"
+    )
+    tooltip = model.data(model.index(tooltip_row, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert isinstance(tooltip, str)
+    assert "Best practice" in tooltip
+    assert "<html lang>" in tooltip
+
+
+def test_content_quality_tab_viewport_tooltip_event(qtbot, monkeypatch) -> None:
+    tab = ContentQualityTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "language": "English (en-US)",
+            "word_count": 520,
+            "paragraph_count": 8,
+            "substantial_paragraph_count": 6,
+            "average_words_per_paragraph": 24.5,
+            "title_present": True,
+            "meta_description_present": True,
+            "h1_count": 1,
+            "h2_h6_count": 3,
+            "title_h1_alignment": "Aligned",
+            "intro_paragraph": "Present",
+            "thin_content_risk": "Low",
+            "heading_structure": "Good",
+            "verdict": "Strong",
+        }
+    )
+    tab.show()
+    qtbot.waitExposed(tab)
+
+    model = tab.view.model()
+    assert model is not None
+    tooltip_row = next(
+        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language"
+    )
+    index = model.index(tooltip_row, 0)
+    rect = tab.view.visualRect(index)
+    shown: dict[str, str] = {}
+
+    def _fake_show_text(pos, text, widget=None, rect=None, msec_display_time=-1):
+        shown["text"] = text
+
+    monkeypatch.setattr(QtWidgets.QToolTip, "showText", _fake_show_text)
+    event = QtGui.QHelpEvent(
+        QtCore.QEvent.Type.ToolTip,
+        rect.center(),
+        tab.view.viewport().mapToGlobal(rect.center()),
+    )
+
+    assert tab.view.viewportEvent(event) is True
+    assert "Best practice" in shown["text"]
 
 
 def test_seo_window_shows_placeholder_before_first_crawl(qtbot):

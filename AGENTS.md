@@ -4,6 +4,7 @@ This file is the local execution contract for Codex in this repository.
 
 ## 1) Engineering quality
 
+- Reply in English unless the user explicitly asks for another language.
 - Keep code simple and explicit.
 - Prefer guard clauses over deep nesting.
 - Avoid chained `if/else` blocks when a map, helper, or `match` is clearer.
@@ -39,4 +40,3 @@ If tests cannot run, report why and what remains unverified.
 - Do not use destructive git commands (`reset --hard`, checkout discard).
 - Never revert user changes unless explicitly requested.
 - Use UTF-8 safe file editing.
-

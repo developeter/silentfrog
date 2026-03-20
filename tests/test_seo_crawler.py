@@ -160,6 +160,13 @@ async def test_analyse(local_server):
     # Keywords tab: extracted tokens include hello (appears twice in body)
     assert any(entry.term == "hello" for entry in payload.keywords)
 
+    quality = payload.content_quality
+    assert quality.word_count >= 1
+    assert quality.h1_count == 1
+    assert quality.title_present is True
+    assert quality.thin_content_risk in {"High", "Medium", "Low"}
+    assert quality.verdict in {"Weak", "Needs work", "Strong"}
+
     perf = payload.performance
     assert perf.transfer_size >= 0
     summary = perf.resource_summary

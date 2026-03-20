@@ -121,6 +121,71 @@ def _normalize_loading(value: str) -> str:
     return mapping.get(text, value.strip().title())
 
 
+def _parse_dimension(value: str | None) -> int:
+    text = (value or "").strip()
+    return int(text) if text.isdigit() else 0
+
+
+def _non_empty_attr(tag: Tag, *names: str) -> str:
+    for name in names:
+        value = (safe_attr(tag, name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _srcset_url(srcset: str, target_width: int = 0) -> str:
+    candidates: list[tuple[str, int]] = []
+    for chunk in srcset.split(","):
+        parts = chunk.strip().split()
+        if not parts:
+            continue
+        url = parts[0].strip()
+        descriptor = parts[1].strip().lower() if len(parts) > 1 else ""
+        width = int(descriptor[:-1]) if descriptor.endswith("w") and descriptor[:-1].isdigit() else 0
+        candidates.append((url, width))
+    if not candidates:
+        return ""
+    if target_width:
+        width_candidates = [candidate for candidate in candidates if candidate[1]]
+        if width_candidates:
+            return min(width_candidates, key=lambda item: abs(item[1] - target_width))[0]
+    return candidates[-1][0]
+
+
+def _picture_source_url(img: Tag, target_width: int) -> str:
+    parent = img.parent
+    if not isinstance(parent, Tag) or parent.name.lower() != "picture":
+        return ""
+    sources = [source for source in parent.find_all("source", recursive=False) if isinstance(source, Tag)]
+    ordered = [source for source in sources if not _non_empty_attr(source, "media")]
+    ordered.extend(source for source in sources if _non_empty_attr(source, "media"))
+    for source in ordered:
+        raw = _non_empty_attr(source, "srcset", "src", "data-srcset", "data-src")
+        resolved = _srcset_url(raw, target_width)
+        if resolved:
+            return resolved
+    return ""
+
+
+def _image_src(base: str, img: Tag) -> str:
+    target_width = _parse_dimension(safe_attr(img, "width"))
+    candidates = (
+        _non_empty_attr(img, "src"),
+        _non_empty_attr(img, "data-src"),
+        _non_empty_attr(img, "data-original"),
+        _non_empty_attr(img, "data-lazy-src"),
+        _non_empty_attr(img, "data-srcset"),
+        _non_empty_attr(img, "srcset"),
+        _picture_source_url(img, target_width),
+    )
+    for candidate in candidates:
+        resolved = _srcset_url(candidate, target_width)
+        if resolved:
+            return urljoin(base, resolved)
+    return ""
+
+
 def _extract_meta(soup: BeautifulSoup) -> list[list[str]]:
     out: list[list[str]] = []
     title_tag = soup.find("title")
@@ -154,8 +219,9 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
     rows: list[list[str]] = []
     for tag in soup.find_all("img"):
         img = tag
-        src_raw = safe_attr(img, "src") or ""
-        src = urljoin(base, src_raw)
+        src = _image_src(base, img)
+        if not src:
+            continue
         info = ImageInfo(
             src=src,
             alt=safe_attr(img, "alt") or "",

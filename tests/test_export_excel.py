@@ -89,6 +89,22 @@ def _sample_payload() -> CrawlPayload:
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
         "ai_crawl": [["GPTBot", "Yes", "No", "Allowed"]],
+        "content_quality": {
+            "language": "English (en-US)",
+            "word_count": 520,
+            "paragraph_count": 8,
+            "substantial_paragraph_count": 6,
+            "average_words_per_paragraph": 24.5,
+            "title_present": True,
+            "meta_description_present": True,
+            "h1_count": 1,
+            "h2_h6_count": 3,
+            "title_h1_alignment": "Aligned",
+            "intro_paragraph": "Present",
+            "thin_content_risk": "Low",
+            "heading_structure": "Good",
+            "verdict": "Strong",
+        },
         "serp": {
             "title": "Example Title",
             "description": "Example description",
@@ -167,6 +183,8 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert "Structured data" in workbook.sheetnames
         assert "Performance" in workbook.sheetnames
         assert "Social" in workbook.sheetnames
+        assert "Indexability" in workbook.sheetnames
+        assert "Content quality" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
         assert meta_sheet["A2"].value == "title"
@@ -203,6 +221,21 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert robots_sheet["A4"].value == "Allow"
         assert robots_sheet["B4"].value == "/"
         assert robots_sheet["B4"].fill.start_color.rgb == "FFD1E7DD"
+
+        indexability_sheet = workbook["Indexability"]
+        assert indexability_sheet["A2"].value == "Requested URL"
+        assert indexability_sheet["A4"].value == "Final status"
+        assert indexability_sheet["B4"].value == "200"
+        assert indexability_sheet["A14"].value == "Overall verdict"
+        assert indexability_sheet["B14"].value == "Indexable"
+        assert indexability_sheet["B14"].fill.start_color.rgb == "FFD1E7DD"
+
+        content_quality_sheet = workbook["Content quality"]
+        assert content_quality_sheet["A2"].value == "Page language"
+        assert content_quality_sheet["B2"].value == "English (en-US)"
+        assert content_quality_sheet["A14"].value == "Heading structure"
+        assert content_quality_sheet["B15"].value == "Strong"
+        assert content_quality_sheet["B15"].fill.start_color.rgb == "FFD1E7DD"
 
         performance_sheet = workbook["Performance"]
         assert performance_sheet["A2"].value == "HTTP status"
