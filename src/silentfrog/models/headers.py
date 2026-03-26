@@ -15,10 +15,12 @@ class HeaderModel(_BaseModel):
     def __init__(self, rows: List[List[str]], title_text: str | None = None) -> None:
         super().__init__(rows)
         self._brushes: StatusBrushPalette = status_brushes()
+        self._title_text = (title_text or "").strip().lower()
+        self._refresh_state()
+
+    def _refresh_state(self) -> None:
         self._h1_count = sum(1 for row in self._rows if row and str(row[0]).strip().lower() == "h1")
-
         self._empty_rows = {idx for idx, row in enumerate(self._rows) if not str(row[1]).strip()}
-
         self._jump_rows = set()
         prev_level = None
         for idx, row in enumerate(self._rows):
@@ -29,17 +31,19 @@ class HeaderModel(_BaseModel):
                     self._jump_rows.add(idx)
                 prev_level = level
 
-        reference = (title_text or "").strip().lower()
         self._title_warn_rows = set()
-        if reference:
+        if self._title_text:
             for idx, row in enumerate(self._rows):
                 tag = str(row[0]).strip().lower() if row else ""
                 if tag == "h1":
                     text = str(row[1]).strip().lower() if len(row) > 1 else ""
                     if text:
-                        ratio = SequenceMatcher(None, text, reference).ratio()
+                        ratio = SequenceMatcher(None, text, self._title_text).ratio()
                         if ratio >= 0.9:
                             self._title_warn_rows.add(idx)
+
+    def _after_sort(self) -> None:
+        self._refresh_state()
 
     def data(  # type: ignore[override]
         self,

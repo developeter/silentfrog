@@ -6,6 +6,7 @@ from openpyxl import load_workbook
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.exporters import export_page_analysis  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import normalize_image_row  # type: ignore[reportMissingImports]
 
 
 def _sample_payload() -> CrawlPayload:
@@ -19,7 +20,26 @@ def _sample_payload() -> CrawlPayload:
         ],
         "headers": [["h1", "Title"]],
         "images": [
-            ["https://example.com/logo.png", "Alt", "Title", "image/png", "100", "200", "10 KB", "2h", "Yes", "High"]
+            normalize_image_row(
+                [
+                    "https://example.com/logo.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "100",
+                    "200",
+                    "10 KB",
+                    "2h",
+                    "Yes",
+                    "High",
+                    "100",
+                    "200",
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+            )
         ],
         "social": {
             "open_graph": {
@@ -61,6 +81,16 @@ def _sample_payload() -> CrawlPayload:
                 "by_type": {"WebPage": 1},
                 "errors": []
             },
+            "eligibility": [
+                {
+                    "type": "Product",
+                    "detected": True,
+                    "count": 1,
+                    "eligibility": "Incomplete",
+                    "missing_fields": ["missing offers.price", "missing offers.priceCurrency"],
+                    "warnings": ["Missing required fields"],
+                }
+            ],
             "blocks": [
                 {
                     "@context": "https://schema.org",
@@ -88,7 +118,41 @@ def _sample_payload() -> CrawlPayload:
         "robots": {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
-        "ai_crawl": [["GPTBot", "Yes", "No", "Allowed"]],
+        "ai_crawl": [[
+            "GPTBot",
+            "gptbot",
+            "Yes",
+            "-",
+            "-",
+            "Allowed",
+            "No explicit AI restrictions detected",
+        ]],
+        "ai_visibility": {
+            "summary": {
+                "verdict": "Needs work",
+                "good_count": 6,
+                "warning_count": 2,
+                "critical_count": 0,
+            },
+            "checks": [
+                {
+                    "area": "Access",
+                    "check": "Audited AI and search agents can access the page",
+                    "status": "good",
+                    "details": "Allowed: GPTBot; Limited: -; Blocked: -.",
+                    "recommendation": "Keep robots.txt open for the official AI and search agents you want to allow.",
+                    "key": "access_agents",
+                },
+                {
+                    "area": "Citation readiness",
+                    "check": "Cross-surface metadata is present",
+                    "status": "warning",
+                    "details": "OpenGraph title/description: Yes; Twitter title/description: No.",
+                    "recommendation": "Keep OpenGraph and Twitter metadata complete so the page is consistently represented outside the page body.",
+                    "key": "citation_social",
+                },
+            ],
+        },
         "content_quality": {
             "language": "English (en-US)",
             "word_count": 520,
@@ -142,11 +206,47 @@ def _sample_payload() -> CrawlPayload:
             "nav_total_ms": 4200.0,
             "transfer_size": 2100000,
             "status": 200,
+            "summary": {
+                "transfer_size": 2100000,
+                "total_resource_bytes": 1096000,
+                "total_page_bytes": 3196000,
+                "total_resource_count": 65,
+                "third_party_bytes": 420000,
+                "third_party_count": 8,
+                "critical_issue_count": 2,
+                "warning_issue_count": 2,
+                "info_issue_count": 0,
+                "verdict": "High performance risk",
+            },
             "resource_summary": {
                 "css": {"count": 12, "bytes": 96000},
                 "js": {"count": 35, "bytes": 420000},
                 "img": {"count": 18, "bytes": 580000},
             },
+            "resource_breakdown": [
+                {"type": "html", "count": 1, "bytes": 2100000},
+                {"type": "css", "count": 12, "bytes": 96000},
+                {"type": "js", "count": 35, "bytes": 420000},
+                {"type": "img", "count": 18, "bytes": 580000},
+                {"type": "font", "count": 0, "bytes": 0},
+                {"type": "other", "count": 0, "bytes": 0},
+            ],
+            "issues": [
+                {
+                    "key": "page_weight",
+                    "severity": "critical",
+                    "message": "Total page weight is very high.",
+                    "evidence": "Measured page weight is 3.0 MB.",
+                    "recommendation": "Reduce heavy assets, defer non-critical resources, and compress media.",
+                },
+                {
+                    "key": "js_weight",
+                    "severity": "warning",
+                    "message": "JavaScript payload is heavier than ideal.",
+                    "evidence": "Measured JavaScript weight is 410.2 KB.",
+                    "recommendation": "Review bundle size and defer non-critical scripts.",
+                },
+            ],
             "top_offenders": [
                 {"type": "js", "url": "https://example.com/app.js", "bytes": 420000, "blocking": True},
                 {"type": "img", "url": "https://example.com/hero.jpg", "bytes": 580000, "blocking": False},
@@ -177,14 +277,21 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
 
     workbook = load_workbook(out_file)
     try:
+        def _row_values(sheet_name: str) -> list[list[object]]:
+            sheet = workbook[sheet_name]
+            return [[cell.value for cell in row] for row in sheet.iter_rows()]
+
         assert "Meta" in workbook.sheetnames
         assert "SERP Preview" in workbook.sheetnames
         assert "Structured summary" in workbook.sheetnames
         assert "Structured data" in workbook.sheetnames
+        assert "Structured eligibility" in workbook.sheetnames
         assert "Performance" in workbook.sheetnames
         assert "Social" in workbook.sheetnames
         assert "Indexability" in workbook.sheetnames
         assert "Content quality" in workbook.sheetnames
+        assert "AI crawl" in workbook.sheetnames
+        assert "AI Visibility" in workbook.sheetnames
 
         meta_sheet = workbook["Meta"]
         assert meta_sheet["A2"].value == "title"
@@ -198,9 +305,20 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert social_sheet["A2"].value == "OpenGraph"
         assert "Missing description" in (social_sheet["I2"].value or "")
 
+        images_sheet = workbook["Images"]
+        assert images_sheet["E1"].value == "W"
+        assert images_sheet["K1"].value == "Declared W"
+        assert images_sheet["N1"].value == "Sizes"
+        assert images_sheet["P2"].value
+
         summary_sheet = workbook["Structured summary"]
         assert summary_sheet["A2"].value == "Total items"
         assert summary_sheet["B2"].value == "1"
+
+        eligibility_sheet = workbook["Structured eligibility"]
+        assert eligibility_sheet["A2"].value == "Product"
+        assert eligibility_sheet["C2"].value == "Incomplete"
+        assert "missing offers.price" in (eligibility_sheet["D2"].value or "")
 
         structured_sheet = workbook["Structured data"]
         assert structured_sheet["B2"].value == "json-ld"
@@ -222,6 +340,35 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert robots_sheet["B4"].value == "/"
         assert robots_sheet["B4"].fill.start_color.rgb == "FFD1E7DD"
 
+        ai_sheet = workbook["AI crawl"]
+        assert ai_sheet["A1"].value == "Agent"
+        assert ai_sheet["B1"].value == "Token"
+        assert ai_sheet["D1"].value == "Nonstandard directive"
+        assert ai_sheet["F2"].value == "Allowed"
+        assert ai_sheet["F2"].fill.start_color.rgb == "FFD1E7DD"
+        assert ai_sheet["G2"].value == "No explicit AI restrictions detected"
+
+        ai_visibility_sheet = workbook["AI Visibility"]
+        ai_visibility_rows = _row_values("AI Visibility")
+        assert ai_visibility_sheet["A2"].value == "Verdict"
+        assert ai_visibility_sheet["B2"].value == "Needs work"
+        assert ai_visibility_sheet["B2"].fill.start_color.rgb == "FFFFF3CD"
+        assert ai_visibility_sheet["A6"].value == "Total checks"
+        assert ai_visibility_sheet["B6"].value == "2"
+        assert ai_visibility_sheet["A9"].value == "Area"
+        assert ai_visibility_sheet["B10"].value == "Audited AI and search agents can access the page"
+        assert ai_visibility_sheet["C10"].value == "Good"
+        assert ai_visibility_sheet["C10"].fill.start_color.rgb == "FFD1E7DD"
+        assert ai_visibility_sheet["A11"].value == "Citation readiness"
+        assert ai_visibility_sheet["C11"].value == "Warning"
+        assert ai_visibility_sheet["C11"].fill.start_color.rgb == "FFFFF3CD"
+        assert any(
+            row[0] == "Citation readiness"
+            and row[1] == "Cross-surface metadata is present"
+            and "Twitter metadata complete" in str(row[4] or "")
+            for row in ai_visibility_rows
+        )
+
         indexability_sheet = workbook["Indexability"]
         assert indexability_sheet["A2"].value == "Requested URL"
         assert indexability_sheet["A4"].value == "Final status"
@@ -238,22 +385,59 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert content_quality_sheet["B15"].fill.start_color.rgb == "FFD1E7DD"
 
         performance_sheet = workbook["Performance"]
-        assert performance_sheet["A2"].value == "HTTP status"
-        assert performance_sheet["B2"].value == "200"
-        assert performance_sheet["A5"].value == "Transfer (KB)"
-        assert performance_sheet["B5"].value == f"{2100000 / 1024:.1f}"
-        assert performance_sheet["A6"].value == "Page weight (KB)"
-        assert performance_sheet["A8"].value == "Resource"
-        assert performance_sheet["A9"].value == "CSS"
-        assert performance_sheet["B9"].value == "12"
-        assert performance_sheet["A13"].value == "Scripts"
-        assert performance_sheet["A14"].value == "Blocking"
-        assert performance_sheet["B14"].value == "4"
-        assert performance_sheet["A17"].value == "Severity"
-        assert performance_sheet["A18"].value == "Critical"
-        assert "HTTP Archive Web Almanac" in performance_sheet["B18"].value
-        assert performance_sheet["A21"].value == "Type"
-        assert performance_sheet["B22"].value == "https://example.com/app.js"
-        assert performance_sheet["D22"].value == f"{420000 / 1024:.1f} KB"
+        performance_rows = _row_values("Performance")
+        assert performance_sheet["A2"].value == "Verdict"
+        assert performance_sheet["B2"].value == "High performance risk"
+        assert performance_sheet["B2"].fill.start_color.rgb == "FFF8D7DA"
+        assert performance_sheet["A6"].value == "Transfer (KB)"
+        assert performance_sheet["B6"].value == f"{2100000 / 1024:.1f}"
+        assert performance_sheet["A7"].value == "Resource bytes (KB)"
+        assert performance_sheet["A8"].value == "Page weight (KB)"
+        assert ["Resource", "Count", "Bytes", None] in performance_rows
+        assert ["HTML", "1", f"{2100000 / 1024:.1f} KB", None] in performance_rows
+        assert ["CSS", "12", f"{96000 / 1024:.1f} KB", None] in performance_rows
+        assert ["Scripts", "Count", "Bytes", None] in performance_rows
+        assert ["Blocking", "4", f"{320000 / 1024:.1f} KB", None] in performance_rows
+        assert ["Severity", "Issue", "Evidence", "Recommendation"] in performance_rows
+        assert any(
+            row[0] == "Critical"
+            and row[1] == "Total page weight is very high."
+            and "Reduce heavy assets" in str(row[3] or "")
+            for row in performance_rows
+        )
+        assert ["Severity", "Opportunity", None, None] in performance_rows
+        assert any("HTTP Archive Web Almanac" in str(row[1] or "") for row in performance_rows if row and row[0] == "Critical")
+        assert ["Type", "URL", "Script", "Bytes"] in performance_rows
+        assert any(
+            row[0] == "JS"
+            and row[1] == "https://example.com/app.js"
+            and row[3] == f"{420000 / 1024:.1f} KB"
+            for row in performance_rows
+        )
+    finally:
+        workbook.close()
+
+
+def test_export_page_analysis_writes_ai_visibility_placeholder_when_empty(tmp_path: Path) -> None:
+    payload = _sample_payload()
+    payload = CrawlPayload.from_raw(
+        {
+            **payload.to_mapping(),
+            "ai_visibility": {"summary": {"verdict": "", "good_count": 0, "warning_count": 0, "critical_count": 0}, "checks": []},
+        }
+    )
+    out_file = tmp_path / "report-empty-ai.xlsx"
+
+    export_page_analysis(payload, out_file)
+
+    workbook = load_workbook(out_file)
+    try:
+        sheet = workbook["AI Visibility"]
+        assert sheet["A2"].value == "Verdict"
+        assert sheet["B2"].value == "-"
+        assert sheet["A9"].value == "Area"
+        assert sheet["A10"].value == "Info"
+        assert sheet["B10"].value == "No AI visibility data yet"
+        assert sheet["D10"].value == "Run an analysis to populate this sheet."
     finally:
         workbook.close()

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from silentfrog.schema_extractor import _extract_schema_all, _schema_primary_type  # type: ignore[reportMissingImports]
-from silentfrog.schema_extractor import _schema_validate_breadcrumb, _schema_validate_product  # type: ignore[reportMissingImports]
+from silentfrog.schema_extractor import (  # type: ignore[reportMissingImports]
+    _schema_validate_article,
+    _schema_validate_breadcrumb,
+    _schema_validate_faq_page,
+    _schema_validate_product,
+)
 
 
 def test_schema_primary_type_parses_hash_and_slash() -> None:
@@ -55,3 +60,54 @@ def test_schema_validator_product_errors() -> None:
     errors = _schema_validate_product(product)
     assert "missing offers.price" in errors
     assert "missing offers.priceCurrency" in errors
+
+
+def test_schema_validator_article_errors() -> None:
+    errors = _schema_validate_article({})
+    assert "missing headline" in errors
+    assert "missing image" in errors
+    assert "missing datePublished" in errors
+    assert "missing author" in errors
+
+
+def test_schema_validator_faq_page_errors() -> None:
+    errors = _schema_validate_faq_page({})
+    assert "missing mainEntity" in errors
+
+    faq = {"mainEntity": [{"name": "", "acceptedAnswer": {}}]}
+    errors = _schema_validate_faq_page(faq)
+    assert any("missing name" in error for error in errors)
+    assert any("missing acceptedAnswer.text" in error for error in errors)
+
+
+def test_schema_extract_builds_eligibility_rows() -> None:
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+      {
+        "@context":"https://schema.org",
+        "@graph":[
+          {
+            "@type":"BreadcrumbList",
+            "itemListElement":[
+              {"@type":"ListItem","position":1,"name":"Home","item":"https://example.com/"}
+            ]
+          },
+          {
+            "@type":"Product",
+            "name":"Chair",
+            "description":"Wooden chair",
+            "image":"https://example.com/chair.jpg",
+            "offers":[{"@type":"Offer"}]
+          }
+        ]
+      }
+      </script>
+    </head><body></body></html>
+    """
+    result = _extract_schema_all(html, "https://example.com")
+    eligibility = {row["type"]: row for row in result["eligibility"]}
+
+    assert eligibility["BreadcrumbList"]["eligibility"] == "Eligible"
+    assert eligibility["Product"]["eligibility"] == "Incomplete"
+    assert "missing offers.price" in eligibility["Product"]["missing_fields"]

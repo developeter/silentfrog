@@ -6,6 +6,23 @@ from typing import List
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
+from ..image_diagnostics import (
+    ACTUAL_HEIGHT_COL,
+    ACTUAL_WIDTH_COL,
+    ALT_COL,
+    CACHE_COL,
+    DECLARED_HEIGHT_COL,
+    DECLARED_WIDTH_COL,
+    DIAGNOSTIC_COL,
+    FETCH_PRIORITY_COL,
+    FORMAT_HINT_COL,
+    IMAGE_HEADERS,
+    LOADING_COL,
+    RESPONSIVE_COL,
+    SIZE_COL,
+    TITLE_COL,
+    normalize_image_row,
+)
 from ..theme import StatusBrushPalette, status_brushes
 from .base import GenericModel
 
@@ -13,26 +30,33 @@ from .base import GenericModel
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
         normalized: List[List[str]] = []
-        self._loading_rows: set[int] = set()
-        self._dimension_rows: set[int] = set()
         for idx, row in enumerate(rows):
-            padded = (row + [""] * 10)[:10]
-            src, alt, title, mime, width, height, size, cache_hint, loading, fetch_priority = padded
-            loading_value = str(loading).strip().title()
-            fetch_text = str(fetch_priority).strip()
-            normalized.append(
-                [src, alt, title, mime, width, height, size, cache_hint, loading_value, fetch_text]
-            )
-            if loading_value:
-                self._loading_rows.add(idx)
-            if str(width).strip() and str(height).strip():
-                self._dimension_rows.add(idx)
+            padded = normalize_image_row(row)
+            padded[LOADING_COL] = str(padded[LOADING_COL]).strip().title()
+            padded[FETCH_PRIORITY_COL] = str(padded[FETCH_PRIORITY_COL]).strip()
+            normalized.append(padded)
 
         super().__init__(
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache", "Loading", "Fetch priority"],
+            IMAGE_HEADERS,
             normalized,
         )
         self._brushes: StatusBrushPalette = status_brushes()
+        self._refresh_state()
+
+    def _refresh_state(self) -> None:
+        self._declared_dimension_rows = {
+            idx
+            for idx, row in enumerate(self._rows)
+            if self._filled(row[DECLARED_WIDTH_COL]) and self._filled(row[DECLARED_HEIGHT_COL])
+        }
+        self._actual_dimension_rows = {
+            idx
+            for idx, row in enumerate(self._rows)
+            if self._filled(row[ACTUAL_WIDTH_COL]) and self._filled(row[ACTUAL_HEIGHT_COL])
+        }
+
+    def _after_sort(self) -> None:
+        self._refresh_state()
 
     @staticmethod
     def _filled(value: object) -> bool:
@@ -94,21 +118,35 @@ class ImagesModel(GenericModel):
             return None
         row = index.row()
         column = index.column()
-        if column in (1, 2):
+        if column == ALT_COL:
             return self._color_required(self._rows[row][column])
-        if column == 3:
+        if column == TITLE_COL:
             return None
-        if column == 6:
+        if column == SIZE_COL:
             return self._color_size(self._rows[row][column])
-        if column == 0 and row not in self._loading_rows:
+        if column in (DECLARED_WIDTH_COL, DECLARED_HEIGHT_COL) and row not in self._declared_dimension_rows:
             return self._brushes.warn
-        if column in (4, 5) and row not in self._dimension_rows:
+        if column in (ACTUAL_WIDTH_COL, ACTUAL_HEIGHT_COL) and row not in self._actual_dimension_rows:
             return self._brushes.warn
-        if column == 8 and row not in self._loading_rows:
+        if column == CACHE_COL and not self._filled(self._rows[row][column]):
             return self._brushes.warn
-        if column == 9:
+        if column == LOADING_COL and not self._filled(self._rows[row][column]):
+            return None
+        if column == FETCH_PRIORITY_COL:
             status = ImagesModel._priority_status(self._rows[row][column])
             if status == "missing":
                 return self._brushes.warn
             return None
+        if column == FORMAT_HINT_COL:
+            value = str(self._rows[row][column]).strip()
+            if not value:
+                return None
+            return self._brushes.good if value == "Next-gen format" else self._brushes.warn
+        if column == RESPONSIVE_COL and not self._filled(self._rows[row][column]):
+            return None
+        if column == DIAGNOSTIC_COL:
+            value = str(self._rows[row][column]).strip()
+            if value == "OK":
+                return self._brushes.good
+            return self._brushes.warn
         return None

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 from urllib.parse import urlparse
 
+from .image_diagnostics import normalize_image_rows
+
 
 def _is_iterable_of_iterables(value: Any) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
@@ -47,6 +49,24 @@ def _parse_int(value: Any) -> int | None:
         return None
 
 
+def _normalize_ai_visibility_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "ok": "good",
+        "pass": "good",
+        "good": "good",
+        "info": "good",
+        "warn": "warning",
+        "warning": "warning",
+        "needs work": "warning",
+        "bad": "critical",
+        "risk": "critical",
+        "critical": "critical",
+        "blocked": "critical",
+    }
+    return mapping.get(normalized, "warning")
+
+
 @dataclass(frozen=True)
 class PerformanceMetrics:
     nav_ttfb_ms: float
@@ -54,10 +74,60 @@ class PerformanceMetrics:
     transfer_size: int
     status: int
     resource_summary: Dict[str, Dict[str, int]]
+    resource_breakdown: List["PerformanceResourceBreakdown"]
+    summary: "PerformanceSummary"
+    issues: List["PerformanceIssue"]
     opportunities: List[str]
     top_offenders: List["PerformanceOffender"]
     scripts: "PerformanceScripts"
     opportunity_details: List["PerformanceOpportunity"]
+
+    @staticmethod
+    def _resource_breakdown_from_summary(summary: Mapping[str, Dict[str, int]], transfer_size: int) -> List["PerformanceResourceBreakdown"]:
+        rows = [PerformanceResourceBreakdown(resource_type="html", count=1, bytes=max(transfer_size, 0))]
+        for name in ("css", "js", "img", "font", "other"):
+            item = summary.get(name, {})
+            rows.append(
+                PerformanceResourceBreakdown(
+                    resource_type=name,
+                    count=max(int(item.get("count", 0)), 0),
+                    bytes=max(int(item.get("bytes", 0)), 0),
+                )
+            )
+        return rows
+
+    @staticmethod
+    def _summary_from_legacy(
+        summary: Mapping[str, Dict[str, int]],
+        transfer_size: int,
+        issues: Iterable["PerformanceIssue"],
+        opportunity_details: Iterable["PerformanceOpportunity"],
+    ) -> "PerformanceSummary":
+        total_resource_bytes = sum(max(int(item.get("bytes", 0)), 0) for item in summary.values())
+        total_resource_count = sum(max(int(item.get("count", 0)), 0) for item in summary.values())
+        severities = [issue.severity for issue in issues]
+        if not severities:
+            severities = [item.severity for item in opportunity_details]
+        critical_count = sum(1 for severity in severities if severity == "critical")
+        warning_count = sum(1 for severity in severities if severity == "warning")
+        info_count = sum(1 for severity in severities if severity == "info")
+        verdict = "Good"
+        if critical_count > 0:
+            verdict = "High performance risk"
+        elif warning_count > 0:
+            verdict = "Needs work"
+        return PerformanceSummary(
+            transfer_size=max(transfer_size, 0),
+            total_resource_bytes=total_resource_bytes,
+            total_page_bytes=max(transfer_size, 0) + total_resource_bytes,
+            total_resource_count=total_resource_count,
+            third_party_bytes=0,
+            third_party_count=0,
+            critical_issue_count=critical_count,
+            warning_issue_count=warning_count,
+            info_issue_count=info_count,
+            verdict=verdict,
+        )
 
     @classmethod
     def empty(cls) -> "PerformanceMetrics":
@@ -67,6 +137,9 @@ class PerformanceMetrics:
             transfer_size=0,
             status=0,
             resource_summary={},
+            resource_breakdown=[],
+            summary=PerformanceSummary.empty(),
+            issues=[],
             opportunities=[],
             top_offenders=[],
             scripts=PerformanceScripts.empty(),
@@ -118,6 +191,20 @@ class PerformanceMetrics:
 
         scripts = PerformanceScripts.from_raw(value.get("scripts"))
 
+        breakdown_raw = value.get("resource_breakdown", [])
+        breakdown: List[PerformanceResourceBreakdown] = []
+        if isinstance(breakdown_raw, Iterable) and not isinstance(breakdown_raw, (str, bytes)):
+            for item in breakdown_raw:
+                if isinstance(item, Mapping):
+                    breakdown.append(PerformanceResourceBreakdown.from_raw(item))
+
+        issues_raw = value.get("issues", [])
+        issues: List[PerformanceIssue] = []
+        if isinstance(issues_raw, Iterable) and not isinstance(issues_raw, (str, bytes)):
+            for item in issues_raw:
+                if isinstance(item, Mapping):
+                    issues.append(PerformanceIssue.from_raw(item))
+
         opportunity_details_raw = value.get("opportunity_details", [])
         opportunity_details: List[PerformanceOpportunity] = []
         if isinstance(opportunity_details_raw, Iterable):
@@ -125,12 +212,22 @@ class PerformanceMetrics:
                 if isinstance(item, Mapping):
                     opportunity_details.append(PerformanceOpportunity.from_raw(item))
 
+        transfer_size = _to_int(value.get('transfer_size', 0))
+        if not breakdown:
+            breakdown = cls._resource_breakdown_from_summary(summary, transfer_size)
+        summary_model = PerformanceSummary.from_raw(value.get("summary"))
+        if summary_model == PerformanceSummary.empty() and (summary or transfer_size):
+            summary_model = cls._summary_from_legacy(summary, transfer_size, issues, opportunity_details)
+
         return cls(
             nav_ttfb_ms=_to_float(value.get('nav_ttfb_ms', 0.0)),
             nav_total_ms=_to_float(value.get('nav_total_ms', 0.0)),
-            transfer_size=_to_int(value.get('transfer_size', 0)),
+            transfer_size=transfer_size,
             status=_to_int(value.get('status', 0)),
             resource_summary=summary,
+            resource_breakdown=breakdown,
+            summary=summary_model,
+            issues=issues,
             opportunities=opp,
             top_offenders=offenders,
             scripts=scripts,
@@ -144,10 +241,123 @@ class PerformanceMetrics:
             'transfer_size': self.transfer_size,
             'status': self.status,
             'resource_summary': {k: dict(v) for k, v in self.resource_summary.items()},
+            'resource_breakdown': [entry.to_dict() for entry in self.resource_breakdown],
+            'summary': self.summary.to_dict(),
+            'issues': [item.to_dict() for item in self.issues],
             'opportunities': list(self.opportunities),
             'top_offenders': [entry.to_dict() for entry in self.top_offenders],
             'scripts': self.scripts.to_dict(),
             'opportunity_details': [item.to_dict() for item in self.opportunity_details],
+        }
+
+
+@dataclass(frozen=True)
+class PerformanceResourceBreakdown:
+    resource_type: str
+    count: int
+    bytes: int
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceResourceBreakdown":
+        try:
+            count = int(value.get("count", 0))
+        except (TypeError, ValueError):
+            count = 0
+        try:
+            size = int(value.get("bytes", 0))
+        except (TypeError, ValueError):
+            size = 0
+        return cls(
+            resource_type=str(value.get("type", "")).strip(),
+            count=max(count, 0),
+            bytes=max(size, 0),
+        )
+
+    def to_dict(self) -> Dict[str, int | str]:
+        return {"type": self.resource_type, "count": self.count, "bytes": self.bytes}
+
+
+@dataclass(frozen=True)
+class PerformanceSummary:
+    transfer_size: int
+    total_resource_bytes: int
+    total_page_bytes: int
+    total_resource_count: int
+    third_party_bytes: int
+    third_party_count: int
+    critical_issue_count: int
+    warning_issue_count: int
+    info_issue_count: int
+    verdict: str
+
+    @classmethod
+    def empty(cls) -> "PerformanceSummary":
+        return cls(0, 0, 0, 0, 0, 0, 0, 0, 0, "")
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "PerformanceSummary":
+        if not isinstance(value, Mapping):
+            return cls.empty()
+
+        def _to_int(raw: Any) -> int:
+            try:
+                return max(int(raw), 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return cls(
+            transfer_size=_to_int(value.get("transfer_size", 0)),
+            total_resource_bytes=_to_int(value.get("total_resource_bytes", 0)),
+            total_page_bytes=_to_int(value.get("total_page_bytes", 0)),
+            total_resource_count=_to_int(value.get("total_resource_count", 0)),
+            third_party_bytes=_to_int(value.get("third_party_bytes", 0)),
+            third_party_count=_to_int(value.get("third_party_count", 0)),
+            critical_issue_count=_to_int(value.get("critical_issue_count", 0)),
+            warning_issue_count=_to_int(value.get("warning_issue_count", 0)),
+            info_issue_count=_to_int(value.get("info_issue_count", 0)),
+            verdict=str(value.get("verdict", "")).strip(),
+        )
+
+    def to_dict(self) -> Dict[str, int | str]:
+        return {
+            "transfer_size": self.transfer_size,
+            "total_resource_bytes": self.total_resource_bytes,
+            "total_page_bytes": self.total_page_bytes,
+            "total_resource_count": self.total_resource_count,
+            "third_party_bytes": self.third_party_bytes,
+            "third_party_count": self.third_party_count,
+            "critical_issue_count": self.critical_issue_count,
+            "warning_issue_count": self.warning_issue_count,
+            "info_issue_count": self.info_issue_count,
+            "verdict": self.verdict,
+        }
+
+
+@dataclass(frozen=True)
+class PerformanceIssue:
+    key: str
+    severity: str
+    message: str
+    evidence: str
+    recommendation: str
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceIssue":
+        return cls(
+            key=str(value.get("key", "")).strip(),
+            severity=str(value.get("severity", "info")).strip().lower() or "info",
+            message=str(value.get("message", "")).strip(),
+            evidence=str(value.get("evidence", "")).strip(),
+            recommendation=str(value.get("recommendation", "")).strip(),
+        )
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "key": self.key,
+            "severity": self.severity,
+            "message": self.message,
+            "evidence": self.evidence,
+            "recommendation": self.recommendation,
         }
 
 
@@ -313,14 +523,60 @@ class StructuredDataSummary:
 
 
 @dataclass(frozen=True)
+class StructuredDataEligibility:
+    schema_type: str
+    detected: bool
+    count: int
+    eligibility: str
+    missing_fields: List[str]
+    warnings: List[str]
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "StructuredDataEligibility":
+        if not isinstance(value, Mapping):
+            return cls(schema_type="", detected=False, count=0, eligibility="Not detected", missing_fields=[], warnings=[])
+        try:
+            count = int(value.get("count", 0))
+        except (TypeError, ValueError):
+            count = 0
+        missing_raw = value.get("missing_fields", [])
+        missing_fields: List[str] = []
+        if isinstance(missing_raw, Iterable) and not isinstance(missing_raw, (str, bytes)):
+            missing_fields = [str(item).strip() for item in missing_raw if str(item).strip()]
+        warnings_raw = value.get("warnings", [])
+        warnings: List[str] = []
+        if isinstance(warnings_raw, Iterable) and not isinstance(warnings_raw, (str, bytes)):
+            warnings = [str(item).strip() for item in warnings_raw if str(item).strip()]
+        return cls(
+            schema_type=str(value.get("type", "")).strip(),
+            detected=bool(value.get("detected", False)),
+            count=max(count, 0),
+            eligibility=str(value.get("eligibility", "Not detected")).strip() or "Not detected",
+            missing_fields=missing_fields,
+            warnings=warnings,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.schema_type,
+            "detected": self.detected,
+            "count": self.count,
+            "eligibility": self.eligibility,
+            "missing_fields": list(self.missing_fields),
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
 class StructuredDataPayload:
     blocks: List[Any]
     summary: StructuredDataSummary
     fallback_raw: List[str]
+    eligibility: List[StructuredDataEligibility] = field(default_factory=list)
 
     @classmethod
     def empty(cls) -> StructuredDataPayload:
-        return cls(blocks=[], summary=StructuredDataSummary.empty(), fallback_raw=[])
+        return cls(blocks=[], summary=StructuredDataSummary.empty(), fallback_raw=[], eligibility=[])
 
     @staticmethod
     def _coerce_blocks(value: Any) -> List[Any]:
@@ -354,7 +610,11 @@ class StructuredDataPayload:
             )
             summary = summary.with_errors(issues_iter)
             fallback_raw = cls._coerce_fallback(value.get("fallback_raw"))
-            return cls(blocks=blocks, summary=summary, fallback_raw=fallback_raw)
+            eligibility_raw = value.get("eligibility", [])
+            eligibility: List[StructuredDataEligibility] = []
+            if isinstance(eligibility_raw, Iterable) and not isinstance(eligibility_raw, (str, bytes)):
+                eligibility = [StructuredDataEligibility.from_raw(item) for item in eligibility_raw if isinstance(item, Mapping)]
+            return cls(blocks=blocks, summary=summary, fallback_raw=fallback_raw, eligibility=eligibility)
         if isinstance(value, list):
             summary_raw: Mapping[str, Any] | None = None
             issues_list: List[str] = []
@@ -380,7 +640,7 @@ class StructuredDataPayload:
                 blocks.append(item)
             summary = StructuredDataSummary.from_raw(summary_raw or {})
             summary = summary.with_errors(issues_list)
-            return cls(blocks=blocks, summary=summary, fallback_raw=fallback)
+            return cls(blocks=blocks, summary=summary, fallback_raw=fallback, eligibility=[])
         return cls.empty()
 
     def to_mapping(self) -> Dict[str, Any]:
@@ -388,6 +648,7 @@ class StructuredDataPayload:
             "blocks": list(self.blocks),
             "summary": self.summary.to_dict(),
             "fallback_raw": list(self.fallback_raw),
+            "eligibility": [item.to_dict() for item in self.eligibility],
             "issues": list(self.summary.errors),
         }
 
@@ -758,6 +1019,106 @@ class SocialPayload:
 
 
 @dataclass(frozen=True)
+class AiVisibilityCheck:
+    area: str
+    check: str
+    status: str
+    details: str
+    recommendation: str
+    key: str = ""
+
+    @classmethod
+    def from_raw(cls, value: Mapping[str, Any]) -> "AiVisibilityCheck":
+        return cls(
+            area=str(value.get("area", "")).strip(),
+            check=str(value.get("check", "")).strip(),
+            status=_normalize_ai_visibility_status(value.get("status", "")),
+            details=str(value.get("details", "")).strip(),
+            recommendation=str(value.get("recommendation", "")).strip(),
+            key=str(value.get("key", "")).strip(),
+        )
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "area": self.area,
+            "check": self.check,
+            "status": self.status,
+            "details": self.details,
+            "recommendation": self.recommendation,
+            "key": self.key,
+        }
+
+
+@dataclass(frozen=True)
+class AiVisibilitySummary:
+    verdict: str
+    good_count: int
+    warning_count: int
+    critical_count: int
+
+    @classmethod
+    def empty(cls) -> "AiVisibilitySummary":
+        return cls(verdict="", good_count=0, warning_count=0, critical_count=0)
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "AiVisibilitySummary":
+        if not isinstance(value, Mapping):
+            return cls.empty()
+
+        def _to_int(raw: Any) -> int:
+            try:
+                return max(int(raw), 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return cls(
+            verdict=str(value.get("verdict", "")).strip(),
+            good_count=_to_int(value.get("good_count", 0)),
+            warning_count=_to_int(value.get("warning_count", 0)),
+            critical_count=_to_int(value.get("critical_count", 0)),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "good_count": self.good_count,
+            "warning_count": self.warning_count,
+            "critical_count": self.critical_count,
+        }
+
+
+@dataclass(frozen=True)
+class AiVisibilityPayload:
+    summary: AiVisibilitySummary
+    checks: List[AiVisibilityCheck]
+
+    @classmethod
+    def empty(cls) -> "AiVisibilityPayload":
+        return cls(summary=AiVisibilitySummary.empty(), checks=[])
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "AiVisibilityPayload":
+        if not isinstance(value, Mapping):
+            return cls.empty()
+        checks_raw = value.get("checks", [])
+        checks = [
+            AiVisibilityCheck.from_raw(item)
+            for item in checks_raw
+            if isinstance(item, Mapping)
+        ] if isinstance(checks_raw, Iterable) and not isinstance(checks_raw, (str, bytes)) else []
+        return cls(
+            summary=AiVisibilitySummary.from_raw(value.get("summary", {})),
+            checks=checks,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "summary": self.summary.to_dict(),
+            "checks": [item.to_dict() for item in self.checks],
+        }
+
+
+@dataclass(frozen=True)
 class CrawlPayload:
     meta: List[List[str]]
     headers: List[List[str]]
@@ -774,6 +1135,7 @@ class CrawlPayload:
     serp_audit: SerpAudit
     keywords: List[KeywordEntry]
     content_quality: ContentQuality = field(default_factory=ContentQuality.empty)
+    ai_visibility: AiVisibilityPayload = field(default_factory=AiVisibilityPayload.empty)
     performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
     social: SocialPayload = field(default_factory=SocialPayload.empty)
 
@@ -808,7 +1170,7 @@ class CrawlPayload:
         return cls(
             meta=_normalize_rows(data["meta"], label="meta"),
             headers=_normalize_rows(data["headers"], label="headers"),
-            images=_normalize_rows(data["images"], label="images"),
+            images=normalize_image_rows(_normalize_rows(data["images"], label="images")),
             links=_normalize_rows(data["links"], label="links"),
             schema=StructuredDataPayload.from_raw(data["schema"]),
             canonical=CanonicalInfo.from_raw(canonical_raw),
@@ -821,6 +1183,7 @@ class CrawlPayload:
             serp_audit=SerpAudit.from_raw(serp_audit_raw),
             keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
             content_quality=ContentQuality.from_raw(data.get("content_quality", {})),
+            ai_visibility=AiVisibilityPayload.from_raw(data.get("ai_visibility", {})),
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
             social=SocialPayload.from_raw(social_raw),
         )
@@ -842,6 +1205,7 @@ class CrawlPayload:
             "serp_audit": self.serp_audit.to_dict(),
             "keywords": [entry.to_dict() for entry in self.keywords],
             "content_quality": self.content_quality.to_dict(),
+            "ai_visibility": self.ai_visibility.to_dict(),
             "performance": self.performance.to_dict(),
             "social": self.social.to_dict(),
         }
@@ -858,12 +1222,19 @@ __all__ = [
     "RedirectInfo",
     "SerpPreview",
     "SerpAudit",
+    "StructuredDataEligibility",
     "StructuredDataPayload",
     "StructuredDataSummary",
     "KeywordEntry",
     "ContentQuality",
+    "AiVisibilityCheck",
+    "AiVisibilitySummary",
+    "AiVisibilityPayload",
     "PerformanceOffender",
+    "PerformanceIssue",
     "PerformanceOpportunity",
+    "PerformanceResourceBreakdown",
+    "PerformanceSummary",
     "PerformanceScripts",
     "PerformanceMetrics",
     "CrawlPayload",

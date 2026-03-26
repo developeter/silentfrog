@@ -10,10 +10,24 @@ from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import (
+    ACTUAL_HEIGHT_COL,
+    ACTUAL_WIDTH_COL,
+    CACHE_COL,
+    DECLARED_HEIGHT_COL,
+    DECLARED_WIDTH_COL,
+    DIAGNOSTIC_COL,
+    FETCH_PRIORITY_COL,
+    IMAGE_HEADERS,
+    LOADING_COL,
+    SIZE_COL,
+    normalize_image_row,
+)
 from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
 from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImports]
 from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     AiTab,
+    AiVisibilityTab,
     CanonicalTab,
     ContentQualityTab,
     HeadersTab,
@@ -86,7 +100,7 @@ def _sample_payload() -> CrawlPayload:
         ],
         "headers": [["h1", "Title"]],
         "images": [
-            [
+            normalize_image_row([
                 "https://example.com/logo.png",
                 "Alt",
                 "Title",
@@ -97,7 +111,13 @@ def _sample_payload() -> CrawlPayload:
                 "2h",
                 "Yes",
                 "High",
-            ]
+                "100",
+                "200",
+                "",
+                "",
+                "",
+                "",
+            ])
         ],
         "links": [
             [
@@ -119,6 +139,16 @@ def _sample_payload() -> CrawlPayload:
                 "by_type": {"WebPage": 1},
                 "errors": []
             },
+            "eligibility": [
+                {
+                    "type": "Product",
+                    "detected": True,
+                    "count": 1,
+                    "eligibility": "Incomplete",
+                    "missing_fields": ["missing offers.price", "missing offers.priceCurrency"],
+                    "warnings": ["Missing required fields"],
+                }
+            ],
             "blocks": [
                 {
                     "@context": "https://schema.org",
@@ -146,7 +176,15 @@ def _sample_payload() -> CrawlPayload:
         "robots": {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
-        "ai_crawl": [["GPTBot", "Yes", "No", "Allowed"]],
+        "ai_crawl": [[
+            "GPTBot",
+            "gptbot",
+            "Yes",
+            "-",
+            "-",
+            "Allowed",
+            "No explicit AI restrictions detected",
+        ]],
         "content_quality": {
             "language": "Italian (it-IT)",
             "word_count": 420,
@@ -162,6 +200,32 @@ def _sample_payload() -> CrawlPayload:
             "thin_content_risk": "Low",
             "heading_structure": "Good",
             "verdict": "Strong",
+        },
+        "ai_visibility": {
+            "summary": {
+                "verdict": "Needs work",
+                "good_count": 6,
+                "warning_count": 2,
+                "critical_count": 0,
+            },
+            "checks": [
+                {
+                    "area": "Access",
+                    "check": "Audited AI and search agents can access the page",
+                    "status": "good",
+                    "details": "Allowed: GPTBot; Limited: -; Blocked: -.",
+                    "recommendation": "Keep robots.txt open for the official AI and search agents you want to allow.",
+                    "key": "access_agents",
+                },
+                {
+                    "area": "Citation readiness",
+                    "check": "Cross-surface metadata is present",
+                    "status": "warning",
+                    "details": "OpenGraph title/description: Yes; Twitter title/description: No.",
+                    "recommendation": "Keep OpenGraph and Twitter metadata complete so the page is consistently represented outside the page body.",
+                    "key": "citation_social",
+                },
+            ],
         },
         "serp": {
             "title": "Example Title",
@@ -264,7 +328,7 @@ TABLE_TAB_CASES: Tuple[
         ImagesTab,
         (
             [
-                [
+                normalize_image_row([
                     "https://example.com/img.png",
                     "Alt",
                     "Title",
@@ -275,7 +339,13 @@ TABLE_TAB_CASES: Tuple[
                     "2h",
                     "Yes",
                     "High",
-                ]
+                    "640",
+                    "480",
+                    "",
+                    "",
+                    "",
+                    "",
+                ])
             ],
         ),
         {0: QtWidgets.QHeaderView.Interactive},
@@ -406,10 +476,49 @@ TABLE_TAB_CASES: Tuple[
     ),
     (
         AiTab,
-        ([["Crawler", "Yes", "No", "Allowed"]],),
+        ([["Crawler", "crawler", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"]],),
         {
             0: QtWidgets.QHeaderView.ResizeToContents,
-            3: QtWidgets.QHeaderView.ResizeToContents,
+            5: QtWidgets.QHeaderView.ResizeToContents,
+            6: QtWidgets.QHeaderView.Stretch,
+        },
+    ),
+    (
+        AiVisibilityTab,
+        (
+            {
+                "summary": {
+                    "verdict": "Needs work",
+                    "good_count": 1,
+                    "warning_count": 1,
+                    "critical_count": 0,
+                },
+                "checks": [
+                    {
+                        "area": "Access",
+                        "check": "Audited AI and search agents can access the page",
+                        "status": "good",
+                        "details": "Allowed: GPTBot; Limited: -; Blocked: -.",
+                        "recommendation": "Keep robots.txt open for the official AI and search agents you want to allow.",
+                        "key": "access_agents",
+                    },
+                    {
+                        "area": "Entity clarity",
+                        "check": "Entity-supporting markup is present",
+                        "status": "warning",
+                        "details": "Detected entity schema: -; Eligible entity schema: -.",
+                        "recommendation": "Add Organization, Product, or Article markup when relevant.",
+                        "key": "entity_schema",
+                    },
+                ],
+            },
+        ),
+        {
+            0: QtWidgets.QHeaderView.ResizeToContents,
+            1: QtWidgets.QHeaderView.Stretch,
+            2: QtWidgets.QHeaderView.ResizeToContents,
+            3: QtWidgets.QHeaderView.Stretch,
+            4: QtWidgets.QHeaderView.Stretch,
         },
     ),
     (
@@ -460,7 +569,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    assert win.tabs.count() == 16
+    assert win.tabs.count() == 17
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
         "Meta tag",
@@ -477,6 +586,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Content quality",
         "Keywords",
         "AI crawl",
+        "AI Visibility",
         "Performance",
         "SERP",
     ]
@@ -594,6 +704,191 @@ def test_content_quality_tab_shows_strong_page(qtbot) -> None:
     assert "<html lang>" in tooltip
 
 
+def test_ai_tab_shows_access_summary(qtbot) -> None:
+    tab = AiTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            ["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"],
+            ["Google-Extended", "google-extended", "No", "-", "-", "Blocked", "Blocked by robots.txt: /private"],
+            ["Googlebot", "googlebot", "Yes", "-", "nosnippet", "Limited", "Google search controls: nosnippet"],
+        ]
+    )
+
+    assert "Allowed 1" in tab._summary.text()
+    assert "Limited 1" in tab._summary.text()
+    assert "Blocked 1" in tab._summary.text()
+    model = tab.view.model()
+    assert model is not None
+    tooltip = model.headerData(3, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert isinstance(tooltip, str)
+    assert "Nonstandard AI directives" in tooltip
+
+
+def test_ai_tab_header_tooltip_event(qtbot, monkeypatch) -> None:
+    tab = AiTab()
+    qtbot.addWidget(tab)
+    tab.update([["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"]])
+    tab.show()
+    qtbot.waitExposed(tab)
+
+    header = tab.view.horizontalHeader()
+    shown: dict[str, str] = {}
+
+    def _fake_show_text(pos, text, widget=None, rect=None, msec_display_time=-1):
+        shown["text"] = text
+
+    monkeypatch.setattr(QtWidgets.QToolTip, "showText", _fake_show_text)
+    section = 3
+    position = QtCore.QPoint(header.sectionViewportPosition(section) + 8, max(header.height() // 2, 1))
+    event = QtGui.QHelpEvent(
+        QtCore.QEvent.Type.ToolTip,
+        position,
+        header.viewport().mapToGlobal(position),
+    )
+
+    assert header.event(event) is True
+    assert "noai" in shown["text"]
+
+
+def test_ai_visibility_tab_renders_summary_and_rows(qtbot) -> None:
+    tab = AiVisibilityTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "summary": {
+                "verdict": "Needs work",
+                "good_count": 3,
+                "warning_count": 2,
+                "critical_count": 0,
+            },
+            "checks": [
+                {
+                    "area": "Access",
+                    "check": "Audited AI and search agents can access the page",
+                    "status": "good",
+                    "details": "Allowed: GPTBot, Google-Extended; Limited: -; Blocked: -.",
+                    "recommendation": "Keep robots.txt open for the official AI and search agents you want to allow.",
+                    "key": "access_agents",
+                },
+                {
+                    "area": "Answerability",
+                    "check": "The page answers the topic early",
+                    "status": "warning",
+                    "details": "Intro paragraph: Weak or missing; Overall content verdict: Needs work.",
+                    "recommendation": "Add a concise opening summary paragraph.",
+                    "key": "answer_intro",
+                },
+                {
+                    "area": "Citation readiness",
+                    "check": "The page is a stable canonical source",
+                    "status": "critical",
+                    "details": "Redirect hops: 2; Canonical self-reference: No; Multiple canonicals: No; Meta robots: noindex.",
+                    "recommendation": "Keep the page indexable, self-canonical, and free from unnecessary redirects.",
+                    "key": "citation_stability",
+                },
+            ],
+        }
+    )
+
+    assert "Verdict:</b> Needs work" in tab._summary.text()
+    assert "Warnings:</b> 2" in tab._summary.text()
+    assert "Strong" in tab._summary.toolTip()
+    assert "Weak" in tab._summary.toolTip()
+    assert tab.view.wordWrap() is True
+    assert tab.view.textElideMode() == QtCore.Qt.TextElideMode.ElideNone
+    assert tab.view.verticalHeader().sectionResizeMode(0) == QtWidgets.QHeaderView.ResizeToContents
+    model = tab.view.model()
+    assert model is not None
+    rows = [
+        [model.index(row, column).data() for column in range(model.columnCount())]
+        for row in range(model.rowCount())
+    ]
+    assert any(row[0] == "Access" and row[2] == "Good" for row in rows)
+    assert any(row[0] == "Answerability" and row[2] == "Warning" for row in rows)
+    assert any(row[0] == "Citation readiness" and row[2] == "Critical" for row in rows)
+    headers = [
+        model.headerData(column, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole)
+        for column in range(model.columnCount())
+    ]
+    assert headers == ["Area", "Check", "Status", "Details", "Recommendation"]
+    tooltip_row = next(
+        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Access"
+    )
+    tooltip = model.data(model.index(tooltip_row, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert isinstance(tooltip, str)
+    assert "robots.txt" in tooltip
+    header_tooltip = model.headerData(2, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert isinstance(header_tooltip, str)
+    assert "Good, Warning, or Critical" in header_tooltip
+    good_row = next(row for row in range(model.rowCount()) if model.index(row, 2).data() == "Good")
+    warning_row = next(row for row in range(model.rowCount()) if model.index(row, 2).data() == "Warning")
+    critical_row = next(row for row in range(model.rowCount()) if model.index(row, 2).data() == "Critical")
+    assert model.data(model.index(good_row, 2), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+    assert model.data(model.index(warning_row, 2), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+    assert model.data(model.index(critical_row, 2), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+
+
+def test_ai_visibility_tab_empty_state_is_stable(qtbot) -> None:
+    tab = AiVisibilityTab()
+    qtbot.addWidget(tab)
+    tab.update({})
+
+    assert "Verdict:</b> -" in tab._summary.text()
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 1
+    assert model.data(model.index(0, 0)) == "Info"
+    assert model.data(model.index(0, 1)) == "No AI visibility data yet"
+    assert model.data(model.index(0, 3)) == "Run an analysis to populate this tab."
+
+
+def test_ai_visibility_tab_viewport_tooltip_event(qtbot, monkeypatch) -> None:
+    tab = AiVisibilityTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "summary": {
+                "verdict": "Needs work",
+                "good_count": 1,
+                "warning_count": 1,
+                "critical_count": 0,
+            },
+            "checks": [
+                {
+                    "area": "Access",
+                    "check": "Audited AI and search agents can access the page",
+                    "status": "good",
+                    "details": "Allowed: GPTBot; Limited: -; Blocked: -.",
+                    "recommendation": "Keep robots.txt open for the official AI and search agents you want to allow.",
+                    "key": "access_agents",
+                }
+            ],
+        }
+    )
+    tab.show()
+    qtbot.waitExposed(tab)
+
+    model = tab.view.model()
+    assert model is not None
+    index = model.index(0, 0)
+    rect = tab.view.visualRect(index)
+    shown: dict[str, str] = {}
+
+    def _fake_show_text(pos, text, widget=None, rect=None, msec_display_time=-1):
+        shown["text"] = text
+
+    monkeypatch.setattr(QtWidgets.QToolTip, "showText", _fake_show_text)
+    event = QtGui.QHelpEvent(
+        QtCore.QEvent.Type.ToolTip,
+        rect.center(),
+        tab.view.viewport().mapToGlobal(rect.center()),
+    )
+
+    assert tab.view.viewportEvent(event) is True
+    assert "robots.txt" in shown["text"]
+
+
 def test_content_quality_tab_viewport_tooltip_event(qtbot, monkeypatch) -> None:
     tab = ContentQualityTab()
     qtbot.addWidget(tab)
@@ -680,8 +975,100 @@ def test_table_tab_update_sets_model_and_resizing(
 
     header = tab.view.horizontalHeader()
     assert isinstance(header, QtWidgets.QHeaderView)
+    assert header.sectionsClickable() is True
+    assert header.isSortIndicatorShown() is True
     for section, expected_mode in resize_modes.items():
         assert header.sectionResizeMode(section) == expected_mode
+
+
+def test_meta_tab_sorting_reorders_rows(qtbot) -> None:
+    tab = MetaTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            ["title", "Short title", "11"],
+            ["description", "Longer description", "120"],
+            ["robots", "index, follow", "13"],
+        ]
+    )
+
+    tab.view.sortByColumn(2, QtCore.Qt.SortOrder.DescendingOrder)
+    QtWidgets.QApplication.processEvents()
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 0)) == "description"
+    assert model.data(model.index(1, 0)) == "robots"
+
+
+def test_meta_tab_header_click_sorts_rows(qtbot) -> None:
+    tab = MetaTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            ["title", "Short title", "11"],
+            ["description", "Longer description", "120"],
+            ["robots", "index, follow", "13"],
+        ]
+    )
+    tab.show()
+    qtbot.waitExposed(tab)
+
+    header = tab.view.horizontalHeader()
+    section = 2
+    position = QtCore.QPoint(header.sectionViewportPosition(section) + 8, max(header.height() // 2, 1))
+
+    qtbot.mouseClick(header.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=position)
+    qtbot.mouseClick(header.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=position)
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 0)) == "description"
+    assert header.sortIndicatorSection() == 2
+
+
+def test_headers_tab_sorting_reorders_rows(qtbot) -> None:
+    tab = HeadersTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            ["h2", "Alpha section"],
+            ["h1", "Zulu topic"],
+            ["h3", "Middle section"],
+        ]
+    )
+
+    tab.view.sortByColumn(1, QtCore.Qt.SortOrder.DescendingOrder)
+    QtWidgets.QApplication.processEvents()
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 1)) == "Zulu topic"
+    assert model.data(model.index(1, 1)) == "Middle section"
+
+
+def test_images_tab_sorting_reorders_rows_and_keeps_diagnostics(qtbot) -> None:
+    tab = ImagesTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            normalize_image_row(
+                ["https://example.com/light.png", "Alt", "Title", "image/png", "", "", "10 KB", "1h", "Lazy", "Low"]
+            ),
+            normalize_image_row(
+                ["https://example.com/heavy.png", "Alt", "Title", "image/png", "", "", "250 KB", "1h", "Lazy", "Low"]
+            ),
+        ]
+    )
+
+    tab.view.sortByColumn(SIZE_COL, QtCore.Qt.SortOrder.DescendingOrder)
+    QtWidgets.QApplication.processEvents()
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 0)) == "https://example.com/heavy.png"
+    assert model.data(model.index(1, 0)) == "https://example.com/light.png"
+    assert model.data(model.index(0, SIZE_COL), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
 
 
 def test_schema_tab_theme_toggle(qtbot):
@@ -768,6 +1155,34 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
             "js": {"count": 5, "bytes": 40960},
             "img": {"count": 2, "bytes": 81920},
         },
+        "summary": {
+            "transfer_size": 512000,
+            "total_resource_bytes": 122880,
+            "total_page_bytes": 634880,
+            "total_resource_count": 7,
+            "third_party_bytes": 20480,
+            "third_party_count": 2,
+            "critical_issue_count": 1,
+            "warning_issue_count": 1,
+            "info_issue_count": 0,
+            "verdict": "High performance risk",
+        },
+        "issues": [
+            {
+                "key": "blocking_js",
+                "severity": "critical",
+                "message": "Blocking JavaScript was detected in the page source.",
+                "evidence": "2 blocking script(s), 43.9 KB total.",
+                "recommendation": "Move non-critical scripts to defer/async and reduce blocking script weight.",
+            },
+            {
+                "key": "image_weight",
+                "severity": "warning",
+                "message": "Image payload is heavier than ideal.",
+                "evidence": "Measured image weight is 80.0 KB.",
+                "recommendation": "Compress large images and review responsive delivery.",
+            },
+        ],
         "opportunity_details": [
             {"message": "Bundle JavaScript files", "severity": "warning"},
             {"message": "Review resource weight", "severity": "critical"},
@@ -785,15 +1200,20 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     tab.update(payload)
 
     summary_text = tab._summary.text()
+    assert "Verdict:" in summary_text
     assert "Status:" in summary_text
     assert "TTFB:" in summary_text
     assert "Transfer:" in summary_text
     assert "Page weight:" in summary_text
+    assert "Third-party:" in summary_text
     assert "620.0 KB" in summary_text
+    assert "Third-party" in tab._summary.toolTip()
 
     scripts_text = tab._scripts.text()
     assert "Blocking JS" in scripts_text
     assert "Async/Deferred JS" in scripts_text
+    assert "Images:" in scripts_text
+    assert "Resource breakdown" in tab._scripts.toolTip()
 
     model = tab.view.model()
     assert model is not None
@@ -801,7 +1221,25 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     header = tab.view.horizontalHeader()
     assert isinstance(header, QtWidgets.QHeaderView)
     assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Stretch
-    assert model.data(model.index(0, 2)) == "40.0 KB"
+    rows = [
+        [
+            model.data(model.index(row, column))
+            for column in range(model.columnCount())
+        ]
+        for row in range(model.rowCount())
+    ]
+    assert any(row[1] == "Critical" and "Blocking JavaScript" in row[0] for row in rows)
+    assert any("defer/async" in row[3] for row in rows)
+    critical_row = next(
+        row
+        for row in range(model.rowCount())
+        if model.data(model.index(row, 1)) == "Critical"
+        and "Blocking JavaScript" in str(model.data(model.index(row, 0)) or "")
+    )
+    assert model.data(model.index(critical_row, 1), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+    tooltip = model.data(model.index(critical_row, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert isinstance(tooltip, str)
+    assert "defer or async" in tooltip.lower()
 
     opp_html = tab._opportunities.text()
     assert "Bundle JavaScript files" in opp_html
@@ -836,7 +1274,7 @@ def test_images_tab_merges_worker_results(qtbot):
     tab = ImagesTab()
     qtbot.addWidget(tab)
     initial_rows = [
-        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "No", ""]
+        normalize_image_row(["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "No", ""])
     ]
     tab.update(initial_rows)
 
@@ -846,13 +1284,36 @@ def test_images_tab_merges_worker_results(qtbot):
     model = tab.view.model()
     assert model is not None
     assert model.data(model.index(0, 3)) == "image/png"
-    assert model.data(model.index(0, 4)) == "640"
-    assert model.data(model.index(0, 6)) == "18 KB"
-    assert tab.rows()[0][4] == "640"
-    assert tab.rows()[0][6] == "18 KB"
+    assert model.data(model.index(0, ACTUAL_WIDTH_COL)) == "640"
+    assert model.data(model.index(0, SIZE_COL)) == "18 KB"
+    assert model.data(model.index(0, CACHE_COL)) == "1h"
+    assert tab.rows()[0][ACTUAL_WIDTH_COL] == "640"
+    assert tab.rows()[0][SIZE_COL] == "18 KB"
     header = tab.view.horizontalHeader()
     assert isinstance(header, QtWidgets.QHeaderView)
     assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+
+
+def test_images_tab_header_order_keeps_analysis_columns_visible(qtbot):
+    tab = ImagesTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            normalize_image_row(
+                ["https://example.com/img.png", "Alt", "Title", "image/png", "", "", "", "", "Lazy", "High"]
+            )
+        ]
+    )
+
+    model = tab.view.model()
+    assert model is not None
+
+    headers = [
+        model.headerData(column, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole)
+        for column in range(model.columnCount())
+    ]
+    assert headers == IMAGE_HEADERS
+    assert headers[:8] == ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache TTL"]
 
 
 def test_schema_tab_dark_palette(qtbot):
@@ -893,6 +1354,45 @@ def test_schema_tab_handles_missing_items(qtbot):
     tab.update([])
 
     assert "Structured data not found" in tab.toHtml()
+
+
+def test_schema_tab_renders_eligibility_summary(qtbot):
+    tab = SchemaTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        {
+            "summary": {
+                "total": 1,
+                "by_syntax": {"json-ld": 1},
+                "by_type": {"Product": 1},
+                "errors": ["Block #1 (Product) via json-ld: missing offers.price"],
+            },
+            "eligibility": [
+                {
+                    "type": "Product",
+                    "detected": True,
+                    "count": 1,
+                    "eligibility": "Incomplete",
+                    "missing_fields": ["missing offers.price", "missing offers.priceCurrency"],
+                    "warnings": ["Missing required fields"],
+                }
+            ],
+            "blocks": [
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Product",
+                    "_extracted_via": "json-ld",
+                    "_schema_errors": ["missing offers.price", "missing offers.priceCurrency"],
+                }
+            ],
+        }
+    )
+
+    html = tab.toHtml()
+    assert "Eligibility summary" in html
+    assert "Product" in html
+    assert "Incomplete" in html
+    assert "missing offers.price" in html
 
 
 def test_schema_tab_displays_block_errors(qtbot):
@@ -1028,12 +1528,55 @@ def test_image_analysis_updates_payload_rows(qtbot):
     assert image_row[1] == "Alt"
     assert image_row[2] == "Title"
     assert image_row[3] == "image/png"
-    assert image_row[4] == "640"
-    assert image_row[5] == "320"
-    assert image_row[6] == "42 KB"
-    assert image_row[7] == "30m"
-    assert image_row[8] == payload.images[0][8]
-    assert image_row[9] == payload.images[0][9]
+    assert image_row[DECLARED_WIDTH_COL] == "100"
+    assert image_row[DECLARED_HEIGHT_COL] == "200"
+    assert image_row[ACTUAL_WIDTH_COL] == "640"
+    assert image_row[ACTUAL_HEIGHT_COL] == "320"
+    assert image_row[SIZE_COL] == "42 KB"
+    assert image_row[CACHE_COL] == "30m"
+    assert image_row[LOADING_COL] == payload.images[0][LOADING_COL]
+    assert image_row[FETCH_PRIORITY_COL] == payload.images[0][FETCH_PRIORITY_COL]
+    assert image_row[DIAGNOSTIC_COL]
+
+
+def test_image_analysis_updates_visible_columns_in_images_tab(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    payload = _sample_payload()
+    win._populate_tables(payload.to_mapping())
+    win._populate_tables({"img_update": [[payload.images[0][0], 640, 320, "42 KB", "image/png", "30m"]]})
+
+    model = win.images_tab.view.model()
+    assert model is not None
+
+    assert model.headerData(ACTUAL_WIDTH_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "W"
+    assert model.headerData(ACTUAL_HEIGHT_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "H"
+    assert model.headerData(SIZE_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "Size"
+    assert model.headerData(CACHE_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "Cache TTL"
+
+    assert model.data(model.index(0, ACTUAL_WIDTH_COL)) == "640"
+    assert model.data(model.index(0, ACTUAL_HEIGHT_COL)) == "320"
+    assert model.data(model.index(0, SIZE_COL)) == "42 KB"
+    assert model.data(model.index(0, CACHE_COL)) == "30m"
+
+
+def test_seo_window_populates_ai_visibility_tab(qtbot):
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    payload = _sample_payload()
+    win._populate_tables(payload.to_mapping())
+
+    model = win.ai_visibility_tab.view.model()
+    assert model is not None
+    assert win.ai_visibility_tab._summary.text().find("Needs work") != -1
+    rows = [
+        [model.index(row, column).data() for column in range(model.columnCount())]
+        for row in range(model.rowCount())
+    ]
+    assert any(row[0] == "Access" and row[2] == "Good" for row in rows)
+    assert any(row[0] == "Citation readiness" and row[2] == "Warning" for row in rows)
 
 
 def test_crawl_settings_dialog_roundtrip(qtbot):

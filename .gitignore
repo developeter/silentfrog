@@ -8,3 +8,4 @@ src/silentfrog/assets/icon-old.png
 .pytest_cache/
 .pytest_runtime_tmp/
 .pytest_runtime_cache/
+.venv/

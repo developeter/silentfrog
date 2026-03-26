@@ -26,6 +26,7 @@ from .tabs import (
     RobotsTab,
     HreflangTab,
     AiTab,
+    AiVisibilityTab,
     KeywordsTab,
     PerformanceTab,
     SchemaTab,
@@ -239,8 +240,10 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.keywords_tab, "Keywords")
 
         self.ai_tab = AiTab()
+        self.ai_visibility_tab = AiVisibilityTab()
         self.performance_tab = PerformanceTab()
         self.tabs.addTab(self.ai_tab, "AI crawl")
+        self.tabs.addTab(self.ai_visibility_tab, "AI Visibility")
         self.tabs.addTab(self.performance_tab, "Performance")
 
         self.serp_tab = SerpTab()
@@ -486,6 +489,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.content_quality_tab.update({})
         self.keywords_tab.update([])
         self.ai_tab.update([])
+        self.ai_visibility_tab.update({})
         self.performance_tab.update({})
         self.schema_tab.update({})
         self.serp_tab.update({}, {})
@@ -583,6 +587,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.content_quality_tab.update, data.get("content_quality", {})),
             (self.keywords_tab.update, data.get("keywords", [])),
             (self.ai_tab.update, data.get("ai_crawl", [])),
+            (self.ai_visibility_tab.update, data.get("ai_visibility", {})),
             (self.performance_tab.update, data.get("performance", {})),
             (self.schema_tab.update, data.get("schema", {})),
             (self.social_tab.update, data.get("social", {})),

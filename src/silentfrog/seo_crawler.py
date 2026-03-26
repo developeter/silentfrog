@@ -30,6 +30,7 @@ from .crawl_http import (
     _image_info,
 )
 from .content_quality import extract_content_quality
+from .ai_visibility import build_ai_visibility_payload
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
@@ -133,6 +134,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "performance": performance_metrics,
         "social": social_cards,
     }
+    raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
 
 

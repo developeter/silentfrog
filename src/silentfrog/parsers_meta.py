@@ -12,6 +12,7 @@ import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
+from .image_diagnostics import format_hint_for_mime, responsive_label
 
 Tag = bs4.element.Tag
 NavigableString = bs4.element.NavigableString
@@ -24,12 +25,18 @@ class ImageInfo:
     alt: str
     title: str
     mime: str
-    width: str
-    height: str
+    actual_width: str
+    actual_height: str
     size: str
     cache: str
     loading: str
     fetchpriority: str
+    declared_width: str
+    declared_height: str
+    responsive: str
+    sizes: str
+    format_hint: str
+    diagnostic: str
 
     def to_row(self) -> list[str]:
         return [
@@ -37,12 +44,18 @@ class ImageInfo:
             self.alt,
             self.title,
             self.mime,
-            self.width,
-            self.height,
+            self.actual_width,
+            self.actual_height,
             self.size,
             self.cache,
             self.loading,
             self.fetchpriority,
+            self.declared_width,
+            self.declared_height,
+            self.responsive,
+            self.sizes,
+            self.format_hint,
+            self.diagnostic,
         ]
 
 
@@ -135,6 +148,17 @@ def _non_empty_attr(tag: Tag, *names: str) -> str:
 
 
 def _srcset_url(srcset: str, target_width: int = 0) -> str:
+    candidates = _srcset_candidates(srcset)
+    if not candidates:
+        return ""
+    if target_width:
+        width_candidates = [candidate for candidate in candidates if candidate[1]]
+        if width_candidates:
+            return min(width_candidates, key=lambda item: abs(item[1] - target_width))[0]
+    return candidates[-1][0]
+
+
+def _srcset_candidates(srcset: str) -> list[tuple[str, int]]:
     candidates: list[tuple[str, int]] = []
     for chunk in srcset.split(","):
         parts = chunk.strip().split()
@@ -144,13 +168,7 @@ def _srcset_url(srcset: str, target_width: int = 0) -> str:
         descriptor = parts[1].strip().lower() if len(parts) > 1 else ""
         width = int(descriptor[:-1]) if descriptor.endswith("w") and descriptor[:-1].isdigit() else 0
         candidates.append((url, width))
-    if not candidates:
-        return ""
-    if target_width:
-        width_candidates = [candidate for candidate in candidates if candidate[1]]
-        if width_candidates:
-            return min(width_candidates, key=lambda item: abs(item[1] - target_width))[0]
-    return candidates[-1][0]
+    return candidates
 
 
 def _picture_source_url(img: Tag, target_width: int) -> str:
@@ -165,6 +183,38 @@ def _picture_source_url(img: Tag, target_width: int) -> str:
         resolved = _srcset_url(raw, target_width)
         if resolved:
             return resolved
+    return ""
+
+
+def _picture_sources(img: Tag) -> list[Tag]:
+    parent = img.parent
+    if not isinstance(parent, Tag) or parent.name.lower() != "picture":
+        return []
+    return [source for source in parent.find_all("source", recursive=False) if isinstance(source, Tag)]
+
+
+def _responsive_candidates(img: Tag) -> int:
+    seen: set[str] = set()
+    raw_values = [
+        _non_empty_attr(img, "srcset"),
+        _non_empty_attr(img, "data-srcset"),
+    ]
+    raw_values.extend(_non_empty_attr(source, "srcset", "data-srcset") for source in _picture_sources(img))
+    for raw in raw_values:
+        for candidate, _ in _srcset_candidates(raw):
+            if candidate:
+                seen.add(candidate)
+    return len(seen)
+
+
+def _image_sizes(img: Tag) -> str:
+    sizes = _non_empty_attr(img, "sizes")
+    if sizes:
+        return sizes
+    for source in _picture_sources(img):
+        sizes = _non_empty_attr(source, "sizes")
+        if sizes:
+            return sizes
     return ""
 
 
@@ -222,17 +272,24 @@ def _extract_images(base: str, soup: BeautifulSoup) -> list[list[str]]:
         src = _image_src(base, img)
         if not src:
             continue
+        mime = _guess_image_mime(src)
         info = ImageInfo(
             src=src,
             alt=safe_attr(img, "alt") or "",
             title=safe_attr(img, "title") or "",
-            mime=_guess_image_mime(src),
-            width=safe_attr(img, "width") or "",
-            height=safe_attr(img, "height") or "",
+            mime=mime,
+            actual_width="",
+            actual_height="",
             size="",
             cache="",
             loading=_normalize_loading(safe_attr(img, "loading") or ""),
             fetchpriority=_normalize_fetchpriority(safe_attr(img, "fetchpriority") or ""),
+            declared_width=safe_attr(img, "width") or "",
+            declared_height=safe_attr(img, "height") or "",
+            responsive=responsive_label(_responsive_candidates(img)),
+            sizes=_image_sizes(img),
+            format_hint=format_hint_for_mime(mime),
+            diagnostic="",
         )
         rows.append(info.to_row())
     return rows
@@ -495,27 +552,159 @@ async def _extract_hreflang(page_url: str, soup: BeautifulSoup, timeout: int = 5
     return rows
 
 
-_AI_AGENTS = {
-    "GPTBot": "gptbot",
-    "Google-Extended": "google-extended",
-    "Gemini": "google-other",
-}
+@dataclass(frozen=True, slots=True)
+class AiAuditAgent:
+    label: str
+    token: str
+    applies_google_search_controls: bool = False
+
+
+_AI_AGENTS = (
+    AiAuditAgent("GPTBot", "gptbot"),
+    AiAuditAgent("OAI-SearchBot", "oai-searchbot"),
+    AiAuditAgent("Googlebot", "googlebot", applies_google_search_controls=True),
+    AiAuditAgent("Google-Extended", "google-extended"),
+    AiAuditAgent("ClaudeBot", "claudebot"),
+    AiAuditAgent("Claude-SearchBot", "claude-searchbot"),
+)
+
+_AI_NONSTANDARD_DIRECTIVES = {"noai", "noimageai"}
+_GOOGLE_SEARCH_CONTROLS = {"noindex", "nosnippet"}
+
+
+def _meta_directives(meta_robots: str) -> set[str]:
+    return {
+        directive.strip().lower()
+        for directive in str(meta_robots or "").split(",")
+        if directive.strip()
+    }
+
+
+def _page_path(page_url: str) -> str:
+    return urlparse(page_url).path or "/"
+
+
+def _path_matches_rule(page_path: str, rule: str) -> bool:
+    normalized = str(rule or "").strip()
+    return bool(normalized) and (normalized == "/" or page_path.startswith(normalized))
+
+
+def _agent_directives(
+    robots_map: dict[str, list[tuple[str, str]]],
+    agent_token: str,
+ ) -> list[tuple[str, str]]:
+    normalized = {str(agent).strip().casefold(): directives for agent, directives in robots_map.items()}
+    return normalized.get(agent_token.casefold()) or normalized.get("*", [])
+
+
+def _matching_robot_rules(
+    directives: list[tuple[str, str]],
+    page_url: str,
+) -> list[tuple[str, str]]:
+    page_path = _page_path(page_url)
+    return [
+        (verb.title(), path)
+        for verb, path in directives
+        if verb.lower() in {"allow", "disallow"} and _path_matches_rule(page_path, path)
+    ]
+
+
+def _longest_robot_match(matches: list[tuple[str, str]]) -> tuple[str, str] | None:
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda item: (len(str(item[1] or "")), 1 if str(item[0]).lower() == "allow" else 0),
+    )
+
+
+def _robot_access(
+    robots_map: dict[str, list[tuple[str, str]]],
+    agent_token: str,
+    page_url: str,
+) -> tuple[bool, list[str]]:
+    matches = _matching_robot_rules(_agent_directives(robots_map, agent_token), page_url)
+    winning_rule = _longest_robot_match(matches)
+    if winning_rule is None:
+        return True, []
+    verb, path = winning_rule
+    blocked = verb.lower() == "disallow"
+    return (not blocked), ([path] if blocked else [])
+
+
+def _ai_nonstandard_directives(directives: set[str]) -> list[str]:
+    return [directive for directive in sorted(directives) if directive in _AI_NONSTANDARD_DIRECTIVES]
+
+
+def _parse_max_snippet_limit(directive: str) -> int | None:
+    key, _sep, value = directive.partition(":")
+    if key != "max-snippet":
+        return None
+    normalized_value = value.strip()
+    if normalized_value == "-1":
+        return None
+    return int(normalized_value) if normalized_value.lstrip("-").isdigit() else None
+
+
+def _google_search_controls(directives: set[str]) -> list[str]:
+    controls = [directive for directive in sorted(directives) if directive in _GOOGLE_SEARCH_CONTROLS]
+    snippet_controls = [
+        directive
+        for directive in sorted(directives)
+        if (limit := _parse_max_snippet_limit(directive)) is not None and limit >= 0
+    ]
+    if "none" in directives:
+        controls.append("none")
+    return list(dict.fromkeys(controls + snippet_controls))
+
+
+def _ai_verdict(robots_ok: bool, controls: list[str]) -> str:
+    if not robots_ok:
+        return "Blocked"
+    if controls:
+        return "Limited"
+    return "Allowed"
+
+
+def _ai_notes(
+    robots_ok: bool,
+    disallows: list[str],
+    nonstandard_directives: list[str],
+    controls: list[str],
+) -> str:
+    notes: list[str] = []
+    if not robots_ok and disallows:
+        notes.append(f"Blocked by robots.txt: {', '.join(disallows)}")
+    if nonstandard_directives:
+        notes.append(f"Nonstandard directives detected: {', '.join(nonstandard_directives)}")
+    if controls:
+        notes.append(f"Google search controls: {', '.join(controls)}")
+    return "; ".join(notes) or "No explicit AI restrictions detected"
 
 
 def _ai_crawl_matrix(robots_map: dict[str, list[tuple[str, str]]], meta_robots: str, page_url: str) -> list[list[str]]:
-    def _allowed_by_robots(agent_token: str) -> bool:
-        disallows = []
-        for ua, directives in robots_map.items():
-            if ua in ("*", agent_token):
-                disallows.extend(path for verb, path in directives if verb.lower() == "disallow")
-        return not any(page_url.startswith(urljoin(page_url, d)) for d in disallows)
-
+    directives = _meta_directives(meta_robots)
+    nonstandard_directives = _ai_nonstandard_directives(directives)
+    google_controls = _google_search_controls(directives)
+    ai_directive_text = ", ".join(nonstandard_directives) or "-"
     out: list[list[str]] = []
-    meta_disallow = "noai" in meta_robots.lower() or "noimageai" in meta_robots.lower()
-    for pretty, token in _AI_AGENTS.items():
-        allowed = _allowed_by_robots(token)
-        verdict = "Blocked" if (not allowed or meta_disallow) else "Allowed"
-        out.append([pretty, "Yes" if allowed else "No", "Yes" if meta_disallow else "No", verdict])
+    for agent in _AI_AGENTS:
+        disallows: list[str]
+        robots_ok, disallows = _robot_access(robots_map, agent.token, page_url)
+        controls = google_controls if agent.applies_google_search_controls else []
+        search_control_text = ", ".join(controls) or "-"
+        verdict = _ai_verdict(robots_ok, controls)
+        out.append(
+            [
+                agent.label,
+                agent.token,
+                "Yes" if robots_ok else "No",
+                ai_directive_text,
+                search_control_text,
+                verdict,
+                _ai_notes(robots_ok, disallows, nonstandard_directives, controls),
+            ]
+        )
     return out
 
 

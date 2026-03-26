@@ -7,6 +7,14 @@ import pytest
 from bs4 import BeautifulSoup
 
 from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import (
+    DECLARED_HEIGHT_COL,
+    DECLARED_WIDTH_COL,
+    DIAGNOSTIC_COL,
+    FORMAT_HINT_COL,
+    RESPONSIVE_COL,
+    SIZES_COL,
+)
 
 
 @pytest.fixture
@@ -57,20 +65,18 @@ def test_extract_headers_picks_h1(soup: BeautifulSoup) -> None:
 
 def test_extract_images_normalises_src(base_url: str, soup: BeautifulSoup) -> None:
     images = crawler._extract_images(base_url, soup)
-    assert images == [
-        [
-            "https://example.com/images/logo.png",
-            "Logo",
-            "Logo title",
-            "image/png",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ]
-    ]
+    assert len(images) == 1
+    image = images[0]
+    assert image[0] == "https://example.com/images/logo.png"
+    assert image[1] == "Logo"
+    assert image[2] == "Logo title"
+    assert image[3] == "image/png"
+    assert image[DECLARED_WIDTH_COL] == ""
+    assert image[DECLARED_HEIGHT_COL] == ""
+    assert image[RESPONSIVE_COL] == ""
+    assert image[SIZES_COL] == ""
+    assert image[FORMAT_HINT_COL] == "Consider WebP or AVIF"
+    assert image[DIAGNOSTIC_COL] == ""
 
 
 def test_extract_images_uses_picture_source_when_img_src_is_empty(base_url: str) -> None:
@@ -88,21 +94,16 @@ def test_extract_images_uses_picture_source_when_img_src_is_empty(base_url: str)
     soup = BeautifulSoup(html, "html.parser")
 
     images = crawler._extract_images(base_url, soup)
-
-    assert images == [
-        [
-            "https://example.com/images/hero-mobile.webp",
-            "Hero image",
-            "Hero title",
-            "image/webp",
-            "640",
-            "480",
-            "",
-            "",
-            "",
-            "",
-        ]
-    ]
+    assert len(images) == 1
+    image = images[0]
+    assert image[0] == "https://example.com/images/hero-mobile.webp"
+    assert image[1] == "Hero image"
+    assert image[2] == "Hero title"
+    assert image[3] == "image/webp"
+    assert image[DECLARED_WIDTH_COL] == "640"
+    assert image[DECLARED_HEIGHT_COL] == "480"
+    assert image[RESPONSIVE_COL] == "2 candidates"
+    assert image[FORMAT_HINT_COL] == "Next-gen format"
 
 
 def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup) -> None:
@@ -234,15 +235,38 @@ def test_schema_validation_flags_breadcrumb_and_product() -> None:
 def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
     robots: Dict[str, List[tuple[str, str]]] = {
         "*": [("Disallow", "/private"), ("Allow", "/")],
-        "gptbot": [("Allow", "/")],
+        "GPTBot": [("Allow", "/")],
+        "GoogleBot": [("Allow", "/")],
     }
-    rows = crawler._ai_crawl_matrix(robots, "noai", "https://example.com")
-    verdicts = {row[0]: row[-1] for row in rows}
+    rows = crawler._ai_crawl_matrix(robots, "noai, nosnippet", "https://example.com/private/page")
+    verdicts = {row[0]: row[5] for row in rows}
+    directives = {row[0]: row[3] for row in rows}
+    controls = {row[0]: row[4] for row in rows}
+    notes = {row[0]: row[6] for row in rows}
     assert verdicts == {
-        "GPTBot": "Blocked",
+        "GPTBot": "Allowed",
+        "OAI-SearchBot": "Blocked",
+        "Googlebot": "Limited",
         "Google-Extended": "Blocked",
-        "Gemini": "Blocked",
+        "ClaudeBot": "Blocked",
+        "Claude-SearchBot": "Blocked",
     }
+    assert all(value == "noai" for value in directives.values())
+    assert "Blocked by robots.txt: /private" in notes["Google-Extended"]
+    assert controls["Googlebot"] == "nosnippet"
+    assert controls["GPTBot"] == "-"
+    assert "Google search controls: nosnippet" in notes["Googlebot"]
+    assert "Nonstandard directives detected: noai" in notes["GPTBot"]
+
+
+def test_ai_crawl_matrix_limits_googlebot_for_positive_max_snippet() -> None:
+    rows = crawler._ai_crawl_matrix({"*": [("Allow", "/")]}, "index, max-snippet:20", "https://example.com/page")
+    by_agent = {row[0]: row for row in rows}
+
+    assert by_agent["Googlebot"][4] == "max-snippet:20"
+    assert by_agent["Googlebot"][5] == "Limited"
+    assert by_agent["GPTBot"][4] == "-"
+    assert by_agent["GPTBot"][5] == "Allowed"
 
 
 def test_serp_schema_snapshot_combined(sample_html: str, soup: BeautifulSoup) -> None:

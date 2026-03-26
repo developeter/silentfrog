@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Launch Silentfrog via Poetry (macOS/Linux, Intel or Apple Silicon).
-# Usage: double-click if your OS opens shell scripts with Terminal, or run:
-#   bash run_silentfrog.sh
+# Launch Silentfrog from the local .venv when available.
+# Falls back to Poetry for developers.
 
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$script_dir"
 
-poetry run python -m silentfrog.gui
+launcher="$script_dir/.venv/bin/silentfrog"
+if [[ -x "$launcher" ]]; then
+  exec "$launcher" "$@"
+fi
+
+exec poetry run silentfrog "$@"

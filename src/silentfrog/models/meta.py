@@ -21,33 +21,44 @@ class MetaModel(_BaseModel):
     def __init__(self, rows: List[List[str]], add_placeholders: bool = True) -> None:
         processed = [list(row) for row in rows]
         self._brushes: StatusBrushPalette = status_brushes()
+        self._add_placeholders = add_placeholders
 
         names = [(row[0] or "").lower() for row in processed]
-        counts = Counter(name for name in names if name)
-        self._duplicate_rows = {idx for idx, name in enumerate(names) if name and counts[name] > 1}
-        self._empty_rows = {idx for idx, row in enumerate(processed) if not str(row[1]).strip()}
-
         viewport_indices = [idx for idx, name in enumerate(names) if name == "viewport"]
-        self._viewport_state: Dict[int, str] = {}
         if viewport_indices:
-            for idx in viewport_indices:
-                self._viewport_state[idx] = "good"
+            pass
         elif add_placeholders:
             processed.append(["viewport", "", "0"])
             names.append("viewport")
-            self._viewport_state[len(processed) - 1] = "warn"
 
         charset_indices = [idx for idx, name in enumerate(names) if name == "charset"]
-        self._charset_state: Dict[int, str] = {}
         if charset_indices:
-            for idx in charset_indices:
-                self._charset_state[idx] = "good" if idx <= 5 else "warn"
+            pass
         elif add_placeholders:
             processed.append(["charset", "", "0"])
             names.append("charset")
-            self._charset_state[len(processed) - 1] = "warn"
 
         super().__init__(processed)
+        self._refresh_state()
+
+    def _refresh_state(self) -> None:
+        names = [(row[0] or "").lower() for row in self._rows]
+        counts = Counter(name for name in names if name)
+        self._duplicate_rows = {idx for idx, name in enumerate(names) if name and counts[name] > 1}
+        self._empty_rows = {idx for idx, row in enumerate(self._rows) if not str(row[1]).strip()}
+        self._viewport_state = {
+            idx: "good"
+            for idx, name in enumerate(names)
+            if name == "viewport"
+        }
+        self._charset_state = {
+            idx: ("good" if idx <= 5 else "warn")
+            for idx, name in enumerate(names)
+            if name == "charset"
+        }
+
+    def _after_sort(self) -> None:
+        self._refresh_state()
 
     def _to_int(self, value: str) -> int:
         try:

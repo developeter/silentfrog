@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List
+from typing import Any, List, Sequence
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
@@ -38,11 +38,8 @@ class _BaseModel(QtCore.QAbstractTableModel):
             return self.HEADERS[section]
         return None
 
-
-class GenericModel(_BaseModel):
-    def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
-        self.HEADERS = headers  # type: ignore[assignment]
-        super().__init__(rows)
+    def _after_sort(self) -> None:
+        return None
 
     def sort(
         self,
@@ -63,27 +60,27 @@ class GenericModel(_BaseModel):
             if len(parts) != 2:
                 return None
             try:
-                num = float(parts[0].replace(",", "."))
+                number = float(parts[0].replace(",", "."))
             except ValueError:
                 return None
-            return num * units.get(parts[1], 1)
+            return number * units.get(parts[1], 1)
 
         def _key(row: List[str]):
             cell = row[column].strip()
-            size_val = _size_to_bytes(cell)
-            if size_val is not None:
-                return (0, size_val)
+            size_value = _size_to_bytes(cell)
+            if size_value is not None:
+                return (0, size_value)
             try:
-                num_val = float(cell)
+                numeric_value = float(cell)
             except ValueError:
                 try:
-                    num_val = float(cell.replace(',', '.'))
+                    numeric_value = float(cell.replace(",", "."))
                 except ValueError:
-                    num_val = None
+                    numeric_value = None
             else:
-                return (0, num_val)
-            if num_val is not None:
-                return (0, num_val)
+                return (0, numeric_value)
+            if numeric_value is not None:
+                return (0, numeric_value)
             return (1, cell.lower())
 
         try:
@@ -92,8 +89,31 @@ class GenericModel(_BaseModel):
                 key=_key,
                 reverse=(order == QtCore.Qt.SortOrder.DescendingOrder),
             )
+            self._after_sort()
         finally:
             self.layoutChanged.emit()
+
+
+class GenericModel(_BaseModel):
+    def __init__(
+        self,
+        headers: List[str],
+        rows: List[List[str]],
+        header_tooltips: Sequence[str] | None = None,
+    ) -> None:
+        self.HEADERS = headers  # type: ignore[assignment]
+        self._header_tooltips = list(header_tooltips or [])
+        super().__init__(rows)
+
+    def headerData(  # noqa: N802
+        self,
+        section: int,
+        orientation: QtCore.Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ):
+        if role == Qt.ItemDataRole.ToolTipRole and orientation == QtCore.Qt.Horizontal:
+            return self._header_tooltips[section] if section < len(self._header_tooltips) else None
+        return super().headerData(section, orientation, role)
 
 
 __all__ = ["_BaseModel", "GenericModel"]

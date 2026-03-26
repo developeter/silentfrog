@@ -8,8 +8,20 @@ from typing import Any, Callable, List, Sequence
 
 import xlsxwriter
 
-from ..crawl_types import CrawlPayload, PerformanceMetrics
+from ..crawl_types import AiVisibilityPayload, CrawlPayload, PerformanceMetrics
 from ..content_quality import build_content_quality_rows
+from ..image_diagnostics import (
+    ALT_COL,
+    CACHE_COL,
+    DECLARED_HEIGHT_COL,
+    DECLARED_WIDTH_COL,
+    DIAGNOSTIC_COL,
+    FETCH_PRIORITY_COL,
+    FORMAT_HINT_COL,
+    IMAGE_HEADERS,
+    SIZE_COL,
+    normalize_image_rows,
+)
 from ..indexability import build_indexability_rows
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
@@ -139,36 +151,132 @@ def _schema_type_label(value: Any) -> str:
     return text.strip()
 
 
-def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: PerformanceMetrics) -> None:
+def _performance_severity_format(formats: _Formats, severity: str):
+    key = severity.strip().lower()
+    if key == "critical":
+        return formats.bad
+    if key == "warning":
+        return formats.warn
+    if key in {"good", "ok"}:
+        return formats.good
+    return None
+
+
+def _ai_visibility_status_format(formats: _Formats, status: str):
+    key = status.strip().lower()
+    if key == "critical":
+        return formats.bad
+    if key == "warning":
+        return formats.warn
+    if key == "good":
+        return formats.good
+    return None
+
+
+def _write_ai_visibility_sheet(
+    workbook: xlsxwriter.Workbook,
+    formats: _Formats,
+    payload: AiVisibilityPayload,
+) -> None:
+    worksheet = workbook.add_worksheet("AI Visibility")
+    worksheet.freeze_panes(1, 0)
+    summary = payload.summary
+    checks = list(payload.checks)
+    area_names = ", ".join(dict.fromkeys(check.area for check in checks if check.area)) or "-"
+    summary_rows = [
+        ("Verdict", summary.verdict or "-"),
+        ("Good checks", str(summary.good_count)),
+        ("Warning checks", str(summary.warning_count)),
+        ("Critical checks", str(summary.critical_count)),
+        ("Total checks", str(len(checks))),
+        ("Areas covered", area_names),
+    ]
+    worksheet.write_row(0, 0, ["Metric", "Value"])
+    for idx, (label, value) in enumerate(summary_rows, start=1):
+        fmt = None
+        if label == "Verdict":
+            verdict = str(value).strip().lower()
+            if verdict == "strong":
+                fmt = formats.good
+            elif verdict == "needs work":
+                fmt = formats.warn
+            elif verdict == "weak":
+                fmt = formats.bad
+        worksheet.write(idx, 0, label)
+        worksheet.write(idx, 1, value, fmt)
+
+    checks_start = len(summary_rows) + 2
+    worksheet.write_row(checks_start, 0, ["Area", "Check", "Status", "Details", "Recommendation"])
+    wrap = workbook.add_format({"text_wrap": True, "valign": "top"})
+    rows = checks or []
+    if not rows:
+        worksheet.write_row(
+            checks_start + 1,
+            0,
+            ["Info", "No AI visibility data yet", "-", "Run an analysis to populate this sheet.", "-"],
+        )
+    else:
+        for offset, check in enumerate(rows, start=1):
+            status = check.status.title()
+            fmt = _ai_visibility_status_format(formats, check.status)
+            worksheet.write(checks_start + offset, 0, check.area or "-")
+            worksheet.write(checks_start + offset, 1, check.check or "-", wrap)
+            worksheet.write(checks_start + offset, 2, status, fmt)
+            worksheet.write(checks_start + offset, 3, check.details or "-", wrap)
+            worksheet.write(checks_start + offset, 4, check.recommendation or "-", wrap)
+
+    end_row = checks_start + max(len(rows), 1)
+    worksheet.autofilter(checks_start, 0, end_row, 4)
+    worksheet.set_column(0, 0, 20)
+    worksheet.set_column(1, 1, 34)
+    worksheet.set_column(2, 2, 12)
+    worksheet.set_column(3, 4, 68)
+
+
+def _write_performance_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, performance: PerformanceMetrics) -> None:
     worksheet = workbook.add_worksheet("Performance")
     worksheet.freeze_panes(1, 0)
+    summary = performance.summary
+    total_page_kb = (summary.total_page_bytes or (performance.transfer_size + sum(info.get("bytes", 0) for info in performance.resource_summary.values()))) / 1024
+    total_resource_kb = (summary.total_resource_bytes or sum(info.get("bytes", 0) for info in performance.resource_summary.values())) / 1024
 
     summary_rows = [
+        ("Verdict", summary.verdict or "Good"),
         ("HTTP status", "-" if performance.status == 0 else str(performance.status)),
         ("TTFB (ms)", f"{performance.nav_ttfb_ms:.0f}"),
         ("Total (ms)", f"{performance.nav_total_ms:.0f}"),
         ("Transfer (KB)", f"{performance.transfer_size / 1024:.1f}"),
-        (
-            "Page weight (KB)",
-            f"{(performance.transfer_size + sum(info.get('bytes', 0) for info in performance.resource_summary.values())) / 1024:.1f}",
-        ),
+        ("Resource bytes (KB)", f"{total_resource_kb:.1f}"),
+        ("Page weight (KB)", f"{total_page_kb:.1f}"),
+        ("Resource count", str(summary.total_resource_count)),
+        ("Third-party bytes (KB)", f"{summary.third_party_bytes / 1024:.1f}"),
+        ("Third-party resources", str(summary.third_party_count)),
+        ("Critical issues", str(summary.critical_issue_count)),
+        ("Warnings", str(summary.warning_issue_count)),
     ]
     worksheet.write_row(0, 0, ["Metric", "Value"])
     for idx, (label, value) in enumerate(summary_rows, start=1):
+        fmt = None
+        if label == "Verdict":
+            verdict = str(value).strip().lower()
+            if verdict == "high performance risk":
+                fmt = formats.bad
+            elif verdict == "needs work":
+                fmt = formats.warn
+            elif verdict == "good":
+                fmt = formats.good
         worksheet.write(idx, 0, label)
-        worksheet.write(idx, 1, value)
+        worksheet.write(idx, 1, value, fmt)
 
-    resource_rows = []
-    for resource, info in sorted(performance.resource_summary.items()):
-        count = info.get("count", 0)
-        bytes_val = info.get("bytes", 0)
-        resource_rows.append(
-            [
-                resource.upper(),
-                str(count),
-                f"{bytes_val / 1024:.1f} KB",
-            ]
-        )
+    resource_rows = [
+        [row.resource_type.upper(), str(row.count), f"{row.bytes / 1024:.1f} KB"]
+        for row in performance.resource_breakdown
+    ]
+    if not resource_rows:
+        for resource, info in sorted(performance.resource_summary.items()):
+            count = info.get("count", 0)
+            bytes_val = info.get("bytes", 0)
+            resource_rows.append([resource.upper(), str(count), f"{bytes_val / 1024:.1f} KB"])
     if not resource_rows:
         resource_rows = [["-", "-", "-"]]
 
@@ -198,13 +306,27 @@ def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: Perform
         ],
     )
 
-    opp_start = scripts_start + 4
-    worksheet.write_row(opp_start, 0, ["Severity", "Opportunity"])
+    issues_start = scripts_start + 4
+    worksheet.write_row(issues_start, 0, ["Severity", "Issue", "Evidence", "Recommendation"])
     wrap = workbook.add_format({"text_wrap": True})
+    if performance.issues:
+        for offset, item in enumerate(performance.issues, start=1):
+            severity = item.severity.title()
+            fmt = _performance_severity_format(formats, item.severity)
+            worksheet.write(issues_start + offset, 0, severity, fmt)
+            worksheet.write(issues_start + offset, 1, item.message, wrap)
+            worksheet.write(issues_start + offset, 2, item.evidence, wrap)
+            worksheet.write(issues_start + offset, 3, item.recommendation, wrap)
+    else:
+        worksheet.write_row(issues_start + 1, 0, ["OK", "No major performance issues detected", "-", "-"], formats.good)
+
+    opp_start = issues_start + max(2, len(performance.issues) + 2)
+    worksheet.write_row(opp_start, 0, ["Severity", "Opportunity"])
     if performance.opportunity_details:
         for offset, item in enumerate(performance.opportunity_details, start=1):
             severity = item.severity.title()
-            worksheet.write(opp_start + offset, 0, severity)
+            fmt = _performance_severity_format(formats, item.severity)
+            worksheet.write(opp_start + offset, 0, severity, fmt)
             worksheet.write(opp_start + offset, 1, item.message, wrap)
     elif performance.opportunities:
         for offset, item in enumerate(performance.opportunities, start=1):
@@ -230,7 +352,6 @@ def _write_performance_sheet(workbook: xlsxwriter.Workbook, performance: Perform
         worksheet.write_row(offenders_start + offset, 0, row)
 
     worksheet.set_column(0, 0, 80)
-    worksheet.set_column(1, 1, 18)
     worksheet.set_column(1, 3, 80)
 
 
@@ -240,7 +361,8 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
 
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _Formats(workbook)
-        _write_performance_sheet(workbook, payload.performance)
+        _write_performance_sheet(workbook, formats, payload.performance)
+        _write_ai_visibility_sheet(workbook, formats, payload.ai_visibility)
 
         raw_meta = [list(row) for row in payload.meta]
         names = [(row[0] or "").lower() for row in raw_meta]
@@ -356,14 +478,14 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             _headers_formatter,
         )
 
-        images_rows = _stringify_rows(payload.images)
+        images_rows = _stringify_rows(normalize_image_rows(payload.images))
 
         def _images_formatter(row_idx: int, col_idx: int, value: str):
             if row_idx >= len(images_rows):
                 return None
-            if col_idx in (1, 2):
+            if col_idx == ALT_COL:
                 return formats.good if str(images_rows[row_idx][col_idx]).strip() else formats.warn
-            if col_idx == 6:
+            if col_idx == SIZE_COL:
                 size = _parse_size(images_rows[row_idx][col_idx])
                 if size < 0:
                     return None
@@ -372,25 +494,25 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
                 if size > 100 * 1024:
                     return formats.warn
                 return formats.good
-            if col_idx in (4, 5) and not images_rows[row_idx][col_idx].strip():
+            if col_idx in (DECLARED_WIDTH_COL, DECLARED_HEIGHT_COL) and not images_rows[row_idx][col_idx].strip():
                 return formats.warn
-            if col_idx == 0 and images_rows[row_idx][8].strip().lower() != "yes":
+            if col_idx == CACHE_COL and not images_rows[row_idx][col_idx].strip():
                 return formats.warn
-            if col_idx == 8:
-                return formats.good if images_rows[row_idx][8].strip().lower() == "yes" else formats.warn
-            if col_idx == 9:
-                value_norm = images_rows[row_idx][9].strip().lower()
+            if col_idx == FORMAT_HINT_COL and images_rows[row_idx][col_idx].strip():
+                return formats.good if images_rows[row_idx][col_idx].strip() == "Next-gen format" else formats.warn
+            if col_idx == FETCH_PRIORITY_COL:
+                value_norm = images_rows[row_idx][col_idx].strip().lower()
                 if not value_norm:
                     return formats.warn
-                if value_norm in {"high", "true"}:
-                    return formats.good
                 return None
+            if col_idx == DIAGNOSTIC_COL:
+                return formats.good if images_rows[row_idx][col_idx].strip() == "OK" else formats.warn
             return None
 
         _write_sheet(
             workbook,
             "Images",
-            ["Src", "Alt", "Title", "Type", "W", "H", "Size", "Cache", "Lazy", "Fetch priority"],
+            IMAGE_HEADERS,
             images_rows,
             _images_formatter,
         )
@@ -687,15 +809,25 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         ai_rows = _stringify_rows(payload.ai_crawl)
 
         def _ai_formatter(row_idx: int, col_idx: int, value: str):
-            if col_idx != 3 or row_idx >= len(payload.ai_crawl):
+            if row_idx >= len(payload.ai_crawl):
                 return None
-            verdict = str(payload.ai_crawl[row_idx][3]).strip().lower()
-            return formats.good if verdict == "allowed" else formats.bad
+            if col_idx == 5:
+                verdict = str(payload.ai_crawl[row_idx][5]).strip().lower()
+                if verdict == "allowed":
+                    return formats.good
+                if verdict == "limited":
+                    return formats.warn
+                return formats.bad
+            if col_idx == 3 and str(payload.ai_crawl[row_idx][3]).strip() != "-":
+                return formats.warn
+            if col_idx == 4 and str(payload.ai_crawl[row_idx][4]).strip() != "-":
+                return formats.warn
+            return None
 
         _write_sheet(
             workbook,
             "AI crawl",
-            ["Agent", "Robots.txt OK", "Meta noai?", "Verdict"],
+            ["Agent", "Token", "Robots.txt OK", "Nonstandard directive", "Google controls", "Verdict", "Notes"],
             ai_rows,
             _ai_formatter,
         )
@@ -736,6 +868,35 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             "Structured summary",
             ["Metric", "Value"],
             summary_rows,
+        )
+
+        eligibility_rows = [
+            [
+                item.schema_type,
+                "Yes" if item.detected else "No",
+                item.eligibility,
+                ", ".join(item.missing_fields) or "-",
+                "; ".join(item.warnings) or "-",
+            ]
+            for item in structured.eligibility
+        ] or [["-", "No", "Not detected", "-", "-"]]
+
+        def _structured_eligibility_formatter(row_idx: int, col_idx: int, value: str):
+            if col_idx != 2 or row_idx >= len(eligibility_rows):
+                return None
+            status = str(eligibility_rows[row_idx][2]).strip().lower()
+            if status == "eligible":
+                return formats.good
+            if status == "incomplete":
+                return formats.warn
+            return None
+
+        _write_sheet(
+            workbook,
+            "Structured eligibility",
+            ["Type", "Detected", "Eligibility", "Missing fields", "Warnings"],
+            eligibility_rows,
+            _structured_eligibility_formatter,
         )
 
         detail_rows: List[List[str]] = []

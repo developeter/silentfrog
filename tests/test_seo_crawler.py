@@ -8,6 +8,7 @@ from pathlib import Path
 from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
 from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import CACHE_COL, DECLARED_HEIGHT_COL, DECLARED_WIDTH_COL, RESPONSIVE_COL, SIZES_COL  # type: ignore[reportMissingImports]
 
 # ------------------------------------------------------------------
 # Silence third-party warning inside pyRdfa only
@@ -92,8 +93,11 @@ async def test_analyse(local_server):
     # Images tab: absolute URL, alt preserved
     assert payload.images[0][0].endswith("/logo.png")
     assert payload.images[0][1] == "logo"
-    assert payload.images[0][7] == ""
-    assert payload.images[0][9] == ""
+    assert payload.images[0][DECLARED_WIDTH_COL] == ""
+    assert payload.images[0][DECLARED_HEIGHT_COL] == ""
+    assert payload.images[0][CACHE_COL] == ""
+    assert payload.images[0][RESPONSIVE_COL] == ""
+    assert payload.images[0][SIZES_COL] == ""
 
     # Links tab: rel + status populated with context
     rel_value = payload.links[0][3].lower()
@@ -108,6 +112,8 @@ async def test_analyse(local_server):
     first = schema_report.blocks[0]
     assert isinstance(first, dict)
     assert "@context" in first
+    assert schema_report.eligibility, "expected eligibility summary rows"
+    assert any(row.schema_type == "BreadcrumbList" for row in schema_report.eligibility)
 
     # Canonical tab: self-referencing to requested URL
     canon = payload.canonical
@@ -131,8 +137,16 @@ async def test_analyse(local_server):
     target = next(row[1] for row in payload.hreflang if row[0] == "en")
     assert target.endswith("/en")
 
-    # AI tab: GPTBot row shows allowed crawl (robots + meta)
-    assert payload.ai_crawl[0] == ["GPTBot", "Yes", "No", "Allowed"]
+    # AI tab: GPTBot row shows allowed crawl with explicit audit columns
+    assert payload.ai_crawl[0] == [
+        "GPTBot",
+        "gptbot",
+        "Yes",
+        "-",
+        "-",
+        "Allowed",
+        "No explicit AI restrictions detected",
+    ]
 
     # SERP tab: preview and audit payloads populated
     serp = payload.serp
@@ -167,6 +181,12 @@ async def test_analyse(local_server):
     assert quality.thin_content_risk in {"High", "Medium", "Low"}
     assert quality.verdict in {"Weak", "Needs work", "Strong"}
 
+    ai_visibility = payload.ai_visibility
+    assert ai_visibility.summary.verdict in {"Strong", "Needs work", "Weak"}
+    assert ai_visibility.checks, "expected AI visibility checks to be populated"
+    areas = {check.area for check in ai_visibility.checks}
+    assert {"Access", "Topic clarity", "Answerability", "Citation readiness", "Entity clarity"} <= areas
+
     perf = payload.performance
     assert perf.transfer_size >= 0
     summary = perf.resource_summary
@@ -180,9 +200,15 @@ async def test_analyse(local_server):
     assert perf.scripts.async_count >= 0
     assert perf.scripts.blocking_bytes >= 0
     assert perf.scripts.async_bytes >= 0
+    assert perf.summary.total_page_bytes >= perf.transfer_size
+    assert perf.summary.total_resource_count >= 4
+    assert perf.summary.verdict in {"Good", "Needs work", "High performance risk"}
+    assert any(entry.resource_type == "html" for entry in perf.resource_breakdown)
+    assert any(entry.resource_type == "js" for entry in perf.resource_breakdown)
     assert perf.top_offenders, "expected top offenders list to be populated"
     assert any(off.resource_type.upper() == "JS" for off in perf.top_offenders)
     assert all(off.bytes >= 0 for off in perf.top_offenders)
+    assert isinstance(perf.issues, list)
     assert isinstance(perf.opportunity_details, list)
 
 @pytest.mark.asyncio

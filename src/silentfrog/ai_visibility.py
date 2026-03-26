@@ -1,0 +1,493 @@
+from __future__ import annotations
+
+from collections import Counter
+import re
+from typing import Any, Iterable, Mapping
+
+from .crawl_types import (
+    AiVisibilityCheck,
+    AiVisibilityPayload,
+    AiVisibilitySummary,
+    CanonicalInfo,
+    ContentQuality,
+    CrawlPayload,
+    RedirectInfo,
+    SocialPayload,
+    StructuredDataPayload,
+)
+
+AI_VISIBILITY_AREAS = (
+    "Access",
+    "Topic clarity",
+    "Answerability",
+    "Citation readiness",
+    "Entity clarity",
+)
+
+_STATUS_ALIASES = {
+    "ok": "good",
+    "pass": "good",
+    "good": "good",
+    "info": "good",
+    "warn": "warning",
+    "warning": "warning",
+    "needs work": "warning",
+    "bad": "critical",
+    "risk": "critical",
+    "critical": "critical",
+    "blocked": "critical",
+}
+
+_VERDICT_STRONG = "Strong"
+_VERDICT_NEEDS_WORK = "Needs work"
+_VERDICT_WEAK = "Weak"
+_WORD_RE = re.compile(r"[^\W\d_]+(?:['\u2019-][^\W\d_]+)*", re.UNICODE)
+_SOCIAL_TITLE_SIMILARITY = 0.6
+_ENTITY_SCHEMA_TYPES = {"organization", "localbusiness", "product", "article", "person", "service"}
+_RICH_SCHEMA_TYPES = {"organization", "localbusiness", "product", "article", "faqpage", "breadcrumblist"}
+_AI_VISIBILITY_SUMMARY_TOOLTIP = (
+    "AI Visibility combines five signals: Access, Topic clarity, Answerability, Citation readiness, "
+    "and Entity clarity.\n\n"
+    "Verdict meanings:\n"
+    "- Strong: the page is accessible to major AI agents and only minor issues were found.\n"
+    "- Needs work: the page is partially limited or several warning-level signals reduce reuse quality.\n"
+    "- Weak: AI access is blocked or multiple critical issues make the page hard to reuse or summarize.\n\n"
+    "Best practice: keep the page accessible, explicit, well-structured, and supported by stable metadata. "
+    "This is a heuristic visibility audit, not a guarantee of citation or ranking in AI products."
+)
+_AI_VISIBILITY_CHECK_TOOLTIPS = {
+    "access_missing": (
+        "Checks whether Silentfrog had enough AI access data to evaluate the page.\n\n"
+        "Best practice: make sure robots.txt, meta robots, and response headers are reachable so access "
+        "signals can be audited reliably."
+    ),
+    "access_agents": (
+        "Checks whether the audited AI and search-facing agents can fetch the page URL.\n\n"
+        "Best practice: allow the official user-agent tokens you want in robots.txt and avoid "
+        "blocking them with conflicting path rules."
+    ),
+    "access_controls": (
+        "Checks whether standard Google search controls or nonstandard AI directives may limit reuse.\n\n"
+        "Best practice: remove nosnippet, noindex, or restrictive max-snippet directives if you want "
+        "Google search and AI surfaces to reuse the page more freely. Treat nonstandard directives such "
+        "as noai or noimageai as advisory unless you have vendor-specific confirmation they are honored."
+    ),
+    "topic_alignment": (
+        "Checks whether the title and H1 describe the same primary topic.\n\n"
+        "Best practice: keep one descriptive title and one clear H1 aligned on the same entity or page intent."
+    ),
+    "topic_language": (
+        "Checks whether the page declares its main language.\n\n"
+        "Best practice: set a valid <html lang> that matches the visible content language."
+    ),
+    "topic_depth": (
+        "Checks whether the page has enough original content to explain the topic.\n\n"
+        "Best practice: avoid thin pages and provide enough topical detail for search engines and AI systems "
+        "to summarize confidently."
+    ),
+    "answer_intro": (
+        "Checks whether the page explains its topic early with a concise intro or summary paragraph.\n\n"
+        "Best practice: answer the core question in the first visible content block."
+    ),
+    "answer_chunking": (
+        "Checks whether the content is segmented into clear, reusable sections.\n\n"
+        "Best practice: use a logical heading hierarchy and self-contained paragraphs instead of long "
+        "unbroken text blocks."
+    ),
+    "citation_schema": (
+        "Checks whether supported structured data helps machines interpret the page and its main entity.\n\n"
+        "Best practice: provide valid Organization, Article, Product, FAQ, or Breadcrumb schema when relevant."
+    ),
+    "citation_social": (
+        "Checks whether social metadata is complete enough to represent the page consistently outside the body copy.\n\n"
+        "Best practice: keep OpenGraph and Twitter title/description fields complete and aligned with the page."
+    ),
+    "citation_stability": (
+        "Checks whether the page is a stable, indexable canonical source.\n\n"
+        "Best practice: use a self-canonical, avoid unnecessary redirects, and do not apply noindex to pages "
+        "you want cited."
+    ),
+    "entity_naming": (
+        "Checks whether the same entity or topic wording is used across title, H1, and social metadata.\n\n"
+        "Best practice: keep naming consistent so AI systems do not have to guess which entity the page is about."
+    ),
+    "entity_schema": (
+        "Checks whether entity-supporting schema is present for the kind of page being audited.\n\n"
+        "Best practice: add the most relevant entity schema type, such as Organization, LocalBusiness, "
+        "Product, Article, Service, or Person."
+    ),
+}
+
+
+def normalize_ai_visibility_status(value: str) -> str:
+    return _STATUS_ALIASES.get(str(value or "").strip().lower(), "warning")
+
+
+def ai_visibility_summary_tooltip() -> str:
+    return _AI_VISIBILITY_SUMMARY_TOOLTIP
+
+
+def ai_visibility_check_tooltip(key: str) -> str:
+    normalized = str(key or "").strip().lower()
+    return _AI_VISIBILITY_CHECK_TOOLTIPS.get(
+        normalized,
+        (
+            "This row evaluates a signal that affects how easy the page is to access, understand, and reuse in "
+            "AI-generated answers.\n\nBest practice: keep the page accessible, explicit, and well-structured."
+        ),
+    )
+
+
+def _coerce_check(value: AiVisibilityCheck | Mapping[str, Any]) -> AiVisibilityCheck:
+    if isinstance(value, AiVisibilityCheck):
+        return value
+    if isinstance(value, Mapping):
+        return AiVisibilityCheck.from_raw(value)
+    raise TypeError("AI visibility checks must be AiVisibilityCheck instances or mappings")
+
+
+def build_ai_visibility_summary(
+    checks: Iterable[AiVisibilityCheck | Mapping[str, Any]],
+) -> AiVisibilitySummary:
+    items = [_coerce_check(item) for item in checks]
+    if not items:
+        return AiVisibilitySummary.empty()
+
+    counts = Counter(item.status for item in items)
+    critical_count = counts.get("critical", 0)
+    warning_count = counts.get("warning", 0)
+    good_count = counts.get("good", 0)
+    access_statuses = {
+        item.status
+        for item in items
+        if item.area == "Access"
+    }
+
+    verdict = _VERDICT_STRONG
+    if "critical" in access_statuses or critical_count >= 2 or (critical_count == 1 and warning_count >= 2):
+        verdict = _VERDICT_WEAK
+    elif "warning" in access_statuses or critical_count == 1 or warning_count >= 2:
+        verdict = _VERDICT_NEEDS_WORK
+
+    return AiVisibilitySummary(
+        verdict=verdict,
+        good_count=good_count,
+        warning_count=warning_count,
+        critical_count=critical_count,
+    )
+
+
+def _token_set(value: str) -> set[str]:
+    return {token.casefold() for token in _WORD_RE.findall(value or "")}
+
+
+def _overlap_ratio(left: str, right: str) -> float:
+    left_tokens = _token_set(left)
+    right_tokens = _token_set(right)
+    smallest = min(len(left_tokens), len(right_tokens)) or 0
+    return len(left_tokens & right_tokens) / smallest if smallest else 0.0
+
+
+def _payload_mapping(value: CrawlPayload | Mapping[str, Any]) -> Mapping[str, Any]:
+    if isinstance(value, CrawlPayload):
+        return value.to_mapping()
+    if isinstance(value, Mapping):
+        return value
+    raise TypeError("AI visibility analyzer expects CrawlPayload or mapping input")
+
+
+def _rows(value: Any) -> list[list[str]]:
+    return [
+        [str(cell) for cell in row]
+        for row in value
+        if isinstance(row, Iterable) and not isinstance(row, (str, bytes))
+    ] if isinstance(value, Iterable) and not isinstance(value, (str, bytes)) else []
+
+
+def _title_from_meta(meta_rows: list[list[str]]) -> str:
+    return next((row[1].strip() for row in meta_rows if len(row) > 1 and row[0].strip().lower() == "title"), "")
+
+
+def _first_h1(header_rows: list[list[str]]) -> str:
+    return next((row[1].strip() for row in header_rows if len(row) > 1 and row[0].strip().lower() == "h1"), "")
+
+
+def _schema_type_sets(schema: StructuredDataPayload) -> tuple[set[str], set[str], set[str]]:
+    all_types = {entry.schema_type.casefold() for entry in schema.eligibility if entry.schema_type}
+    eligible = {
+        entry.schema_type.casefold()
+        for entry in schema.eligibility
+        if entry.schema_type and entry.eligibility.casefold() == "eligible"
+    }
+    detected = {
+        entry.schema_type.casefold()
+        for entry in schema.eligibility
+        if entry.schema_type and entry.detected
+    }
+    return all_types, eligible, detected
+
+
+def _check(
+    area: str,
+    check: str,
+    status: str,
+    details: str,
+    recommendation: str,
+    key: str,
+) -> AiVisibilityCheck:
+    return AiVisibilityCheck(
+        area=area,
+        check=check,
+        status=normalize_ai_visibility_status(status),
+        details=details,
+        recommendation=recommendation,
+        key=key,
+    )
+
+
+def _build_access_checks(ai_rows: list[list[str]]) -> list[AiVisibilityCheck]:
+    if not ai_rows:
+        return [
+            _check(
+                "Access",
+                "AI crawler access could not be evaluated",
+                "warning",
+                "No AI crawl rows were available for this page.",
+                "Run the page analysis again and verify robots.txt and meta robots signals are available.",
+                "access_missing",
+            )
+        ]
+
+    blocked = [row[0] for row in ai_rows if len(row) > 5 and row[5] == "Blocked"]
+    limited = [row[0] for row in ai_rows if len(row) > 5 and row[5] == "Limited"]
+    allowed = [row[0] for row in ai_rows if len(row) > 5 and row[5] == "Allowed"]
+    search_controls = [row[4] for row in ai_rows if len(row) > 4 and row[4] != "-"]
+    nonstandard_directives = [row[3] for row in ai_rows if len(row) > 3 and row[3] != "-"]
+    status = "good" if not blocked and not limited else "warning"
+    status = "critical" if blocked else status
+    details = (
+        f"Allowed: {', '.join(allowed) or '-'}; "
+        f"Limited: {', '.join(limited) or '-'}; "
+        f"Blocked: {', '.join(blocked) or '-'}."
+    )
+    access_check = _check(
+        "Access",
+        "Audited AI and search agents can access the page",
+        status,
+        details,
+        "Keep robots.txt open for the official AI and search agents you want to allow.",
+        "access_agents",
+    )
+    controls_status = "warning" if nonstandard_directives or search_controls else "good"
+    controls_detail = "Nonstandard directives: {directives}; Google search controls: {controls}.".format(
+        directives=", ".join(dict.fromkeys(nonstandard_directives)) or "-",
+        controls=", ".join(dict.fromkeys(search_controls)) or "-",
+    )
+    controls_check = _check(
+        "Access",
+        "Reuse restrictions are limited",
+        controls_status,
+        controls_detail,
+        "Remove Google search controls or nonstandard AI directives if you want broader reuse, but verify vendor support before treating nonstandard directives as blockers.",
+        "access_controls",
+    )
+    return [access_check, controls_check]
+
+
+def _build_topic_clarity_checks(
+    quality: ContentQuality,
+    title: str,
+    h1: str,
+) -> list[AiVisibilityCheck]:
+    alignment_status = "good" if quality.title_present and quality.h1_count == 1 and quality.title_h1_alignment in {"Aligned", "Exact match"} else "warning"
+    alignment_status = "critical" if not quality.title_present or quality.h1_count == 0 else alignment_status
+    topic_alignment = _check(
+        "Topic clarity",
+        "The page states a clear primary topic",
+        alignment_status,
+        f"Title present: {'Yes' if quality.title_present else 'No'}; H1 count: {quality.h1_count}; Title/H1: {quality.title_h1_alignment or '-'}.",
+        "Keep one descriptive title and one clear H1 that express the same core topic.",
+        "topic_alignment",
+    )
+    language_status = "good" if quality.language and quality.language != "Not declared" else "warning"
+    language_check = _check(
+        "Topic clarity",
+        "The page language is explicit",
+        language_status,
+        f"Declared language: {quality.language or 'Not declared'}.",
+        "Declare a valid html lang that matches the main visible content language.",
+        "topic_language",
+    )
+    depth_map = {"Low": "good", "Medium": "warning", "High": "critical"}
+    depth_check = _check(
+        "Topic clarity",
+        "The page has enough topical depth",
+        depth_map.get(quality.thin_content_risk, "warning"),
+        (
+            f"Word count: {quality.word_count}; Paragraphs: {quality.paragraph_count}; "
+            f"Thin-content risk: {quality.thin_content_risk or '-'}."
+        ),
+        "Add enough original, on-topic copy to satisfy the page intent and support summarization.",
+        "topic_depth",
+    )
+    return [topic_alignment, language_check, depth_check]
+
+
+def _build_answerability_checks(quality: ContentQuality) -> list[AiVisibilityCheck]:
+    intro_status = "good" if quality.intro_paragraph == "Present" else "warning"
+    intro_check = _check(
+        "Answerability",
+        "The page answers the topic early",
+        intro_status,
+        f"Intro paragraph: {quality.intro_paragraph or '-'}; Overall content verdict: {quality.verdict or '-'}.",
+        "Add a concise opening paragraph that explains the page topic immediately.",
+        "answer_intro",
+    )
+    chunking_status = "good" if quality.heading_structure == "Good" and quality.substantial_paragraph_count >= 2 else "warning"
+    chunking_status = "critical" if quality.heading_structure in {"Missing H1", "Multiple H1s"} else chunking_status
+    chunking_check = _check(
+        "Answerability",
+        "The content is easy to chunk into answerable sections",
+        chunking_status,
+        (
+            f"Heading structure: {quality.heading_structure or '-'}; "
+            f"Substantial paragraphs: {quality.substantial_paragraph_count}; "
+            f"Average words/paragraph: {quality.average_words_per_paragraph:.1f}."
+        ),
+        "Use clear heading hierarchy and several meaningful paragraphs instead of dense or fragmented copy.",
+        "answer_chunking",
+    )
+    return [intro_check, chunking_check]
+
+
+def _build_citation_checks(
+    schema: StructuredDataPayload,
+    social: SocialPayload,
+    canonical: CanonicalInfo,
+    redirect: RedirectInfo,
+    meta_robots: str,
+) -> list[AiVisibilityCheck]:
+    all_types, eligible_types, detected_types = _schema_type_sets(schema)
+    schema_status = "good" if eligible_types & _RICH_SCHEMA_TYPES else "warning"
+    schema_status = "critical" if detected_types & _RICH_SCHEMA_TYPES and not eligible_types & _RICH_SCHEMA_TYPES else schema_status
+    schema_check = _check(
+        "Citation readiness",
+        "Structured data supports interpretation and citation",
+        schema_status,
+        "Eligible schema: {eligible}; Detected schema: {detected}; Summary errors: {errors}.".format(
+            eligible=", ".join(sorted(eligible_types)) or "-",
+            detected=", ".join(sorted(detected_types or all_types)) or "-",
+            errors=", ".join(schema.summary.errors[:3]) or "-",
+        ),
+        "Add or complete supported schema such as Organization, Article, Product, FAQ, or Breadcrumb.",
+        "citation_schema",
+    )
+    social_cards = (social.open_graph, social.twitter)
+    complete_cards = sum(bool(card.title and card.description) for card in social_cards)
+    social_status = "good" if complete_cards == 2 else "warning"
+    social_check = _check(
+        "Citation readiness",
+        "Cross-surface metadata is present",
+        social_status,
+        f"OpenGraph title/description: {'Yes' if social.open_graph.title and social.open_graph.description else 'No'}; "
+        f"Twitter title/description: {'Yes' if social.twitter.title and social.twitter.description else 'No'}.",
+        "Keep OpenGraph and Twitter metadata complete so the page is consistently represented outside the page body.",
+        "citation_social",
+    )
+    meta_directives = {part.strip().lower() for part in str(meta_robots or "").split(",") if part.strip()}
+    stability_status = "good"
+    if "noindex" in meta_directives:
+        stability_status = "critical"
+    elif redirect.hops > 0 or not canonical.is_self or canonical.multiple:
+        stability_status = "warning"
+    stability_check = _check(
+        "Citation readiness",
+        "The page is a stable canonical source",
+        stability_status,
+        (
+            f"Redirect hops: {redirect.hops}; Canonical self-reference: {'Yes' if canonical.is_self else 'No'}; "
+            f"Multiple canonicals: {'Yes' if canonical.multiple else 'No'}; Meta robots: {meta_robots or '-'}."
+        ),
+        "Keep the page indexable, self-canonical, and free from unnecessary redirects if it should be cited as the source URL.",
+        "citation_stability",
+    )
+    return [schema_check, social_check, stability_check]
+
+
+def _build_entity_checks(
+    title: str,
+    h1: str,
+    schema: StructuredDataPayload,
+    social: SocialPayload,
+) -> list[AiVisibilityCheck]:
+    social_titles = [card.title for card in (social.open_graph, social.twitter) if card.title]
+    title_matches = [_overlap_ratio(title, social_title) >= _SOCIAL_TITLE_SIMILARITY for social_title in social_titles]
+    naming_status = "good" if title and h1 and _overlap_ratio(title, h1) >= _SOCIAL_TITLE_SIMILARITY and all(title_matches or [True]) else "warning"
+    naming_check = _check(
+        "Entity clarity",
+        "Naming is consistent across the page and social metadata",
+        naming_status,
+        "Title: {title}; H1: {h1}; OpenGraph title: {og}; Twitter title: {tw}.".format(
+            title=title or "-",
+            h1=h1 or "-",
+            og=social.open_graph.title or "-",
+            tw=social.twitter.title or "-",
+        ),
+        "Keep the main page title, H1, and social titles focused on the same entity or topic wording.",
+        "entity_naming",
+    )
+    all_types, eligible_types, detected_types = _schema_type_sets(schema)
+    entity_support = detected_types & _ENTITY_SCHEMA_TYPES
+    entity_status = "good" if entity_support else "warning"
+    entity_status = "good" if eligible_types & _ENTITY_SCHEMA_TYPES else entity_status
+    entity_check = _check(
+        "Entity clarity",
+        "Entity-supporting markup is present",
+        entity_status,
+        "Detected entity schema: {detected}; Eligible entity schema: {eligible}.".format(
+            detected=", ".join(sorted(entity_support)) or "-",
+            eligible=", ".join(sorted(eligible_types & _ENTITY_SCHEMA_TYPES)) or "-",
+        ),
+        "Add clear Organization, LocalBusiness, Product, Article, Service, or Person markup when relevant.",
+        "entity_schema",
+    )
+    return [naming_check, entity_check]
+
+
+def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[AiVisibilityCheck]:
+    data = _payload_mapping(value)
+    ai_rows = _rows(data.get("ai_crawl", []))
+    meta_rows = _rows(data.get("meta", []))
+    header_rows = _rows(data.get("headers", []))
+    quality = ContentQuality.from_raw(data.get("content_quality", {}))
+    schema = StructuredDataPayload.from_raw(data.get("schema", {}))
+    social = SocialPayload.from_raw(data.get("social", {}))
+    canonical = CanonicalInfo.from_raw(data.get("canonical", {}))
+    redirect = RedirectInfo.from_raw(data.get("redirect", {}))
+    meta_robots = str(data.get("meta_robots", "")).strip()
+    title = _title_from_meta(meta_rows)
+    h1 = _first_h1(header_rows)
+    checks = [
+        *_build_access_checks(ai_rows),
+        *_build_topic_clarity_checks(quality, title, h1),
+        *_build_answerability_checks(quality),
+        *_build_citation_checks(schema, social, canonical, redirect, meta_robots),
+        *_build_entity_checks(title, h1, schema, social),
+    ]
+    return checks
+
+
+def build_ai_visibility_payload(value: CrawlPayload | Mapping[str, Any]) -> AiVisibilityPayload:
+    checks = build_ai_visibility_checks(value)
+    return AiVisibilityPayload(summary=build_ai_visibility_summary(checks), checks=checks)
+
+
+__all__ = [
+    "AI_VISIBILITY_AREAS",
+    "ai_visibility_check_tooltip",
+    "ai_visibility_summary_tooltip",
+    "build_ai_visibility_checks",
+    "build_ai_visibility_payload",
+    "build_ai_visibility_summary",
+    "normalize_ai_visibility_status",
+]

@@ -40,6 +40,8 @@ async def test_perf_metrics_counts_inline_only() -> None:
     metrics = await _collect_performance_metrics(resp, soup)
     assert metrics["status"] == 200
     assert metrics["resource_summary"]["js"]["bytes"] > 0
+    assert metrics["summary"]["total_page_bytes"] >= metrics["transfer_size"]
+    assert any(entry["type"] == "html" for entry in metrics["resource_breakdown"])
     scripts = metrics["scripts"]
     assert scripts["blocking"]["count"] == 1
     assert metrics["top_offenders"], "Expected at least the inline script as an offender"

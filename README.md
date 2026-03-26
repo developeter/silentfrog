@@ -1,14 +1,15 @@
 ﻿# Silentfrog - Desktop SEO Toolkit
 
-Silentfrog is a **simple desktop SEO auditor** built with Python 3.11 / 3.12 and PyQt 5.
+Silentfrog is a **desktop SEO auditor** built with **Python 3.12** and **PyQt 5**.
 
 It lets you quickly:
 
-| Capability                                                                  | Status |
-| --------------------------------------------------------------------------- | ------ |
-| Bulk-check redirects from Excel                                             | ✅     |
-| Single-page SEO analyser (meta, headers, images, links, structured data, performance) | ✅     |
-| Export results to Excel                                                     | ✅     |
+| Capability | Status |
+| --- | --- |
+| Bulk-check redirects from Excel | ✅ |
+| Single-page SEO analysis (meta, headers, images, social, links, canonical, robots, hreflang, structured data, keywords, performance, SERP) | ✅ |
+| Single-page AI / GEO support (AI crawl audit + AI Visibility heuristics) | ✅ |
+| Export results to Excel | ✅ |
 
 ---
 
@@ -16,8 +17,8 @@ It lets you quickly:
 
 |            | Recommended   | Why                                                                 |
 | ---------- | ------------- | ------------------------------------------------------------------- |
-| **Python** | **3.11 or 3.12** | `extruct 0.16` is pinned to **lxml 4.x** (no wheel for Py 3.13 yet) |
-| **Poetry** | >= 1.8        | Reproducible virtual environments                                   |
+| **Python** | **3.12**      | Matches `pyproject.toml` and the tested dependency set              |
+| **Poetry** | >= 1.8        | Development workflow only                                           |
 | **Git**    | any           | Clone updates                                                       |
 
 > On **Windows** enable "Add Python to PATH" during install.  
@@ -25,7 +26,60 @@ It lets you quickly:
 
 ---
 
-## 2. Quick start (recommended: Poetry)
+## 2. One-command install (from source)
+
+You only need **Python 3.12+** installed manually.
+
+The installer will:
+
+- create a local `.venv`
+- upgrade `pip`, `setuptools`, and `wheel`
+- install Silentfrog into that `.venv`
+- refresh the launcher scripts
+- create a Desktop launcher:
+  - Windows: `Silentfrog.lnk`
+  - macOS: `Silentfrog.command`
+
+### Install
+
+```bash
+# Windows
+py install_silentfrog.py
+
+# macOS
+python3 install_silentfrog.py
+```
+
+If Python is missing or too old, the installer stops with a clear message instead of failing later.
+
+### Launch after install
+
+```bash
+# Windows
+run_silentfrog.bat
+
+# macOS
+./run_silentfrog.sh
+```
+
+The installer also creates a Desktop launcher automatically:
+
+- **Windows**: double-click `Silentfrog.lnk`
+- **macOS**: double-click `Silentfrog.command`
+
+Convenience wrappers are also available:
+
+```bash
+# Windows
+install_silentfrog.bat
+
+# macOS
+./install_silentfrog.sh
+```
+
+---
+
+## 3. Quick start (recommended: Poetry for development)
 
 ```bash
 # clone
@@ -33,7 +87,7 @@ $ git clone https://github.com/your-org/silentfrog.git
 $ cd silentfrog
 
 # pick the right interpreter
-$ poetry env use $(which python3.12)  # or python3.11
+$ poetry env use $(which python3.12)
 
 # install (pre-built wheels, no compile step; stopwords are bundled locally)
 $ poetry install
@@ -58,16 +112,26 @@ $ poetry run python -m silentfrog
 ### Running without Poetry
 
 ```bash
-python3 -m pip install --upgrade pip
-python3 -m pip install -e .
-python3 -m silentfrog
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install .
+.venv/bin/python -m silentfrog
 ```
 
-Use Python 3.11 or 3.12; PyQt 5.15 wheels are available for those versions.
+On Windows the equivalent is:
+
+```bash
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install .
+.venv\Scripts\python.exe -m silentfrog
+```
+
+Use Python 3.12; that is the tested baseline for this repository.
 
 **macOS first-run notes**
-- If `nltk.downloader` fails with `CERTIFICATE_VERIFY_FAILED`, run:  
-  `open "/Applications/Python 3.12/Install Certificates.command"` and retry the stopwords download.
+- If `pip`/HTTPS certificate validation fails with the python.org installer build, run:  
+  `open "/Applications/Python 3.12/Install Certificates.command"` and retry the install.
 - Use `python3.12` (PyQt 5.15 has universal2 wheels); avoid 3.13 until lxml/extruct wheels land.
 
 ## Support & project status
@@ -81,12 +145,54 @@ Use Python 3.11 or 3.12; PyQt 5.15 wheels are available for those versions.
 
 1. Run a page analysis with **Analyze**.
 2. Click **Export Excel** and pick a filename (the `.xlsx` extension is appended if missing).
-3. Each tab is exported to its own worksheet (Meta, Headers, Images, Links, Redirect, Canonical, Robots, Hreflang, AI crawl, Structured data, Performance, SERP preview/audit, Keywords, Keyword Alerts).
+3. Silentfrog exports the current analysis into dedicated worksheets, including:
+   - `Meta`
+   - `Headers`
+   - `Images`
+   - `Social`
+   - `Links`
+   - `Redirect`
+   - `Canonical`
+   - `Indexability`
+   - `Robots`
+   - `Hreflang`
+   - `AI crawl`
+   - `AI Visibility`
+   - `Structured summary`
+   - `Structured eligibility`
+   - `Structured data`
+   - `Content quality`
+   - `Keywords`
+   - `Performance`
+   - `SERP Preview`
+   - `SERP Audit`
 4. Re-run the export after a new crawl to refresh the workbook.
+
+### Single-page analysis tabs
+
+The **SEO webpage analysis** window currently includes these tabs:
+
+- `Meta tag`
+- `Header H1-H6`
+- `Images`
+- `Social`
+- `Link`
+- `Redirect`
+- `Canonical`
+- `Indexability`
+- `Robots`
+- `Hreflang`
+- `Structured data`
+- `Content quality`
+- `Keywords`
+- `AI crawl`
+- `AI Visibility`
+- `Performance`
+- `SERP`
 
 ### Keyword analysis & fine tuning
 
-Silentfrog extracts 1/2/3‑grams together with density, heading coverage, title/meta usage, and first-occurrence data. High-density terms are highlighted in the GUI, summarised at the top of the tab, and mirrored in the **Keyword Alerts** sheet inside the Excel export.
+Silentfrog extracts 1/2/3‑grams together with density, heading coverage, title/meta usage, and first-occurrence data. High-density terms are highlighted in the GUI, summarised at the top of the tab, and exported in the **Keywords** worksheet.
 
 Power users can adjust the density warning threshold (default **4 %**) by setting an environment variable before launching the app:
 
@@ -98,12 +204,14 @@ set SILENTFROG_KEYWORD_WARN_DENSITY=6.5      # Windows Command Prompt
 
 Set the value back to blank (or `0`) to disable the warning altogether.
 
-### Performance metrics & open-source guidance
+### Performance-for-SEO metrics & open-source guidance
 
 The **Performance** tab (and the corresponding Excel worksheet) displays:
 
 - navigation timings (HTTP status, Time To First Byte, total navigation time, transfer size);
-- resource mix (per-type request counts and approximate weights for CSS, JS, images, fonts);
+- a verdict (`Good`, `Needs work`, or `High performance risk`);
+- resource mix (per-type request counts and approximate weights for HTML, CSS, JS, images, fonts, and other resources);
+- SEO-relevant issue rows such as heavy page weight, blocking JavaScript, large image payloads, and third-party overhead;
 - opportunity hints whenever payloads look heavy or script/stylesheet counts climb.
 
 Silentfrog can also suggest **open-source learning resources** (HTTP Archive Web Almanac, Google's RAIL model, Web Vitals patterns). Toggle them with:
@@ -119,7 +227,7 @@ Unset the variable (or set it to `1`) to re-enable the guidance.
 
 * **Gatekeeper** – if the window will not open: `xattr -dr com.apple.quarantine silentfrog`
 * **lxml build fails** with CPython 3.13 – use Python 3.12 **or** follow the manual-compile instructions in §7.
-* **PyInstaller** – standalone bundles are deferred until the NLTK stopwords dependency is fully packaged; use `poetry run silentfrog` for now.
+* **Standalone bundles** – packaged binaries are not a supported release path right now; use the local source installer or run via Poetry.
 
 ---
 
@@ -148,7 +256,7 @@ Silentfrog includes a **gentle crawl mode** for fragile staging sites or wheneve
 
 ---
 
-## 3. Running the test suite
+## 4. Running the test suite
 
 ```bash
 poetry run pytest -q 
@@ -168,14 +276,20 @@ poetry run python tools/install_hooks.py
 
 ---
 
-## 4. Folder layout
+## 5. Folder layout
 
 ```
 silentfrog/
 ├── AGENTS.md
+├── install_silentfrog.py
+├── install_silentfrog.bat
+├── install_silentfrog.sh
 ├── pyproject.toml
 ├── README.md
+├── run_silentfrog.bat
+├── run_silentfrog.sh
 ├── tools/
+│   ├── source_install.py  # Local .venv installer and launcher generation
 │   ├── doctor.py          # Env/dependency/resource/compile/test checks
 │   └── install_hooks.py   # Configures git to use .githooks/
 ├── .githooks/
@@ -189,24 +303,38 @@ silentfrog/
 │           ├── robots.txt
 │           └── schema_product.json
 ├── src/silentfrog/
-│   ├── gui.py            # Launcher / theme switcher
+│   ├── __main__.py        # Enables `python -m silentfrog`
+│   ├── ai_visibility.py   # AI Visibility heuristics and tooltip text
+│   ├── content_quality.py # Content quality heuristics for single-page analysis
+│   ├── gui.py            # Home launcher / theme switcher
+│   ├── image_diagnostics.py # Shared image-table schema and diagnostics helpers
+│   ├── indexability.py   # Indexability verdict helpers
 │   ├── seo_gui.py        # Single-page analysis window
 │   ├── exporters/
 │   │   └── excel.py      # Excel export helpers
-│   ├── tabs/             # Per-tab Qt widgets
+│   ├── tabs.py           # Per-tab Qt widgets
 │   ├── models/           # Table models feeding tabs
 │   ├── crawl_types.py    # Typed crawl payloads
 │   ├── crawl_constants.py# Shared accept headers, stopwords, density threshold
 │   ├── crawl_http.py     # Throttling, robots, backoff helpers
+│   ├── http_client.py    # Async page fetch wrapper
 │   ├── parsers_meta.py   # Meta/headers/images/links/hreflang/canonical/SERP helpers
+│   ├── perf_guides.py    # Optional open-source performance learning resources
 │   ├── schema_extractor.py # Structured data extraction and validators
 │   ├── perf_metrics.py   # Resource/weight/opportunity calculation
 │   ├── keywords.py       # Keyword tokenization and density analysis
-│   ├── social.py         # Social card previews/issues (OpenGraph/Twitter)
+│   ├── redirect.py       # Redirect export / parsing helpers
+│   ├── redirect_gui.py   # Massive redirect check window
 │   ├── resources/        # Bundled stopword lists
+│   ├── assets/           # Bundled icons and UI assets
+│   ├── settings_dialog.py # Crawl settings dialog
+│   ├── theme.py          # Shared theme helpers
 │   ├── workers.py        # Thread helpers wrapping async tasks
 │   └── seo_crawler.py    # Orchestrator wiring the modules above
 ├── tests/
+│   ├── test_ai_visibility_unit.py
+│   ├── test_source_install_unit.py
+│   ├── test_image_diagnostics_unit.py
 │   ├── test_seo_gui.py
 │   ├── test_seo_crawler.py
 │   ├── test_export_excel.py
@@ -216,21 +344,19 @@ silentfrog/
 │   ├── test_perf_metrics_unit.py
 │   ├── test_crawl_http_unit.py
 │   ├── ...
-└── assets/
-    └── icon.png
 ```
 
 ---
 
-## 5. Packaging binaries (optional)
+## 6. Packaging binaries (optional)
 
 | OS      | Command                                    | Output                |
 | ------- | ------------------------------------------ | --------------------- |
-| Windows | Packaging via PyInstaller is currently deferred (pending xlsxwriter/PyQt bundling); run via Poetry for now: `poetry run silentfrog` | |
+| Windows / macOS | Standalone packaging is currently not a supported release path; use `install_silentfrog.py` for a local `.venv` install or run `poetry run silentfrog` during development. | Local source install |
 
 --- 
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom / log snippet                                                        | Root cause                    | Fix                                                                                                   |
 | ---------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -241,7 +367,7 @@ silentfrog/
 
 ---
 
-## 7. Compiling on Python 3.13 anyway (macOS / Linux)
+## 8. Compiling on Python 3.13 anyway (macOS / Linux)
 
 ```bash
 brew install libxml2 libxslt libiconv            # C headers

@@ -40,3 +40,23 @@ If tests cannot run, report why and what remains unverified.
 - Do not use destructive git commands (`reset --hard`, checkout discard).
 - Never revert user changes unless explicitly requested.
 - Use UTF-8 safe file editing.
+
+## 6) Install and launcher policy
+
+- The supported end-user install flow is the local source installer:
+  - `install_silentfrog.py`
+  - `install_silentfrog.bat`
+  - `install_silentfrog.sh`
+- End-user installation should target a local `.venv` with `pip install .`, not Poetry.
+- Poetry is for development workflow only.
+- Keep these entrypoints aligned whenever startup logic changes:
+  - `pyproject.toml` script entrypoint
+  - `src/silentfrog/__main__.py`
+  - `run_silentfrog.bat`
+  - `run_silentfrog.sh`
+  - `tools/source_install.py`
+- Keep the installer best-effort for Desktop launchers:
+  - Windows: `Silentfrog.lnk`
+  - macOS: `Silentfrog.command`
+- If install behavior changes, update `README.md` in the same task.
+- Treat Python 3.12 as the tested baseline unless the dependency matrix is intentionally expanded.

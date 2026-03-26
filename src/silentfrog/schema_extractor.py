@@ -26,6 +26,14 @@ except Exception:
 
 DEBUG_SCHEMA = os.environ.get("SILENTFROG_DEBUG", "").lower() in ("1", "true", "yes", "y")
 _SCHEMA_LOGGER = logging.getLogger("silentfrog.schema")
+_SCHEMA_ELIGIBILITY_TYPES = [
+    ("breadcrumblist", "BreadcrumbList"),
+    ("product", "Product"),
+    ("article", "Article"),
+    ("faqpage", "FAQPage"),
+    ("organization", "Organization"),
+    ("localbusiness", "LocalBusiness"),
+]
 
 
 def _log_schema(msg: str) -> None:
@@ -143,10 +151,121 @@ def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
     return errors
 
 
+def _schema_validate_article(obj: Dict[str, Any]) -> List[str]:
+    checks = [
+        (not obj.get("headline"), "missing headline"),
+        (not obj.get("image"), "missing image"),
+        (not obj.get("datePublished"), "missing datePublished"),
+        (not obj.get("author"), "missing author"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
+def _schema_validate_faq_page(obj: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    entries = _schema_normalize_entries(obj.get("mainEntity"))
+    if not entries:
+        return ["missing mainEntity"]
+
+    for idx, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            errors.append(f"mainEntity[{idx}] is not an object")
+            continue
+        if not entry.get("name"):
+            errors.append(f"mainEntity[{idx}] missing name")
+        answer = entry.get("acceptedAnswer")
+        if not isinstance(answer, dict):
+            errors.append(f"mainEntity[{idx}] missing acceptedAnswer")
+            continue
+        if not (answer.get("text") or answer.get("answerExplanation")):
+            errors.append(f"mainEntity[{idx}] missing acceptedAnswer.text")
+    return errors
+
+
+def _schema_validate_organization(obj: Dict[str, Any]) -> List[str]:
+    checks = [
+        (not obj.get("name"), "missing name"),
+        (not obj.get("url"), "missing url"),
+        (not obj.get("logo"), "missing logo"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
+def _schema_validate_local_business(obj: Dict[str, Any]) -> List[str]:
+    checks = [
+        (not obj.get("name"), "missing name"),
+        (not obj.get("address"), "missing address"),
+        (not obj.get("telephone"), "missing telephone"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
 _SCHEMA_VALIDATORS: Dict[str, Any] = {
     "breadcrumblist": _schema_validate_breadcrumb,
     "product": _schema_validate_product,
+    "article": _schema_validate_article,
+    "faqpage": _schema_validate_faq_page,
+    "organization": _schema_validate_organization,
+    "localbusiness": _schema_validate_local_business,
 }
+
+
+def _unique_text(values: List[str]) -> List[str]:
+    ordered: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        ordered.append(text)
+        seen.add(text)
+    return ordered
+
+
+def _schema_build_eligibility(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    indexed: Dict[str, List[Dict[str, Any]]] = {key: [] for key, _ in _SCHEMA_ELIGIBILITY_TYPES}
+    for block in blocks:
+        schema_type = _schema_primary_type(block.get("@type")).lower()
+        if schema_type in indexed:
+            indexed[schema_type].append(block)
+
+    rows: List[Dict[str, Any]] = []
+    for key, label in _SCHEMA_ELIGIBILITY_TYPES:
+        matches = indexed[key]
+        if not matches:
+            rows.append(
+                {
+                    "type": label,
+                    "detected": False,
+                    "count": 0,
+                    "eligibility": "Not detected",
+                    "missing_fields": [],
+                    "warnings": [],
+                }
+            )
+            continue
+
+        valid_blocks = sum(1 for block in matches if not block.get("_schema_errors"))
+        missing_fields = _unique_text([error for block in matches for error in block.get("_schema_errors", [])])
+        warnings: List[str] = []
+        if len(matches) > 1:
+            warnings.append(f"{len(matches)} blocks detected")
+        if valid_blocks and valid_blocks < len(matches):
+            warnings.append(f"{len(matches) - valid_blocks} block(s) need fixes")
+        if not valid_blocks and missing_fields:
+            warnings.append("Missing required fields")
+
+        rows.append(
+            {
+                "type": label,
+                "detected": True,
+                "count": len(matches),
+                "eligibility": "Eligible" if valid_blocks else "Incomplete",
+                "missing_fields": missing_fields,
+                "warnings": _unique_text(warnings),
+            }
+        )
+    return rows
 
 
 def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
@@ -427,7 +546,6 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
         if via_lower in ("json-ld", "json-ld-raw"):
             checks = [
                 ("@raw" in obj, "Unparseable JSON-LD block"),
-                ("@context" not in obj and "@raw" not in obj, "JSON-LD missing @context"),
                 ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
             ]
             block_issues.extend(msg for cond, msg in checks if cond)
@@ -447,6 +565,8 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
             label = _schema_block_label(idx, obj)
             aggregate.extend(f"{label}: {msg}" for msg in unique)
 
+    eligibility = _schema_build_eligibility([obj for obj in collected if isinstance(obj, dict)])
+
     summary = {
         "total": int(sum(syntax_counter.values())),
         "by_syntax": {name: syntax_counter[name] for name in sorted(syntax_counter) if syntax_counter[name]},
@@ -456,6 +576,7 @@ def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
     return {
         "blocks": collected,
         "summary": summary,
+        "eligibility": eligibility,
         "issues": summary["errors"],
         "fallback_raw": fallback_raw,
     }

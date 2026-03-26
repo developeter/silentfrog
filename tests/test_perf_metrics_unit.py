@@ -9,6 +9,10 @@ from silentfrog.perf_metrics import (  # type: ignore[reportMissingImports]
     _data_uri_size,
     _format_bytes,
     _measure_remote_resources,
+    _normalize_resource_type,
+    performance_issue_tooltip,
+    performance_resource_tooltip,
+    performance_summary_tooltip,
 )
 
 
@@ -19,6 +23,13 @@ def test_data_uri_size_and_format_bytes() -> None:
     assert _format_bytes(-5) == "0 B"
     assert _format_bytes(1024) == "1.0 KB"
     assert _format_bytes(0) == "0 B"
+    assert _normalize_resource_type("style") == "css"
+    assert _normalize_resource_type("script") == "js"
+    assert _normalize_resource_type("image") == "img"
+    assert _normalize_resource_type("unknown") == "other"
+    assert "Blocking JavaScript" in performance_issue_tooltip("blocking_js")
+    assert "Third-party" in performance_summary_tooltip()
+    assert "Blocking JS" in performance_resource_tooltip()
 
 
 @pytest.mark.asyncio
@@ -47,8 +58,65 @@ async def test_collect_performance_metrics_inline_resources() -> None:
     summary = metrics["resource_summary"]
     assert summary["js"]["bytes"] > 0
     assert summary["img"]["bytes"] > 0
+    assert summary["other"]["bytes"] == 0
     assert metrics["status"] == 200
     assert metrics["transfer_size"] > 0
+    assert metrics["summary"]["total_page_bytes"] >= metrics["transfer_size"]
+    assert metrics["summary"]["total_resource_count"] >= 2
+    assert metrics["summary"]["warning_issue_count"] >= 1
+    assert metrics["summary"]["verdict"] in {"Needs work", "High performance risk"}
+    assert any(issue["key"] == "blocking_js" for issue in metrics["issues"])
+    breakdown = {entry["type"]: entry for entry in metrics["resource_breakdown"]}
+    assert breakdown["html"]["bytes"] == metrics["transfer_size"]
+    assert breakdown["js"]["bytes"] == summary["js"]["bytes"]
+    assert breakdown["img"]["bytes"] == summary["img"]["bytes"]
+
+
+@pytest.mark.asyncio
+async def test_collect_performance_metrics_builds_verdict_and_third_party_issues(monkeypatch) -> None:
+    body = """
+    <html>
+      <head>
+        <link rel="stylesheet" href="https://cdn.third-party.com/app.css" />
+        <script src="https://cdn.third-party.com/app.js"></script>
+      </head>
+      <body>
+        <img src="https://cdn.third-party.com/hero.jpg" />
+      </body>
+    </html>
+    """
+
+    async def _fake_measure(targets):
+        return (
+            {"css": 180_000, "js": 820_000, "img": 1_700_000, "font": 0, "other": 0},
+            {
+                "css": {"https://cdn.third-party.com/app.css": 180_000},
+                "js": {"https://cdn.third-party.com/app.js": 820_000},
+                "img": {"https://cdn.third-party.com/hero.jpg": 1_700_000},
+                "font": {},
+                "other": {},
+            },
+        )
+
+    monkeypatch.setattr("silentfrog.perf_metrics._measure_remote_resources", _fake_measure)
+
+    resp = HttpResponse(
+        body=body,
+        url="https://example.com/page",
+        status=200,
+        headers={},
+        total_ms=640.0,
+        ttfb_ms=140.0,
+    )
+    soup = BeautifulSoup(body, "html.parser")
+
+    metrics = await _collect_performance_metrics(resp, soup)
+
+    assert metrics["summary"]["third_party_count"] == 3
+    assert metrics["summary"]["critical_issue_count"] >= 1
+    assert metrics["summary"]["verdict"] == "High performance risk"
+    issue_keys = {issue["key"] for issue in metrics["issues"]}
+    assert {"page_weight", "blocking_js", "js_weight", "image_weight", "third_party_weight"} <= issue_keys
 
 
 @pytest.mark.asyncio

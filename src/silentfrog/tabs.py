@@ -6,11 +6,15 @@ import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
+from .ai_visibility import ai_visibility_summary_tooltip
 from .content_quality import build_content_quality_rows
+from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_rows
 from .indexability import build_indexability_rows
+from .perf_metrics import performance_resource_tooltip, performance_summary_tooltip
 from .theme import current_theme
-from .crawl_types import ContentQuality, KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
+from .crawl_types import AiVisibilityPayload, ContentQuality, KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
 from .models import (
+    AiVisibilityModel,
     MetaModel,
     ImagesModel,
     RobotsModel,
@@ -24,6 +28,7 @@ from .models import (
     LinksModel,
     GenericModel,
     KeywordModel,
+    PerformanceIssueModel,
     SocialIssuesModel,
 )
 
@@ -59,11 +64,32 @@ class _TooltipTableView(QtWidgets.QTableView):
         return True
 
 
+class _TooltipHeaderView(QtWidgets.QHeaderView):
+    def event(self, event: QtCore.QEvent) -> bool:
+        if event.type() != QtCore.QEvent.Type.ToolTip:
+            return super().event(event)
+        help_event = cast(QtGui.QHelpEvent, event)
+        section = self.logicalIndexAt(help_event.pos())
+        model = self.model()
+        tooltip = model.headerData(section, self.orientation(), Qt.ItemDataRole.ToolTipRole) if model and section >= 0 else ""
+        if tooltip:
+            rect = QtCore.QRect(self.sectionViewportPosition(section), 0, self.sectionSize(section), self.height())
+            QtWidgets.QToolTip.showText(help_event.globalPos(), str(tooltip), self.viewport(), rect)
+            return True
+        QtWidgets.QToolTip.hideText()
+        event.ignore()
+        return True
+
+
 class TableTab(QtWidgets.QWidget):
     def __init__(self, sorting: bool = True, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._table = _TooltipTableView()
+        self._table.setHorizontalHeader(_TooltipHeaderView(QtCore.Qt.Orientation.Horizontal, self._table))
         self._table.setSortingEnabled(sorting)
+        header = _header(self._table)
+        header.setSectionsClickable(sorting)
+        header.setSortIndicatorShown(sorting)
         self._table.setViewportMargins(0, 0, 18, 18)
         self._table.setStyleSheet("QTableView { padding-right: 18px; padding-bottom: 18px; }")
         self._layout: QtWidgets.QVBoxLayout = QtWidgets.QVBoxLayout(self)
@@ -92,6 +118,9 @@ class TableTab(QtWidgets.QWidget):
         model.layoutChanged.emit()
         self._table.resizeColumnsToContents()
         self._table.setSortingEnabled(was_sorted)
+        header = _header(self._table)
+        header.setSectionsClickable(was_sorted)
+        header.setSortIndicatorShown(was_sorted)
 
 
 class SocialTab(QtWidgets.QWidget):
@@ -211,25 +240,16 @@ class ImagesTab(TableTab):
             updates = {row[0]: row for row in rows}
             merged: List[List[str]] = []
             for current in self._rows:
-                url = current[0]
-                update = updates.get(url)
-                if update:
-                    _, width, height, human, mime, cache = update
-                    if mime and mime != "-":
-                        current[3] = mime
-                    current[4] = str(width) if width else current[4]
-                    current[5] = str(height) if height else current[5]
-                    current[6] = human or current[6]
-                    current[7] = cache or current[7]
-                merged.append(list(current))
+                merged.append(merge_image_row(current, updates.get(current[0], [])))
             rows = merged
         else:
-            rows = [list(row) for row in rows]
+            rows = normalize_image_rows(rows)
         self._rows = rows
         model = ImagesModel(self._rows)
         self.set_model(model)
         _header(self.view).setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
         self.view.setColumnWidth(0, 280)
+        _header(self.view).setSectionResizeMode(DIAGNOSTIC_COL, QtWidgets.QHeaderView.Stretch)
 
     def rows(self) -> List[List[str]]:
         return [list(row) for row in self._rows]
@@ -315,11 +335,93 @@ class HreflangTab(TableTab):
 
 
 class AiTab(TableTab):
+    def __init__(self) -> None:
+        super().__init__(sorting=True)
+        self._summary = QtWidgets.QLabel()
+        self._summary.setWordWrap(True)
+        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._layout.insertWidget(0, self._summary)
+
     def update(self, rows: List[List[str]]) -> None:
-        headers = ["Agent", "Robots.txt OK", "Meta noai?", "Verdict"]
-        self.set_model(GenericModel(headers, rows))
-        _header(self.view).setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        _header(self.view).setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+        headers = ["Agent", "Token", "Robots.txt OK", "Nonstandard directive", "Google controls", "Verdict", "Notes"]
+        tooltips = [
+            "The human-readable crawler name. Use this to see which AI-facing agent the row refers to.",
+            "The robots.txt user-agent token Silentfrog checked for this crawler.",
+            "Whether robots.txt allows this crawler to fetch the current page URL.",
+            "Nonstandard AI directives found in meta or X-Robots-Tag, such as noai or noimageai. Silentfrog reports them, but official support should be verified vendor by vendor.",
+            "Google search controls that can limit reuse in Google Search features, such as nosnippet, noindex, none, or max-snippet.",
+            "Final AI access verdict for this crawler: Allowed, Limited, or Blocked.",
+            "Why the verdict was assigned, including matched robots.txt rules or restrictive meta directives.",
+        ]
+        self.set_model(GenericModel(headers, rows, tooltips))
+        verdicts = [str(row[5]).strip() for row in rows if len(row) > 5]
+        counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
+        self._summary.setText(
+            (
+                "<b>AI access summary:</b> "
+                f"Allowed {counts['Allowed']} &nbsp; "
+                f"Limited {counts['Limited']} &nbsp; "
+                f"Blocked {counts['Blocked']}"
+            )
+        )
+        header = _header(self.view)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(6, QtWidgets.QHeaderView.Stretch)
+
+
+class AiVisibilityTab(TableTab):
+    def __init__(self) -> None:
+        super().__init__(sorting=True)
+        self._summary = QtWidgets.QLabel()
+        self._summary.setWordWrap(True)
+        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._summary.setToolTip(ai_visibility_summary_tooltip())
+        self.view.setWordWrap(True)
+        self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
+        self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        self._layout.insertWidget(0, self._summary)
+
+    def update(self, data: object) -> None:
+        payload = data if isinstance(data, AiVisibilityPayload) else AiVisibilityPayload.from_raw(data)
+        summary = payload.summary
+        verdict = summary.verdict or "-"
+        self._summary.setText(
+            (
+                f"<b>Verdict:</b> {verdict} &nbsp; "
+                f"<b>Good:</b> {summary.good_count} &nbsp; "
+                f"<b>Warnings:</b> {summary.warning_count} &nbsp; "
+                f"<b>Critical:</b> {summary.critical_count}"
+            )
+        )
+        rows = [
+            [check.area, check.check, check.status.title(), check.details or "-", check.recommendation or "-"]
+            for check in payload.checks
+        ]
+        check_keys = [check.key or "ai_visibility" for check in payload.checks]
+        if not rows:
+            rows = [["Info", "No AI visibility data yet", "-", "Run an analysis to populate this tab.", "-"]]
+            check_keys = ["ai_visibility"]
+        headers = ["Area", "Check", "Status", "Details", "Recommendation"]
+        header_tooltips = [
+            "The audit area being evaluated: Access, Topic clarity, Answerability, Citation readiness, or Entity clarity.",
+            "The specific AI visibility check performed for this row.",
+            "The result for this check: Good, Warning, or Critical.",
+            "Evidence from the page that explains why this status was assigned.",
+            "The clearest next step to improve this AI visibility signal.",
+        ]
+        self.set_model(AiVisibilityModel(headers, rows, check_keys, header_tooltips))
+        header = _header(self.view)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
+        self.view.resizeRowsToContents()
 
 
 class KeywordsTab(TableTab):
@@ -472,69 +574,59 @@ class PerformanceTab(TableTab):
         self._is_rendering = True
 
         try:
-
-            total_bytes = metrics.transfer_size + sum(
-
-                info.get("bytes", 0) for info in metrics.resource_summary.values()
-
+            summary = metrics.summary
+            total_bytes = summary.total_page_bytes or (
+                metrics.transfer_size + sum(info.get("bytes", 0) for info in metrics.resource_summary.values())
             )
-
-            transfer_text = self._format_bytes(metrics.transfer_size)
-
+            transfer_text = self._format_bytes(summary.transfer_size or metrics.transfer_size)
             weight_text = self._format_bytes(total_bytes)
-
+            verdict = summary.verdict or "Good"
             summary_html = (
-
+                f"<b>Verdict:</b> {verdict} &nbsp; "
                 f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
-
                 f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
-
                 f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
-
                 f"<b>Transfer:</b> {transfer_text} &nbsp; "
-
-                f"<b>Page weight:</b> {weight_text}"
-
+                f"<b>Page weight:</b> {weight_text} &nbsp; "
+                f"<b>Resources:</b> {summary.total_resource_count or sum(info.get('count', 0) for info in metrics.resource_summary.values())} &nbsp; "
+                f"<b>Third-party:</b> {self._format_bytes(summary.third_party_bytes)}"
             )
-
             self._summary.setText(summary_html)
+            self._summary.setToolTip(performance_summary_tooltip())
 
-
-
+            resource_bytes = {
+                row.resource_type: row.bytes for row in metrics.resource_breakdown
+            } if metrics.resource_breakdown else {
+                name: info.get("bytes", 0) for name, info in metrics.resource_summary.items()
+            }
             script_html = (
-
                 f"<b>Blocking JS:</b> {metrics.scripts.blocking_count} "
-
                 f"({self._format_bytes(metrics.scripts.blocking_bytes)}) &nbsp; "
-
                 f"<b>Async/Deferred JS:</b> {metrics.scripts.async_count} "
-
-                f"({self._format_bytes(metrics.scripts.async_bytes)})"
-
+                f"({self._format_bytes(metrics.scripts.async_bytes)})<br/>"
+                f"<b>CSS:</b> {self._format_bytes(resource_bytes.get('css', 0))} &nbsp; "
+                f"<b>JS:</b> {self._format_bytes(resource_bytes.get('js', 0))} &nbsp; "
+                f"<b>Images:</b> {self._format_bytes(resource_bytes.get('img', 0))} &nbsp; "
+                f"<b>Fonts:</b> {self._format_bytes(resource_bytes.get('font', 0))}"
             )
-
             self._scripts.setText(script_html)
-
-
+            self._scripts.setToolTip(performance_resource_tooltip())
 
             severity_order = {"critical": 3, "warning": 2, "info": 1, "ok": 0}
-
             dominant = "ok"
-
-            if metrics.opportunity_details:
-
+            if summary.critical_issue_count > 0:
+                dominant = "critical"
+            elif summary.warning_issue_count > 0:
+                dominant = "warning"
+            elif summary.info_issue_count > 0:
+                dominant = "info"
+            elif metrics.opportunity_details:
                 dominant = max(
-
                     (detail.severity.lower() or "info" for detail in metrics.opportunity_details),
-
                     key=lambda sev: severity_order.get(sev, 1),
-
                     default="info",
-
                 )
-
             elif metrics.opportunities:
-
                 dominant = "info"
 
 
@@ -591,29 +683,29 @@ class PerformanceTab(TableTab):
 
 
 
-            rows: List[List[str]] = []
+            issue_rows: List[List[str]] = []
+            issue_keys: List[str] = []
+            for issue in metrics.issues:
+                issue_rows.append(
+                    [
+                        issue.message or "-",
+                        issue.severity.title(),
+                        issue.evidence or "-",
+                        issue.recommendation or "-",
+                    ]
+                )
+                issue_keys.append(issue.key)
+            if not issue_rows:
+                issue_rows = [["No major performance issues detected", "OK", "-", "-"]]
+                issue_keys = [""]
 
-            for r_type, info in metrics.resource_summary.items():
-
-                byte_value = info.get("bytes", 0)
-
-                rows.append([r_type.upper(), str(info.get("count", 0)), self._format_bytes(byte_value)])
-
-            if not rows:
-
-                rows = [["-", "-", "-"]]
-
-            model = GenericModel(["Resource", "Count", "Bytes"], rows)
-
+            model = PerformanceIssueModel(["Issue", "Severity", "Evidence", "Recommendation"], issue_rows, issue_keys)
             self.set_model(model)
-
             header = _header(self.view)
-
             header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-
             header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-
-            header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+            header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
 
 
 
@@ -684,23 +776,14 @@ class PerformanceTab(TableTab):
 
 
             offenders_rows: List[List[str]] = []
-
             for offender in metrics.top_offenders:
-
                 offenders_rows.append([
-
                     offender.resource_type.upper() or "-",
-
                     offender.url or "-",
-
                     "Blocking" if offender.blocking else "Async",
-
                     self._format_bytes(offender.bytes),
-
                 ])
-
             if not offenders_rows:
-
                 offenders_rows = [["-", "-", "-", "-"]]
 
             offender_model = GenericModel(["Type", "URL", "Script", "Bytes"], offenders_rows)
@@ -830,6 +913,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             "blocks": block_models,
             "syntax_counts": syntax_counts,
             "type_counts": type_counts,
+            "eligibility": list(report.eligibility),
             "issues": list(summary.errors),
             "total": total,
         }
@@ -879,6 +963,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             summary = self._state["summary"]
             syntax_counts = self._state["syntax_counts"]
             type_counts = self._state["type_counts"]
+            eligibility = self._state["eligibility"]
             total = self._state["total"]
             issues = list(dict.fromkeys(self._state["issues"]))
 
@@ -909,6 +994,7 @@ class SchemaTab(QtWidgets.QTextEdit):
                 f"<div style='font-weight:bold;color:{header_color}'>Structured data: {total} items &nbsp; "
                 f"(Syntax: {syntax_text}){type_text}</div>"
             )
+            eligibility_html = self._render_eligibility(eligibility, theme)
 
             if issues:
                 items_html = "".join(f"<li>{_html.escape(item)}</li>" for item in issues)
@@ -917,9 +1003,49 @@ class SchemaTab(QtWidgets.QTextEdit):
                 issue_html = ""
 
             block_html = "".join(self._render_block(block, theme) for block in self._state["blocks"])
-            self.setHtml(header + issue_html + block_html)
+            self.setHtml(header + eligibility_html + issue_html + block_html)
         finally:
             self._is_rendering = False
+
+    @staticmethod
+    def _render_eligibility(rows: List[Any], theme: Dict[str, str]) -> str:
+        if not rows:
+            return ""
+        status_colors = {
+            "eligible": theme["ok"],
+            "incomplete": theme["warn"],
+            "not detected": theme["foreground"],
+        }
+        header = (
+            "<div style='margin-top:10px;font-weight:bold'>Eligibility summary</div>"
+            "<table style='width:100%;border-collapse:collapse;margin-top:6px'>"
+            "<tr>"
+            f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Type</th>"
+            f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Detected</th>"
+            f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Eligibility</th>"
+            f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Missing fields</th>"
+            f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Warnings</th>"
+            "</tr>"
+        )
+        body = []
+        for row in rows:
+            status = str(getattr(row, "eligibility", "")).strip()
+            status_color = status_colors.get(status.lower(), theme["foreground"])
+            detected = "Yes" if getattr(row, "detected", False) else "No"
+            count = int(getattr(row, "count", 0) or 0)
+            detected_text = detected if count <= 1 else f"{detected} ({count} blocks)"
+            missing_fields = getattr(row, "missing_fields", []) or []
+            warnings = getattr(row, "warnings", []) or []
+            body.append(
+                "<tr>"
+                f"<td style='border:1px solid {theme['block_border']};padding:4px'>{_html.escape(str(getattr(row, 'schema_type', '')))}</td>"
+                f"<td style='border:1px solid {theme['block_border']};padding:4px'>{_html.escape(detected_text)}</td>"
+                f"<td style='border:1px solid {theme['block_border']};padding:4px;color:{status_color};font-weight:bold'>{_html.escape(status)}</td>"
+                f"<td style='border:1px solid {theme['block_border']};padding:4px'>{_html.escape(', '.join(missing_fields) or '-')}</td>"
+                f"<td style='border:1px solid {theme['block_border']};padding:4px'>{_html.escape('; '.join(warnings) or '-')}</td>"
+                "</tr>"
+            )
+        return header + "".join(body) + "</table>"
 
     @staticmethod
     def _fallback_syntax_counts(blocks: List[Any]) -> Dict[str, int]:
@@ -1085,6 +1211,7 @@ __all__ = [
     "RobotsTab",
     "HreflangTab",
     "AiTab",
+    "AiVisibilityTab",
     "KeywordsTab",
     "PerformanceTab",
     "SchemaTab",
