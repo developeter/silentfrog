@@ -49,6 +49,22 @@ def _parse_int(value: Any) -> int | None:
         return None
 
 
+def _to_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _to_int(value: Any) -> int:
+    try:
+        if isinstance(value, bool):
+            return 0
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalize_ai_visibility_status(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     mapping = {
@@ -65,6 +81,68 @@ def _normalize_ai_visibility_status(value: Any) -> str:
         "blocked": "critical",
     }
     return mapping.get(normalized, "warning")
+
+
+_REQUIRED_CRAWL_KEYS = {
+    "meta",
+    "headers",
+    "images",
+    "links",
+    "schema",
+    "canonical",
+    "redirect",
+    "robots",
+    "meta_robots",
+    "hreflang",
+    "ai_crawl",
+    "serp",
+    "serp_audit",
+    "keywords",
+}
+
+
+def _require_crawl_keys(data: Mapping[str, Any]) -> None:
+    missing = sorted(_REQUIRED_CRAWL_KEYS - set(data.keys()))
+    if missing:
+        raise ValueError(f"Missing crawl keys: {', '.join(missing)}")
+
+
+def _rows_section(data: Mapping[str, Any], key: str) -> List[List[str]]:
+    return _normalize_rows(data[key], label=key)
+
+
+def _mapping_section(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    return _ensure_mapping(data[key], key)
+
+
+def _optional_mapping_section(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    raw = data.get(key, {})
+    if not isinstance(raw, Mapping):
+        return {}
+    return _ensure_mapping(raw, key)
+
+
+def _keyword_entries(raw: Any) -> List["KeywordEntry"]:
+    if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
+        return []
+    return [KeywordEntry.from_raw(item) for item in raw if isinstance(item, Mapping)]
+
+
+def _mapping_items(raw: Any) -> List[Mapping[str, Any]]:
+    if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
+        return []
+    return [item for item in raw if isinstance(item, Mapping)]
+
+
+def _string_items(raw: Any) -> List[str]:
+    if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
+        return []
+    values: List[str] = []
+    for item in raw:
+        text = str(item).strip()
+        if text:
+            values.append(text)
+    return values
 
 
 @dataclass(frozen=True)
@@ -146,73 +224,41 @@ class PerformanceMetrics:
             opportunity_details=[],
         )
 
+    @staticmethod
+    def _resource_summary(raw: Any) -> Dict[str, Dict[str, int]]:
+        if not isinstance(raw, Mapping):
+            return {}
+        summary: Dict[str, Dict[str, int]] = {}
+        for key, item in raw.items():
+            if not isinstance(item, Mapping):
+                continue
+            summary[str(key)] = {
+                "count": _to_int(item.get("count", 0)),
+                "bytes": _to_int(item.get("bytes", 0)),
+            }
+        return summary
+
+    @staticmethod
+    def _model_list(raw: Any, factory):
+        return [factory(item) for item in _mapping_items(raw)]
+
     @classmethod
     def from_raw(cls, value: Any) -> "PerformanceMetrics":
         if not isinstance(value, Mapping):
             return cls.empty()
 
-        def _to_float(val: Any) -> float:
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return 0.0
-
-        def _to_int(val: Any) -> int:
-            try:
-                if isinstance(val, bool):
-                    return 0
-                return int(val)
-            except (TypeError, ValueError):
-                return 0
-
-        summary_raw = value.get('resource_summary')
-        summary: Dict[str, Dict[str, int]] = {}
-        if isinstance(summary_raw, Mapping):
-            for key, item in summary_raw.items():
-                if isinstance(item, Mapping):
-                    summary[str(key)] = {
-                        'count': _to_int(item.get('count', 0)),
-                        'bytes': _to_int(item.get('bytes', 0)),
-                    }
-        opp_raw = value.get('opportunities', [])
-        opp: List[str] = []
-        if isinstance(opp_raw, Iterable) and not isinstance(opp_raw, (str, bytes)):
-            for entry in opp_raw:
-                text = str(entry).strip()
-                if text:
-                    opp.append(text)
-
-        offender_raw = value.get("top_offenders", [])
-        offenders: List[PerformanceOffender] = []
-        if isinstance(offender_raw, Iterable):
-            for item in offender_raw:
-                if isinstance(item, Mapping):
-                    offenders.append(PerformanceOffender.from_raw(item))
-
+        summary = cls._resource_summary(value.get("resource_summary"))
+        opp = _string_items(value.get("opportunities", []))
+        offenders = cls._model_list(value.get("top_offenders", []), PerformanceOffender.from_raw)
         scripts = PerformanceScripts.from_raw(value.get("scripts"))
+        breakdown = cls._model_list(value.get("resource_breakdown", []), PerformanceResourceBreakdown.from_raw)
+        issues = cls._model_list(value.get("issues", []), PerformanceIssue.from_raw)
+        opportunity_details = cls._model_list(
+            value.get("opportunity_details", []),
+            PerformanceOpportunity.from_raw,
+        )
 
-        breakdown_raw = value.get("resource_breakdown", [])
-        breakdown: List[PerformanceResourceBreakdown] = []
-        if isinstance(breakdown_raw, Iterable) and not isinstance(breakdown_raw, (str, bytes)):
-            for item in breakdown_raw:
-                if isinstance(item, Mapping):
-                    breakdown.append(PerformanceResourceBreakdown.from_raw(item))
-
-        issues_raw = value.get("issues", [])
-        issues: List[PerformanceIssue] = []
-        if isinstance(issues_raw, Iterable) and not isinstance(issues_raw, (str, bytes)):
-            for item in issues_raw:
-                if isinstance(item, Mapping):
-                    issues.append(PerformanceIssue.from_raw(item))
-
-        opportunity_details_raw = value.get("opportunity_details", [])
-        opportunity_details: List[PerformanceOpportunity] = []
-        if isinstance(opportunity_details_raw, Iterable):
-            for item in opportunity_details_raw:
-                if isinstance(item, Mapping):
-                    opportunity_details.append(PerformanceOpportunity.from_raw(item))
-
-        transfer_size = _to_int(value.get('transfer_size', 0))
+        transfer_size = _to_int(value.get("transfer_size", 0))
         if not breakdown:
             breakdown = cls._resource_breakdown_from_summary(summary, transfer_size)
         summary_model = PerformanceSummary.from_raw(value.get("summary"))
@@ -220,10 +266,10 @@ class PerformanceMetrics:
             summary_model = cls._summary_from_legacy(summary, transfer_size, issues, opportunity_details)
 
         return cls(
-            nav_ttfb_ms=_to_float(value.get('nav_ttfb_ms', 0.0)),
-            nav_total_ms=_to_float(value.get('nav_total_ms', 0.0)),
+            nav_ttfb_ms=_to_float(value.get("nav_ttfb_ms", 0.0)),
+            nav_total_ms=_to_float(value.get("nav_total_ms", 0.0)),
             transfer_size=transfer_size,
-            status=_to_int(value.get('status', 0)),
+            status=_to_int(value.get("status", 0)),
             resource_summary=summary,
             resource_breakdown=breakdown,
             summary=summary_model,
@@ -1141,51 +1187,27 @@ class CrawlPayload:
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
-        required = {
-            "meta",
-            "headers",
-            "images",
-            "links",
-            "schema",
-            "canonical",
-            "redirect",
-            "robots",
-            "meta_robots",
-            "hreflang",
-            "ai_crawl",
-            "serp",
-            "serp_audit",
-            "keywords",
-        }
-        missing = sorted(required - set(data.keys()))
-        if missing:
-            raise ValueError(f"Missing crawl keys: {', '.join(missing)}")
-
-        canonical_raw = _ensure_mapping(data["canonical"], "canonical")
-        redirect_raw = _ensure_mapping(data["redirect"], "redirect")
-        serp_raw = _ensure_mapping(data["serp"], "serp")
-        serp_audit_raw = _ensure_mapping(data["serp_audit"], "serp_audit")
-        social_raw = _ensure_mapping(data.get("social", {}), "social") if isinstance(data, Mapping) else {}
+        _require_crawl_keys(data)
 
         return cls(
-            meta=_normalize_rows(data["meta"], label="meta"),
-            headers=_normalize_rows(data["headers"], label="headers"),
-            images=normalize_image_rows(_normalize_rows(data["images"], label="images")),
-            links=_normalize_rows(data["links"], label="links"),
+            meta=_rows_section(data, "meta"),
+            headers=_rows_section(data, "headers"),
+            images=normalize_image_rows(_rows_section(data, "images")),
+            links=_rows_section(data, "links"),
             schema=StructuredDataPayload.from_raw(data["schema"]),
-            canonical=CanonicalInfo.from_raw(canonical_raw),
-            redirect=RedirectInfo.from_raw(redirect_raw),
+            canonical=CanonicalInfo.from_raw(_mapping_section(data, "canonical")),
+            redirect=RedirectInfo.from_raw(_mapping_section(data, "redirect")),
             robots=_normalize_robots(data["robots"]),
             meta_robots=str(data.get("meta_robots", "")),
-            hreflang=_normalize_rows(data["hreflang"], label="hreflang"),
-            ai_crawl=_normalize_rows(data["ai_crawl"], label="ai_crawl"),
-            serp=SerpPreview.from_raw(serp_raw),
-            serp_audit=SerpAudit.from_raw(serp_audit_raw),
-            keywords=[KeywordEntry.from_raw(item) for item in data.get("keywords", []) if isinstance(item, Mapping)],
+            hreflang=_rows_section(data, "hreflang"),
+            ai_crawl=_rows_section(data, "ai_crawl"),
+            serp=SerpPreview.from_raw(_mapping_section(data, "serp")),
+            serp_audit=SerpAudit.from_raw(_mapping_section(data, "serp_audit")),
+            keywords=_keyword_entries(data.get("keywords", [])),
             content_quality=ContentQuality.from_raw(data.get("content_quality", {})),
             ai_visibility=AiVisibilityPayload.from_raw(data.get("ai_visibility", {})),
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
-            social=SocialPayload.from_raw(social_raw),
+            social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
         )
 
     def to_mapping(self) -> Dict[str, Any]:

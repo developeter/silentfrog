@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 
 from silentfrog.http_client import HttpResponse  # type: ignore[reportMissingImports]
 from silentfrog.perf_metrics import (  # type: ignore[reportMissingImports]
+    _build_performance_issues,
     _collect_performance_metrics,
     _data_uri_size,
     _format_bytes,
@@ -30,6 +31,43 @@ def test_data_uri_size_and_format_bytes() -> None:
     assert "Blocking JavaScript" in performance_issue_tooltip("blocking_js")
     assert "Third-party" in performance_summary_tooltip()
     assert "Blocking JS" in performance_resource_tooltip()
+
+
+def test_build_performance_issues_keeps_thresholds_and_order() -> None:
+    resources = {
+        "css": {"count": 4, "bytes": 130_000},
+        "js": {"count": 7, "bytes": 710_000},
+        "img": {"count": 3, "bytes": 1_600_000},
+        "font": {"count": 1, "bytes": 40_000},
+        "other": {"count": 0, "bytes": 0},
+    }
+    script_stats = {
+        "blocking": {"count": 2, "bytes": 360_000},
+        "async": {"count": 5, "bytes": 80_000},
+    }
+    summary = {
+        "total_page_bytes": 2_100_000,
+        "total_resource_count": 28,
+        "third_party_bytes": 700_000,
+        "third_party_count": 6,
+    }
+
+    issues = _build_performance_issues(resources, script_stats, summary)
+
+    assert [issue["key"] for issue in issues] == [
+        "page_weight",
+        "blocking_js",
+        "js_weight",
+        "css_weight",
+        "image_weight",
+        "request_count",
+        "third_party_weight",
+    ]
+    assert issues[0]["severity"] == "critical"
+    assert issues[1]["severity"] == "critical"
+    assert issues[3]["severity"] == "warning"
+    assert issues[5]["severity"] == "warning"
+    assert issues[6]["severity"] == "critical"
 
 
 @pytest.mark.asyncio

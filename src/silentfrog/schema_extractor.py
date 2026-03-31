@@ -6,6 +6,7 @@ import os
 import re
 import html as _html
 from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 import bs4
@@ -112,8 +113,7 @@ def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
         errors.append("missing name")
     if not obj.get("description"):
         errors.append("missing description")
-    image = obj.get("image")
-    if not image:
+    if not obj.get("image"):
         errors.append("missing image")
 
     offers = obj.get("offers")
@@ -121,34 +121,31 @@ def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
         errors.append("missing offers")
         return errors
 
-    offers_list = _schema_normalize_entries(offers)
+    have_price, have_currency = _schema_offer_flags(_schema_normalize_entries(offers))
+    if not have_price:
+        errors.append("missing offers.price")
+    if not have_currency:
+        errors.append("missing offers.priceCurrency")
+    return errors
+
+
+def _schema_offer_flags(offers: List[Any]) -> tuple[bool, bool]:
     have_price = False
     have_currency = False
-    for offer in offers_list:
+    for offer in offers:
         if not isinstance(offer, dict):
             continue
-        offer_type = _schema_primary_type(offer.get("@type")).lower()
         price_spec = offer.get("priceSpecification")
         if isinstance(price_spec, dict):
             if price_spec.get("price") or price_spec.get("minPrice") or price_spec.get("lowPrice"):
                 have_price = True
             if price_spec.get("priceCurrency"):
                 have_currency = True
-        price_value = offer.get("price") or offer.get("lowPrice") or offer.get("highPrice")
-        if price_value:
+        if offer.get("price") or offer.get("lowPrice") or offer.get("highPrice"):
             have_price = True
         if offer.get("priceCurrency"):
             have_currency = True
-        if offer_type == "aggregateoffer":
-            if offer.get("lowPrice") or offer.get("highPrice"):
-                have_price = True
-            if offer.get("priceCurrency"):
-                have_currency = True
-    if not have_price:
-        errors.append("missing offers.price")
-    if not have_currency:
-        errors.append("missing offers.priceCurrency")
-    return errors
+    return have_price, have_currency
 
 
 def _schema_validate_article(obj: Dict[str, Any]) -> List[str]:
@@ -210,6 +207,15 @@ _SCHEMA_VALIDATORS: Dict[str, Any] = {
 }
 
 
+@dataclass
+class _SchemaState:
+    collected: list[Dict[str, Any]] = field(default_factory=list)
+    seen: set[str] = field(default_factory=set)
+    syntax_counter: Counter[str] = field(default_factory=Counter)
+    type_counter: Counter[str] = field(default_factory=Counter)
+    fallback_raw: list[str] = field(default_factory=list)
+
+
 def _unique_text(values: List[str]) -> List[str]:
     ordered: List[str] = []
     seen: set[str] = set()
@@ -268,315 +274,345 @@ def _schema_build_eligibility(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
     return rows
 
 
-def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
-    syntaxes = ["json-ld", "microdata", "opengraph", "microformat", "rdfa"]
-    collected: list[Dict[str, Any]] = []
-    seen: set[str] = set()
-    syntax_counter: Counter[str] = Counter()
-    type_counter: Counter[str] = Counter()
-    fallback_raw: list[str] = []
+def _schema_add_flat(state: _SchemaState, obj: Dict[str, Any], via: str) -> None:
+    graph = obj.get("@graph")
+    if isinstance(graph, list) and graph:
+        for node in graph:
+            if isinstance(node, dict):
+                _schema_add_flat(state, node, via)
+        return
+    signature = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+    if signature in state.seen:
+        return
+    state.seen.add(signature)
+    enriched = dict(obj)
+    enriched["_extracted_via"] = via
+    state.collected.append(enriched)
+    state.syntax_counter[via] += 1
+    primary_type = _schema_primary_type(enriched.get("@type"))
+    if primary_type:
+        state.type_counter[primary_type] += 1
 
-    def _add_flat(obj: dict, via: str) -> None:
-        g = obj.get("@graph")
-        if isinstance(g, list) and g:
-            for n in g:
-                if isinstance(n, dict):
-                    _add_flat(n, via)
-            return
-        sig = json.dumps(obj, sort_keys=True, ensure_ascii=False)
-        if sig in seen:
-            return
-        seen.add(sig)
-        enriched = dict(obj)
-        enriched["_extracted_via"] = via
-        collected.append(enriched)
-        syntax_counter[via] += 1
-        primary_type = _schema_primary_type(enriched.get("@type"))
-        if primary_type:
-            type_counter[primary_type] += 1
 
-    def _scrub_jsonish(s: str) -> str:
-        s = s.lstrip("\ufeff").strip()
-        s = re.sub(r"(?s)<!--.*?-->", "", s)
-        s = re.sub(r"(?s)/\*.*?\*/", "", s)
-        s = re.sub(r"(?m)^\s*//.*$", "", s)
-        s = re.sub(r",\s*([}\]])", r"\1", s)
-        return s
+def _scrub_jsonish(text: str) -> str:
+    cleaned = text.lstrip("\ufeff").strip()
+    cleaned = re.sub(r"(?s)<!--.*?-->", "", cleaned)
+    cleaned = re.sub(r"(?s)/\*.*?\*/", "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*//.*$", "", cleaned)
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    return cleaned
 
-    def _safe_load(s: str) -> Any:
+
+def _safe_load_json(text: str) -> Any:
+    variants = (text, _scrub_jsonish(text), _scrub_jsonish(_html.unescape(text)))
+    for candidate in variants:
         try:
-            return json.loads(s)
+            return json.loads(candidate)
         except Exception:
-            pass
-        try:
-            return json.loads(_scrub_jsonish(s))
-        except Exception:
-            pass
-        try:
-            return json.loads(_scrub_jsonish(_html.unescape(s)))
-        except Exception:
-            return None
+            continue
+    return None
 
-    def _walk_jsonld(obj: Any) -> list[dict]:
-        out: list[dict] = []
-        stack = [obj]
-        while stack:
-            cur = stack.pop()
-            if isinstance(cur, dict):
-                if ("@context" in cur) or ("@type" in cur) or ("@graph" in cur):
-                    out.append(cur)
-                stack.extend(cur.values())
-            elif isinstance(cur, list):
-                stack.extend(cur)
-            elif isinstance(cur, str) and ("@context" in cur or "@type" in cur):
-                loaded = _safe_load(cur)
-                if isinstance(loaded, (list, dict)):
-                    stack.append(loaded)
-        return out
 
-    def _is_within_other(scope: bs4.element.Tag, node: bs4.element.Tag, attr: str) -> bool:
-        p = node.parent
-        while isinstance(p, bs4.element.Tag) and p is not scope:
-            if p.has_attr(attr):
-                return True
-            p = p.parent
-        return False
+def _walk_jsonld(obj: Any) -> list[dict]:
+    out: list[dict] = []
+    stack = [obj]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            if any(key in current for key in ("@context", "@type", "@graph")):
+                out.append(current)
+            stack.extend(current.values())
+            continue
+        if isinstance(current, list):
+            stack.extend(current)
+            continue
+        if not isinstance(current, str) or ("@context" not in current and "@type" not in current):
+            continue
+        loaded = _safe_load_json(current)
+        if isinstance(loaded, (list, dict)):
+            stack.append(loaded)
+    return out
 
-    def _microdata_bs(soup: BeautifulSoup) -> list[dict]:
-        out: list[dict] = []
-        for scope in soup.find_all(attrs={"itemscope": True}):
-            if not isinstance(scope, Tag):
+
+def _find_json_objects(text: str) -> list[str]:
+    out: list[str] = []
+    depth = 0
+    start = -1
+    quote = ""
+    escaped = False
+    for index, char in enumerate(text):
+        if quote:
+            escaped = char == "\\" and not escaped
+            if char == quote and not escaped:
+                quote = ""
+            continue
+        if char in ("'", '"'):
+            quote = char
+            escaped = False
+            continue
+        if char == "{":
+            depth += 1
+            if depth == 1:
+                start = index
+            continue
+        if char != "}":
+            continue
+        depth -= 1
+        if depth == 0 and start >= 0:
+            out.append(text[start : index + 1])
+    return out
+
+
+def _is_schema_jsonld_script(node: Tag) -> bool:
+    tag_type = _attr(node, "type").lower().strip()
+    if "ld+json" in tag_type or tag_type in ("application/jsonld", "application/json+ld"):
+        return True
+    ident = _attr(node, "id")
+    class_attr = node.get("class") or []
+    class_text = " ".join(class_attr) if isinstance(class_attr, (list, tuple)) else str(class_attr)
+    return "schema" in f"{ident} {class_text}".lower()
+
+
+def _is_within_other(scope: Tag, node: Tag, attr: str) -> bool:
+    parent = node.parent
+    while isinstance(parent, Tag) and parent is not scope:
+        if parent.has_attr(attr):
+            return True
+        parent = parent.parent
+    return False
+
+
+def _microdata_bs(soup: BeautifulSoup) -> list[dict]:
+    out: list[dict] = []
+    for scope in soup.find_all(attrs={"itemscope": True}):
+        if not isinstance(scope, Tag):
+            continue
+        type_tokens = _attr(scope, "itemtype").split()
+        item: dict[str, Any] = {"@type": type_tokens[0] if type_tokens else "Thing"}
+        for prop in scope.find_all(attrs={"itemprop": True}):
+            if not isinstance(prop, Tag) or _is_within_other(scope, prop, "itemscope"):
                 continue
-            typ_tokens = _attr(scope, "itemtype").split()
-            item_type = typ_tokens[0] if typ_tokens else "Thing"
-            item: dict[str, Any] = {"@type": item_type}
-            for prop in scope.find_all(attrs={"itemprop": True}):
-                if not isinstance(prop, Tag):
-                    continue
-                if _is_within_other(scope, prop, "itemscope"):
-                    continue
-                key_tokens = _attr(prop, "itemprop").split()
-                raw_content = _attr(prop, "content")
-                raw_href = _attr(prop, "href")
-                raw_src = _attr(prop, "src")
-                value = raw_content or raw_href or raw_src or " ".join(prop.stripped_strings)
-                for key in key_tokens:
-                    if key:
-                        item[key] = value
-            out.append(item)
-        return out
-
-    def _rdfa_bs(soup: BeautifulSoup) -> list[dict]:
-        out: list[dict] = []
-        for root in soup.find_all(attrs={"typeof": True}):
-            if not isinstance(root, Tag):
-                continue
-            typ = _attr(root, "typeof").strip()
-            vocab = _attr(root, "vocab").strip()
-            item: dict[str, Any] = {"@type": typ or (vocab or "Thing")}
-            for prop in root.find_all(attrs={"property": True}):
-                if not isinstance(prop, Tag):
-                    continue
-                if _is_within_other(root, prop, "typeof"):
-                    continue
-                key = _attr(prop, "property").strip()
-                raw_content = _attr(prop, "content")
-                raw_href = _attr(prop, "href")
-                raw_src = _attr(prop, "src")
-                value = raw_content or raw_href or raw_src or " ".join(prop.stripped_strings)
+            value = _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            for key in _attr(prop, "itemprop").split():
                 if key:
                     item[key] = value
-            out.append(item)
-        return out
+        out.append(item)
+    return out
+
+
+def _rdfa_bs(soup: BeautifulSoup) -> list[dict]:
+    out: list[dict] = []
+    for root in soup.find_all(attrs={"typeof": True}):
+        if not isinstance(root, Tag):
+            continue
+        schema_type = _attr(root, "typeof").strip() or _attr(root, "vocab").strip() or "Thing"
+        item: dict[str, Any] = {"@type": schema_type}
+        for prop in root.find_all(attrs={"property": True}):
+            if not isinstance(prop, Tag) or _is_within_other(root, prop, "typeof"):
+                continue
+            key = _attr(prop, "property").strip()
+            if not key:
+                continue
+            value = _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            item[key] = value
+        out.append(item)
+    return out
+
+
+def _collect_manual_jsonld(state: _SchemaState, html_text: str) -> None:
+    soup = BeautifulSoup(html_text, "html.parser")
+    parsed_count = 0
+    raw_bad = 0
+    for node in soup.find_all("script"):
+        if not isinstance(node, Tag) or not _is_schema_jsonld_script(node):
+            continue
+        raw = (node.string or node.get_text() or "").strip()
+        if not raw:
+            continue
+        parsed = _safe_load_json(raw)
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict):
+                    _schema_add_flat(state, item, "json-ld")
+            parsed_count += 1
+            continue
+        if isinstance(parsed, dict):
+            _schema_add_flat(state, parsed, "json-ld")
+            parsed_count += 1
+            continue
+        state.collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
+        raw_bad += 1
+    _log_schema(f"manual json-ld blocks parsed={parsed_count}, raw_bad={raw_bad}")
+
+
+def _collect_heuristic_jsonld(state: _SchemaState, html_text: str) -> None:
+    soup = BeautifulSoup(html_text, "html.parser")
+    hits = 0
+    for script_node in soup.find_all("script"):
+        script = as_tag(script_node)
+        raw = str(getattr(script, "string", None) or script.get_text() or "") if script else ""
+        if not raw:
+            continue
+        parsed = _safe_load_json(raw)
+        if isinstance(parsed, (list, dict)):
+            for item in _walk_jsonld(parsed):
+                _schema_add_flat(state, item, "json-ld")
+                hits += 1
+            continue
+        for chunk in _find_json_objects(raw):
+            parsed_chunk = _safe_load_json(chunk)
+            if not isinstance(parsed_chunk, (list, dict)):
+                continue
+            for item in _walk_jsonld(parsed_chunk):
+                _schema_add_flat(state, item, "json-ld")
+                hits += 1
+    if hits:
+        _log_schema(f"heuristic nested json-ld nodes found={hits}")
+
+
+def _extract_extruct(html_text: str, response_url: str, syntaxes: List[str]) -> dict[str, Any]:
+    def _extract_lxml() -> dict[str, Any]:
+        data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+        _log_schema("extruct:lxml ok")
+        return data
+
+    def _extract_html5lib() -> dict[str, Any]:
+        from extruct.utils import parse_html as _parse_html  # type: ignore[import]
+
+        tree = _parse_html(html_text, treebuilder="html5lib")
+        data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
+        _log_schema("extruct:html5lib ok")
+        return data
 
     try:
-        soup = BeautifulSoup(html_text, "html.parser")
-        ok = bad = 0
-        for node in soup.find_all("script"):
-            if not isinstance(node, Tag):
-                continue
-            tag_type = _attr(node, "type").lower().strip()
-            is_ld = "ld+json" in tag_type or tag_type in ("application/jsonld", "application/json+ld")
-            ident = _attr(node, "id")
-            class_attr = node.get("class") or []
-            class_text = " ".join(class_attr) if isinstance(class_attr, (list, tuple)) else str(class_attr)
-            hint = "schema" in f"{ident} {class_text}".lower()
-            if not (is_ld or hint):
-                continue
-            raw = (node.string or node.get_text() or "").strip()
-            if not raw:
-                continue
-            parsed = _safe_load(raw)
-            if parsed is None:
-                collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
-                bad += 1
-                continue
-            if isinstance(parsed, list):
-                for obj in parsed:
-                    if isinstance(obj, dict):
-                        _add_flat(obj, "json-ld")
-            elif isinstance(parsed, dict):
-                _add_flat(parsed, "json-ld")
-            else:
-                collected.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
-                bad += 1
-                continue
-            ok += 1
-        _log_schema(f"manual json-ld blocks parsed={ok}, raw_bad={bad}")
-    except Exception as e:
-        _log_schema(f"manual json-ld error: {e!r}")
-
-    def _find_json_objects(text: str) -> list[str]:
-        out: list[str] = []
-        depth = 0
-        start = -1
-        in_str = ""
-        esc = False
-        for i, ch in enumerate(text):
-            if in_str:
-                esc = ch == "\\" and not esc
-                if ch == in_str and not esc:
-                    in_str = ""
-                continue
-            if ch in ("'", '"'):
-                in_str = ch
-                esc = False
-                continue
-            if ch == "{":
-                depth += 1
-                start = i if depth == 1 else start
-                continue
-            if ch == "}":
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    out.append(text[start : i + 1])
-        return out
-
+        data = _extract_lxml()
+    except Exception as exc:
+        _log_schema(f"extruct:lxml error: {exc!r}")
+        data = {}
+    if any(data.get(key) for key in syntaxes):
+        return data
     try:
-        soup2 = BeautifulSoup(html_text, "html.parser")
-        hits = 0
-        for script_node in soup2.find_all("script"):
-            script = as_tag(script_node)
-            raw = str(getattr(script, "string", None) or script.get_text() or "") if script else ""
-            if not raw:
-                continue
-            parsed = _safe_load(raw)
-            if isinstance(parsed, (list, dict)):
-                for item in _walk_jsonld(parsed):
-                    _add_flat(item, "json-ld")
-                    hits += 1
-                continue
-            for chunk in _find_json_objects(raw):
-                parsed2 = _safe_load(chunk)
-                if isinstance(parsed2, (list, dict)):
-                    for item in _walk_jsonld(parsed2):
-                        _add_flat(item, "json-ld")
-                        hits += 1
-        if hits:
-            _log_schema(f"heuristic nested json-ld nodes found={hits}")
-    except Exception as e:
-        _log_schema(f"heuristic json-ld error: {e!r}")
+        return _extract_html5lib()
+    except Exception as exc:
+        _log_schema(f"extruct:html5lib error: {exc!r}")
+        return {}
 
-    if USE_EXTRUCT:
-        def _extract_lxml() -> dict[str, Any]:
-            try:
-                data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]  # third-party API lacks typing
-                _log_schema("extruct:lxml ok")
-                return data
-            except Exception as e:
-                _log_schema(f"extruct:lxml error: {e!r}")
-                return {}
 
-        def _extract_html5lib() -> dict[str, Any]:
-            try:
-                from extruct.utils import parse_html as _parse_html  # type: ignore[import]  # extruct utils untyped
+def _collect_extruct_items(state: _SchemaState, html_text: str, response_url: str, syntaxes: List[str]) -> None:
+    if not USE_EXTRUCT:
+        return
+    data = _extract_extruct(html_text, response_url, syntaxes)
+    for syntax in syntaxes:
+        items = data.get(syntax) or []
+        for item in items:
+            if isinstance(item, dict):
+                _schema_add_flat(state, item, syntax)
+        if items:
+            _log_schema(f"extruct:{syntax} -> {len(items)} items")
 
-                tree = _parse_html(html_text, treebuilder="html5lib")
-                data = extruct.extract(tree, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]  # third-party API lacks typing
-                _log_schema("extruct:html5lib ok")
-                return data
-            except Exception as e:
-                _log_schema(f"extruct:html5lib error: {e!r}")
-                return {}
 
-        res = _extract_lxml()
-        if not any(res.get(k) for k in syntaxes):
-            res = _extract_html5lib()
-        for syntax in syntaxes:
-            items = res.get(syntax) or []
-            for it in items:
-                if isinstance(it, dict):
-                    _add_flat(it, syntax)
-            if items:
-                _log_schema(f"extruct:{syntax} -> {len(items)} items")
-
-    soup_md = BeautifulSoup(html_text, "html.parser")
-    have_micro = any(isinstance(o, dict) and o.get("_extracted_via") == "microdata" for o in collected)
-    have_rdfa = any(isinstance(o, dict) and o.get("_extracted_via") == "rdfa" for o in collected)
-    if not have_micro:
-        for item in _microdata_bs(soup_md):
-            _add_flat(item, "microdata")
+def _collect_bs_fallbacks(state: _SchemaState, html_text: str) -> None:
+    soup = BeautifulSoup(html_text, "html.parser")
+    if not any(obj.get("_extracted_via") == "microdata" for obj in state.collected if isinstance(obj, dict)):
+        for item in _microdata_bs(soup):
+            _schema_add_flat(state, item, "microdata")
         _log_schema("fallback: microdata added")
-    if not have_rdfa:
-        for item in _rdfa_bs(soup_md):
-            _add_flat(item, "rdfa")
+    if not any(obj.get("_extracted_via") == "rdfa" for obj in state.collected if isinstance(obj, dict)):
+        for item in _rdfa_bs(soup):
+            _schema_add_flat(state, item, "rdfa")
         _log_schema("fallback: rdfa added")
 
-    if not collected:
-        soup_fallback = BeautifulSoup(html_text, "html.parser")
-        fallback_blocks: list[Dict[str, Any]] = []
-        for script in soup_fallback.find_all("script", {"type": "application/ld+json"}):
-            raw = script.get_text(strip=True) or ""
-            if not raw:
-                continue
-            fallback_raw.append(raw)
-            fallback_blocks.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
-        if fallback_blocks:
-            collected.extend(fallback_blocks)
-            syntax_counter["json-ld-raw"] += len(fallback_blocks)
-            _log_schema(f"fallback: raw json-ld captured={len(fallback_blocks)}")
 
-    aggregate: list[str] = []
-    for idx, obj in enumerate(collected, start=1):
-        if not isinstance(obj, dict):
+def _collect_raw_jsonld_fallback(state: _SchemaState, html_text: str) -> None:
+    if state.collected:
+        return
+    soup = BeautifulSoup(html_text, "html.parser")
+    fallback_blocks: list[Dict[str, Any]] = []
+    for script in soup.find_all("script", {"type": "application/ld+json"}):
+        raw = script.get_text(strip=True) or ""
+        if not raw:
             continue
-        via = str(obj.get("_extracted_via", "")).strip()
-        via_lower = via.lower()
-        block_issues: List[str] = []
-        if via_lower in ("json-ld", "json-ld-raw"):
-            checks = [
-                ("@raw" in obj, "Unparseable JSON-LD block"),
-                ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
-            ]
-            block_issues.extend(msg for cond, msg in checks if cond)
-        if via_lower == "microdata" and "@type" not in obj:
-            block_issues.append("Microdata item missing @type")
-        if via_lower == "rdfa" and "@type" not in obj:
-            block_issues.append("RDFa item missing @type")
+        state.fallback_raw.append(raw)
+        fallback_blocks.append({"@raw": raw, "_extracted_via": "json-ld-raw"})
+    if not fallback_blocks:
+        return
+    state.collected.extend(fallback_blocks)
+    state.syntax_counter["json-ld-raw"] += len(fallback_blocks)
+    _log_schema(f"fallback: raw json-ld captured={len(fallback_blocks)}")
 
-        validator_key = _schema_primary_type(obj.get("@type")).lower()
-        validator = _SCHEMA_VALIDATORS.get(validator_key)
-        if validator:
-            block_issues.extend(validator(obj))
 
-        if block_issues:
-            unique = sorted(set(block_issues))
-            obj["_schema_errors"] = unique
-            label = _schema_block_label(idx, obj)
-            aggregate.extend(f"{label}: {msg}" for msg in unique)
+def _schema_block_issues(obj: Dict[str, Any]) -> List[str]:
+    via_lower = str(obj.get("_extracted_via", "")).strip().lower()
+    issues: List[str] = []
+    if via_lower in {"json-ld", "json-ld-raw"}:
+        checks = [
+            ("@raw" in obj, "Unparseable JSON-LD block"),
+            ("@type" not in obj and "@raw" not in obj, "JSON-LD missing @type"),
+        ]
+        issues.extend(message for condition, message in checks if condition)
+    if via_lower == "microdata" and "@type" not in obj:
+        issues.append("Microdata item missing @type")
+    if via_lower == "rdfa" and "@type" not in obj:
+        issues.append("RDFa item missing @type")
+    validator = _SCHEMA_VALIDATORS.get(_schema_primary_type(obj.get("@type")).lower())
+    if validator:
+        issues.extend(validator(obj))
+    return sorted(set(issues))
 
-    eligibility = _schema_build_eligibility([obj for obj in collected if isinstance(obj, dict)])
 
-    summary = {
-        "total": int(sum(syntax_counter.values())),
-        "by_syntax": {name: syntax_counter[name] for name in sorted(syntax_counter) if syntax_counter[name]},
-        "by_type": {name: type_counter[name] for name in sorted(type_counter) if type_counter[name]},
+def _annotate_schema_blocks(blocks: List[Dict[str, Any]]) -> List[str]:
+    aggregate: List[str] = []
+    for index, obj in enumerate(blocks, start=1):
+        issues = _schema_block_issues(obj)
+        if not issues:
+            continue
+        obj["_schema_errors"] = issues
+        label = _schema_block_label(index, obj)
+        aggregate.extend(f"{label}: {message}" for message in issues)
+    return aggregate
+
+
+def _schema_summary(state: _SchemaState, aggregate: List[str]) -> Dict[str, Any]:
+    return {
+        "total": int(sum(state.syntax_counter.values())),
+        "by_syntax": {
+            name: state.syntax_counter[name]
+            for name in sorted(state.syntax_counter)
+            if state.syntax_counter[name]
+        },
+        "by_type": {
+            name: state.type_counter[name]
+            for name in sorted(state.type_counter)
+            if state.type_counter[name]
+        },
         "errors": sorted(set(aggregate)),
     }
+
+
+def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
+    syntaxes = ["json-ld", "microdata", "opengraph", "microformat", "rdfa"]
+    state = _SchemaState()
+    try:
+        _collect_manual_jsonld(state, html_text)
+    except Exception as exc:
+        _log_schema(f"manual json-ld error: {exc!r}")
+
+    try:
+        _collect_heuristic_jsonld(state, html_text)
+    except Exception as exc:
+        _log_schema(f"heuristic json-ld error: {exc!r}")
+
+    _collect_extruct_items(state, html_text, response_url, syntaxes)
+    _collect_bs_fallbacks(state, html_text)
+    _collect_raw_jsonld_fallback(state, html_text)
+
+    aggregate = _annotate_schema_blocks([obj for obj in state.collected if isinstance(obj, dict)])
+    eligibility = _schema_build_eligibility([obj for obj in state.collected if isinstance(obj, dict)])
+    summary = _schema_summary(state, aggregate)
     return {
-        "blocks": collected,
+        "blocks": state.collected,
         "summary": summary,
         "eligibility": eligibility,
         "issues": summary["errors"],
-        "fallback_raw": fallback_raw,
+        "fallback_raw": state.fallback_raw,
     }

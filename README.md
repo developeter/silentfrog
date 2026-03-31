@@ -104,6 +104,8 @@ $ poetry run silentfrog
 $ poetry run python -m silentfrog
 ```
 
+`doctor` also runs the repository **code-shape guard**, which blocks new deeply nested or branch-heavy functions unless they are intentionally grandfathered in the baseline.
+
 ### Entry points (explicit)
 
 - Preferred: `poetry run silentfrog`
@@ -291,6 +293,8 @@ silentfrog/
 ├── tools/
 │   ├── source_install.py  # Local .venv installer and launcher generation
 │   ├── doctor.py          # Env/dependency/resource/compile/test checks
+│   ├── code_shape_guard.py # AST-based complexity/nesting guard
+│   ├── code_shape_baseline.json # Grandfathered legacy guard exceptions
 │   └── install_hooks.py   # Configures git to use .githooks/
 ├── .githooks/
 │   ├── pre-commit         # Runs doctor --quick automatically

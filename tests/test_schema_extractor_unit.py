@@ -62,6 +62,23 @@ def test_schema_validator_product_errors() -> None:
     assert "missing offers.priceCurrency" in errors
 
 
+def test_schema_validator_product_accepts_price_specification() -> None:
+    product = {
+        "name": "Test",
+        "description": "Desc",
+        "image": "img.jpg",
+        "offers": [
+            {
+                "@type": "Offer",
+                "priceSpecification": {"price": "29.99", "priceCurrency": "EUR"},
+            }
+        ],
+    }
+    errors = _schema_validate_product(product)
+    assert "missing offers.price" not in errors
+    assert "missing offers.priceCurrency" not in errors
+
+
 def test_schema_validator_article_errors() -> None:
     errors = _schema_validate_article({})
     assert "missing headline" in errors

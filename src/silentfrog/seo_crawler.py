@@ -54,8 +54,11 @@ from .schema_extractor import _extract_schema_all
 _HOST_DELAYS = crawl_http._HOST_DELAYS
 
 
-async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
-    crawl_options = options or CrawlOptions.default()
+async def _fetch_analysis_response(
+    url: str,
+    timeout: int,
+    crawl_options: CrawlOptions,
+) -> tuple[Any, dict[str, list[tuple[str, str]]] | None]:
     host_key = _host_key(url)
     robots_snapshot: dict[str, list[tuple[str, str]]] | None = None
     async with _throttle_host(host_key, crawl_options):
@@ -76,63 +79,120 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
                 break
             await asyncio.sleep(_BACKOFF_DELAY)
         assert resp is not None
+    return resp, robots_snapshot
 
-    soup = BeautifulSoup(resp.body, "html.parser")
-    structured_data = _extract_schema_all(resp.body, resp.url)
-    performance_metrics = await _collect_performance_metrics(resp, soup)
 
+def _extract_plain_text(soup: BeautifulSoup) -> str:
     for tag in soup.find_all(["script", "style"]):
         tag.extract()
     for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
         comment.extract()
-    plain = soup.get_text(separator=" ", strip=True)
+    return soup.get_text(separator=" ", strip=True)
 
-    links_rows: list[list[str]] = _extract_links(resp.url, soup)
+
+async def _resolve_link_rows(
+    page_url: str,
+    soup: BeautifulSoup,
+    timeout: int,
+    crawl_options: CrawlOptions,
+) -> list[list[str]]:
+    links_rows = _extract_links(page_url, soup)
     connector = aiohttp.TCPConnector(ssl=False)
-    link_headers = _headers_from_options(crawl_options)
-    async with aiohttp.ClientSession(connector=connector, headers=link_headers) as _sess:
-        coros = [_link_status(_sess, row[0], timeout, crawl_options) for row in links_rows]
-        statuses = await asyncio.gather(*coros, return_exceptions=True)
+    headers = _headers_from_options(crawl_options)
+    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+        coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in links_rows]
+        statuses = await asyncio.gather(*coroutines, return_exceptions=True)
     _update_link_statuses(links_rows, statuses)
+    return links_rows
 
-    canonical_url, is_self, many_canon, canon_status = await _check_canonical(resp.url, soup, timeout=timeout)
-    hops, final_status, hop_count, is_loop = await _trace_redirects(url)
-    hreflang_rows = await _extract_hreflang(resp.url, soup, timeout=timeout)
-    meta_robots = _meta_robots_value(resp.headers, soup)
-    robots_map = robots_snapshot or await _parse_robots(url, timeout=timeout)
-    ai_rows = _ai_crawl_matrix(robots_map, meta_robots, resp.url)
-    serp_snippet = await _make_serp_snippet(soup, resp.url)
-    title_audit = _title_audit(serp_snippet["title"], _extract_headers(soup))
-    social_cards = await _extract_social_cards(resp.url, soup, timeout=timeout)
 
-    raw_payload = {
-        "meta": _extract_meta(soup),
-        "headers": _extract_headers(soup),
-        "images": _extract_images(resp.url, soup),
-        "links": links_rows,
-        "schema": structured_data,
-        "canonical": {
-            "target": canonical_url,
-            "self": is_self,
-            "multiple": many_canon,
-            "status": canon_status,
-        },
-        "redirect": {
-            "hops": hop_count,
-            "chain": hops,
-            "final_status": final_status,
-            "loop": is_loop,
-        },
+def _canonical_section(
+    canonical_url: str,
+    is_self: bool,
+    many_canon: bool,
+    canon_status: str,
+) -> dict[str, Any]:
+    return {
+        "target": canonical_url,
+        "self": is_self,
+        "multiple": many_canon,
+        "status": canon_status,
+    }
+
+
+def _redirect_section(
+    hops: list[str],
+    final_status: str,
+    hop_count: int,
+    is_loop: bool,
+) -> dict[str, Any]:
+    return {
+        "hops": hop_count,
+        "chain": hops,
+        "final_status": final_status,
+        "loop": is_loop,
+    }
+
+
+async def _collect_analysis_sections(
+    request_url: str,
+    response: Any,
+    soup: BeautifulSoup,
+    timeout: int,
+    crawl_options: CrawlOptions,
+    robots_snapshot: dict[str, list[tuple[str, str]]] | None,
+) -> dict[str, Any]:
+    plain_text = _extract_plain_text(soup)
+    meta_rows = _extract_meta(soup)
+    header_rows = _extract_headers(soup)
+    image_rows = _extract_images(response.url, soup)
+    link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options)
+
+    canonical_url, is_self, many_canon, canon_status = await _check_canonical(response.url, soup, timeout=timeout)
+    hops, final_status, hop_count, is_loop = await _trace_redirects(request_url)
+    hreflang_rows = await _extract_hreflang(response.url, soup, timeout=timeout)
+    meta_robots = _meta_robots_value(response.headers, soup)
+    robots_map = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
+    serp_snippet = await _make_serp_snippet(soup, response.url)
+
+    return {
+        "meta": meta_rows,
+        "headers": header_rows,
+        "images": image_rows,
+        "links": link_rows,
+        "canonical": _canonical_section(canonical_url, is_self, many_canon, canon_status),
+        "redirect": _redirect_section(hops, final_status, hop_count, is_loop),
         "robots": robots_map,
         "meta_robots": meta_robots,
         "hreflang": hreflang_rows,
-        "ai_crawl": ai_rows,
+        "ai_crawl": _ai_crawl_matrix(robots_map, meta_robots, response.url),
         "serp": serp_snippet,
-        "serp_audit": title_audit,
-        "keywords": _extract_keywords(soup, plain),
+        "serp_audit": _title_audit(serp_snippet["title"], header_rows),
+        "keywords": _extract_keywords(soup, plain_text),
         "content_quality": extract_content_quality(soup),
+        "social": await _extract_social_cards(response.url, soup, timeout=timeout),
+    }
+
+
+async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
+    crawl_options = options or CrawlOptions.default()
+    response, robots_snapshot = await _fetch_analysis_response(url, timeout, crawl_options)
+    soup = BeautifulSoup(response.body, "html.parser")
+    structured_data = _extract_schema_all(response.body, response.url)
+    performance_metrics = await _collect_performance_metrics(response, soup)
+    section_payload = await _collect_analysis_sections(
+        url,
+        response,
+        soup,
+        timeout,
+        crawl_options,
+        robots_snapshot,
+    )
+
+    raw_payload = {
+        "schema": structured_data,
         "performance": performance_metrics,
-        "social": social_cards,
+        **section_payload,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)

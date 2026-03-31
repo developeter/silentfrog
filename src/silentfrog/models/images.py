@@ -18,9 +18,7 @@ from ..image_diagnostics import (
     FORMAT_HINT_COL,
     IMAGE_HEADERS,
     LOADING_COL,
-    RESPONSIVE_COL,
     SIZE_COL,
-    TITLE_COL,
     normalize_image_row,
 )
 from ..theme import StatusBrushPalette, status_brushes
@@ -30,7 +28,7 @@ from .base import GenericModel
 class ImagesModel(GenericModel):
     def __init__(self, rows: List[List[str]]) -> None:
         normalized: List[List[str]] = []
-        for idx, row in enumerate(rows):
+        for row in rows:
             padded = normalize_image_row(row)
             padded[LOADING_COL] = str(padded[LOADING_COL]).strip().title()
             padded[FETCH_PRIORITY_COL] = str(padded[FETCH_PRIORITY_COL]).strip()
@@ -42,6 +40,18 @@ class ImagesModel(GenericModel):
         )
         self._brushes: StatusBrushPalette = status_brushes()
         self._refresh_state()
+        self._background_handlers = {
+            ALT_COL: self._required_background,
+            SIZE_COL: self._size_background,
+            DECLARED_WIDTH_COL: self._declared_dimension_background,
+            DECLARED_HEIGHT_COL: self._declared_dimension_background,
+            ACTUAL_WIDTH_COL: self._actual_dimension_background,
+            ACTUAL_HEIGHT_COL: self._actual_dimension_background,
+            CACHE_COL: self._cache_background,
+            FETCH_PRIORITY_COL: self._fetch_priority_background,
+            FORMAT_HINT_COL: self._format_hint_background,
+            DIAGNOSTIC_COL: self._diagnostic_background,
+        }
 
     def _refresh_state(self) -> None:
         self._declared_dimension_rows = {
@@ -107,6 +117,39 @@ class ImagesModel(GenericModel):
             return "low"
         return "custom"
 
+    def _required_background(self, row: int, column: int):
+        return self._color_required(self._rows[row][column])
+
+    def _size_background(self, row: int, column: int):
+        return self._color_size(self._rows[row][column])
+
+    def _declared_dimension_background(self, row: int, column: int):
+        return None if row in self._declared_dimension_rows else self._brushes.warn
+
+    def _actual_dimension_background(self, row: int, column: int):
+        return None if row in self._actual_dimension_rows else self._brushes.warn
+
+    def _cache_background(self, row: int, column: int):
+        return None if self._filled(self._rows[row][column]) else self._brushes.warn
+
+    def _fetch_priority_background(self, row: int, column: int):
+        status = ImagesModel._priority_status(self._rows[row][column])
+        return self._brushes.warn if status == "missing" else None
+
+    def _format_hint_background(self, row: int, column: int):
+        value = str(self._rows[row][column]).strip()
+        if not value:
+            return None
+        return self._brushes.good if value == "Next-gen format" else self._brushes.warn
+
+    def _diagnostic_background(self, row: int, column: int):
+        value = str(self._rows[row][column]).strip()
+        return self._brushes.good if value == "OK" else self._brushes.warn
+
+    def _background_for(self, row: int, column: int):
+        handler = self._background_handlers.get(column)
+        return handler(row, column) if handler else None
+
     def data(  # type: ignore[override]
         self,
         index: QtCore.QModelIndex,
@@ -114,39 +157,6 @@ class ImagesModel(GenericModel):
     ):
         if role == Qt.ItemDataRole.DisplayRole:
             return super().data(index, role)
-        if role != Qt.ItemDataRole.BackgroundRole:
-            return None
-        row = index.row()
-        column = index.column()
-        if column == ALT_COL:
-            return self._color_required(self._rows[row][column])
-        if column == TITLE_COL:
-            return None
-        if column == SIZE_COL:
-            return self._color_size(self._rows[row][column])
-        if column in (DECLARED_WIDTH_COL, DECLARED_HEIGHT_COL) and row not in self._declared_dimension_rows:
-            return self._brushes.warn
-        if column in (ACTUAL_WIDTH_COL, ACTUAL_HEIGHT_COL) and row not in self._actual_dimension_rows:
-            return self._brushes.warn
-        if column == CACHE_COL and not self._filled(self._rows[row][column]):
-            return self._brushes.warn
-        if column == LOADING_COL and not self._filled(self._rows[row][column]):
-            return None
-        if column == FETCH_PRIORITY_COL:
-            status = ImagesModel._priority_status(self._rows[row][column])
-            if status == "missing":
-                return self._brushes.warn
-            return None
-        if column == FORMAT_HINT_COL:
-            value = str(self._rows[row][column]).strip()
-            if not value:
-                return None
-            return self._brushes.good if value == "Next-gen format" else self._brushes.warn
-        if column == RESPONSIVE_COL and not self._filled(self._rows[row][column]):
-            return None
-        if column == DIAGNOSTIC_COL:
-            value = str(self._rows[row][column]).strip()
-            if value == "OK":
-                return self._brushes.good
-            return self._brushes.warn
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return self._background_for(index.row(), index.column())
         return None

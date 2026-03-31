@@ -105,6 +105,10 @@ def _run_compile_check() -> None:
     _run([sys.executable, "-m", "compileall", "-q", "src"], "Compile check")
 
 
+def _run_code_shape_check() -> None:
+    _run([sys.executable, "tools/code_shape_guard.py"], "Code-shape guard")
+
+
 def _run_tests(quick: bool) -> None:
     pytest_cmd = [sys.executable, "-m", "pytest", "-q"]
     if quick:
@@ -136,6 +140,7 @@ def main() -> int:
         _check_paths()
         _check_imports()
         _check_packaged_files()
+        _run_code_shape_check()
         _run_compile_check()
         if not args.skip_tests:
             _run_tests(quick=args.quick)

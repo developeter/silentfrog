@@ -35,9 +35,56 @@ from .models import (
 import html as _html
 import json
 
+_AI_CRAWL_HEADERS = [
+    "Agent",
+    "Token",
+    "Robots.txt OK",
+    "Nonstandard directive",
+    "Google controls",
+    "Verdict",
+    "Notes",
+]
+
+_AI_CRAWL_HEADER_TOOLTIPS = [
+    "The human-readable crawler name. Use this to see which AI-facing agent the row refers to.",
+    "The robots.txt user-agent token Silentfrog checked for this crawler.",
+    "Whether robots.txt allows this crawler to fetch the current page URL.",
+    "Nonstandard AI directives found in meta or X-Robots-Tag, such as noai or noimageai. Silentfrog reports them, but official support should be verified vendor by vendor.",
+    "Google search controls that can limit reuse in Google Search features, such as nosnippet, noindex, none, or max-snippet.",
+    "Final AI access verdict for this crawler: Allowed, Limited, or Blocked.",
+    "Why the verdict was assigned, including matched robots.txt rules or restrictive meta directives.",
+]
+
+_AI_VISIBILITY_HEADERS = ["Area", "Check", "Status", "Details", "Recommendation"]
+
+_AI_VISIBILITY_HEADER_TOOLTIPS = [
+    "The audit area being evaluated: Access, Topic clarity, Answerability, Citation readiness, or Entity clarity.",
+    "The specific AI visibility check performed for this row.",
+    "The result for this check: Good, Warning, or Critical.",
+    "Evidence from the page that explains why this status was assigned.",
+    "The clearest next step to improve this AI visibility signal.",
+]
+
 
 def _header(view: QtWidgets.QTableView) -> QtWidgets.QHeaderView:
     return cast(QtWidgets.QHeaderView, view.horizontalHeader())
+
+
+def _set_header_modes(
+    header: QtWidgets.QHeaderView,
+    *modes: tuple[int, QtWidgets.QHeaderView.ResizeMode],
+) -> None:
+    for column, mode in modes:
+        header.setSectionResizeMode(column, mode)
+
+
+def _rich_label(tooltip: str = "") -> QtWidgets.QLabel:
+    label = QtWidgets.QLabel()
+    label.setWordWrap(True)
+    label.setTextFormat(QtCore.Qt.TextFormat.RichText)
+    if tooltip:
+        label.setToolTip(tooltip)
+    return label
 
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
@@ -209,9 +256,11 @@ class SocialTab(QtWidgets.QWidget):
         if not rows:
             rows = [["Info", "No social issues detected"]]
         self._issues.setModel(SocialIssuesModel(rows))
-        header = cast(QtWidgets.QHeaderView, self._issues.horizontalHeader())
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(
+            cast(QtWidgets.QHeaderView, self._issues.horizontalHeader()),
+            (0, QtWidgets.QHeaderView.ResizeToContents),
+            (1, QtWidgets.QHeaderView.Stretch),
+        )
 
 
 class MetaTab(TableTab):
@@ -247,9 +296,12 @@ class ImagesTab(TableTab):
         self._rows = rows
         model = ImagesModel(self._rows)
         self.set_model(model)
-        _header(self.view).setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
+        _set_header_modes(
+            _header(self.view),
+            (0, QtWidgets.QHeaderView.Interactive),
+            (DIAGNOSTIC_COL, QtWidgets.QHeaderView.Stretch),
+        )
         self.view.setColumnWidth(0, 280)
-        _header(self.view).setSectionResizeMode(DIAGNOSTIC_COL, QtWidgets.QHeaderView.Stretch)
 
     def rows(self) -> List[List[str]]:
         return [list(row) for row in self._rows]
@@ -259,7 +311,7 @@ class LinksTab(TableTab):
     def update(self, rows: List[List[str]]) -> None:
         self.set_model(LinksModel(rows))
         self.view.setAlternatingRowColors(False)
-        _header(self.view).setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (0, QtWidgets.QHeaderView.Stretch))
 
 
 class RedirectTab(TableTab):
@@ -278,7 +330,7 @@ class RedirectTab(TableTab):
             ["Loop detected", "Yes" if data.get("loop") else "No"],
         ]
         self.set_model(RedirectModel(["Check", "Value"], rows))
-        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class CanonicalTab(TableTab):
@@ -302,7 +354,7 @@ class IndexabilityTab(TableTab):
     ) -> None:
         rows = build_indexability_rows(redirect, canonical, meta_robots, robots_map)
         self.set_model(IndexabilityModel(["Check", "Value"], rows))
-        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class ContentQualityTab(TableTab):
@@ -312,7 +364,7 @@ class ContentQualityTab(TableTab):
         payload = quality.to_dict()
         rows = build_content_quality_rows(payload if any(payload.values()) else {})
         self.set_model(ContentQualityModel(["Check", "Value"], rows))
-        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class RobotsTab(TableTab):
@@ -324,36 +376,24 @@ class RobotsTab(TableTab):
         if not robots_map:
             rows.append(["robots.txt", "Not fetched or empty"])
         self.set_model(RobotsModel(["Directive", "Value"], rows))
-        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class HreflangTab(TableTab):
     def update(self, rows: List[List[str]]) -> None:
         headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
         self.set_model(HreflangModel(headers, rows))
-        _header(self.view).setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class AiTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
-        self._summary = QtWidgets.QLabel()
-        self._summary.setWordWrap(True)
-        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._summary = _rich_label()
         self._layout.insertWidget(0, self._summary)
 
     def update(self, rows: List[List[str]]) -> None:
-        headers = ["Agent", "Token", "Robots.txt OK", "Nonstandard directive", "Google controls", "Verdict", "Notes"]
-        tooltips = [
-            "The human-readable crawler name. Use this to see which AI-facing agent the row refers to.",
-            "The robots.txt user-agent token Silentfrog checked for this crawler.",
-            "Whether robots.txt allows this crawler to fetch the current page URL.",
-            "Nonstandard AI directives found in meta or X-Robots-Tag, such as noai or noimageai. Silentfrog reports them, but official support should be verified vendor by vendor.",
-            "Google search controls that can limit reuse in Google Search features, such as nosnippet, noindex, none, or max-snippet.",
-            "Final AI access verdict for this crawler: Allowed, Limited, or Blocked.",
-            "Why the verdict was assigned, including matched robots.txt rules or restrictive meta directives.",
-        ]
-        self.set_model(GenericModel(headers, rows, tooltips))
+        self.set_model(GenericModel(_AI_CRAWL_HEADERS, rows, _AI_CRAWL_HEADER_TOOLTIPS))
         verdicts = [str(row[5]).strip() for row in rows if len(row) > 5]
         counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
         self._summary.setText(
@@ -364,23 +404,22 @@ class AiTab(TableTab):
                 f"Blocked {counts['Blocked']}"
             )
         )
-        header = _header(self.view)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(
+            _header(self.view),
+            (0, QtWidgets.QHeaderView.ResizeToContents),
+            (1, QtWidgets.QHeaderView.ResizeToContents),
+            (2, QtWidgets.QHeaderView.ResizeToContents),
+            (3, QtWidgets.QHeaderView.ResizeToContents),
+            (4, QtWidgets.QHeaderView.ResizeToContents),
+            (5, QtWidgets.QHeaderView.ResizeToContents),
+            (6, QtWidgets.QHeaderView.Stretch),
+        )
 
 
 class AiVisibilityTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
-        self._summary = QtWidgets.QLabel()
-        self._summary.setWordWrap(True)
-        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        self._summary.setToolTip(ai_visibility_summary_tooltip())
+        self._summary = _rich_label(ai_visibility_summary_tooltip())
         self.view.setWordWrap(True)
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
         self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
@@ -406,30 +445,22 @@ class AiVisibilityTab(TableTab):
         if not rows:
             rows = [["Info", "No AI visibility data yet", "-", "Run an analysis to populate this tab.", "-"]]
             check_keys = ["ai_visibility"]
-        headers = ["Area", "Check", "Status", "Details", "Recommendation"]
-        header_tooltips = [
-            "The audit area being evaluated: Access, Topic clarity, Answerability, Citation readiness, or Entity clarity.",
-            "The specific AI visibility check performed for this row.",
-            "The result for this check: Good, Warning, or Critical.",
-            "Evidence from the page that explains why this status was assigned.",
-            "The clearest next step to improve this AI visibility signal.",
-        ]
-        self.set_model(AiVisibilityModel(headers, rows, check_keys, header_tooltips))
-        header = _header(self.view)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
+        self.set_model(AiVisibilityModel(_AI_VISIBILITY_HEADERS, rows, check_keys, _AI_VISIBILITY_HEADER_TOOLTIPS))
+        _set_header_modes(
+            _header(self.view),
+            (0, QtWidgets.QHeaderView.ResizeToContents),
+            (1, QtWidgets.QHeaderView.Stretch),
+            (2, QtWidgets.QHeaderView.ResizeToContents),
+            (3, QtWidgets.QHeaderView.Stretch),
+            (4, QtWidgets.QHeaderView.Stretch),
+        )
         self.view.resizeRowsToContents()
 
 
 class KeywordsTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
-        self._summary = QtWidgets.QLabel()
-        self._summary.setWordWrap(True)
-        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._summary = _rich_label()
         self._entries: List[KeywordEntry] = []
         self._applying_palette = False
         self._layout.insertWidget(0, self._summary)
@@ -447,7 +478,7 @@ class KeywordsTab(TableTab):
         self.set_model(model)
         self.view.setAlternatingRowColors(True)
         header = _header(self.view)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        _set_header_modes(header, (0, QtWidgets.QHeaderView.Stretch))
         for column in range(1, model.columnCount()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
         self._apply_palette()
@@ -535,15 +566,9 @@ class KeywordsTab(TableTab):
 class PerformanceTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
-        self._summary = QtWidgets.QLabel()
-        self._summary.setWordWrap(True)
-        self._summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        self._opportunities = QtWidgets.QLabel()
-        self._opportunities.setWordWrap(True)
-        self._opportunities.setTextFormat(QtCore.Qt.TextFormat.RichText)
-        self._scripts = QtWidgets.QLabel()
-        self._scripts.setWordWrap(True)
-        self._scripts.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        self._summary = _rich_label()
+        self._opportunities = _rich_label()
+        self._scripts = _rich_label()
         self._offender_view: QtWidgets.QTableView = QtWidgets.QTableView()
         self._offender_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._offender_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -566,249 +591,197 @@ class PerformanceTab(TableTab):
         self._render(metrics)
 
     def _render(self, metrics: PerformanceMetrics) -> None:
-
         if self._is_rendering:
-
             return
-
         self._is_rendering = True
-
         try:
-            summary = metrics.summary
-            total_bytes = summary.total_page_bytes or (
-                metrics.transfer_size + sum(info.get("bytes", 0) for info in metrics.resource_summary.values())
-            )
-            transfer_text = self._format_bytes(summary.transfer_size or metrics.transfer_size)
-            weight_text = self._format_bytes(total_bytes)
-            verdict = summary.verdict or "Good"
-            summary_html = (
-                f"<b>Verdict:</b> {verdict} &nbsp; "
-                f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
-                f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
-                f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
-                f"<b>Transfer:</b> {transfer_text} &nbsp; "
-                f"<b>Page weight:</b> {weight_text} &nbsp; "
-                f"<b>Resources:</b> {summary.total_resource_count or sum(info.get('count', 0) for info in metrics.resource_summary.values())} &nbsp; "
-                f"<b>Third-party:</b> {self._format_bytes(summary.third_party_bytes)}"
-            )
-            self._summary.setText(summary_html)
-            self._summary.setToolTip(performance_summary_tooltip())
-
-            resource_bytes = {
-                row.resource_type: row.bytes for row in metrics.resource_breakdown
-            } if metrics.resource_breakdown else {
-                name: info.get("bytes", 0) for name, info in metrics.resource_summary.items()
-            }
-            script_html = (
-                f"<b>Blocking JS:</b> {metrics.scripts.blocking_count} "
-                f"({self._format_bytes(metrics.scripts.blocking_bytes)}) &nbsp; "
-                f"<b>Async/Deferred JS:</b> {metrics.scripts.async_count} "
-                f"({self._format_bytes(metrics.scripts.async_bytes)})<br/>"
-                f"<b>CSS:</b> {self._format_bytes(resource_bytes.get('css', 0))} &nbsp; "
-                f"<b>JS:</b> {self._format_bytes(resource_bytes.get('js', 0))} &nbsp; "
-                f"<b>Images:</b> {self._format_bytes(resource_bytes.get('img', 0))} &nbsp; "
-                f"<b>Fonts:</b> {self._format_bytes(resource_bytes.get('font', 0))}"
-            )
-            self._scripts.setText(script_html)
-            self._scripts.setToolTip(performance_resource_tooltip())
-
-            severity_order = {"critical": 3, "warning": 2, "info": 1, "ok": 0}
-            dominant = "ok"
-            if summary.critical_issue_count > 0:
-                dominant = "critical"
-            elif summary.warning_issue_count > 0:
-                dominant = "warning"
-            elif summary.info_issue_count > 0:
-                dominant = "info"
-            elif metrics.opportunity_details:
-                dominant = max(
-                    (detail.severity.lower() or "info" for detail in metrics.opportunity_details),
-                    key=lambda sev: severity_order.get(sev, 1),
-                    default="info",
-                )
-            elif metrics.opportunities:
-                dominant = "info"
-
-
-
             dark_theme = _is_dark(self)
-
-            if dark_theme:
-
-                severity_styles = {
-
-                    "critical": ("#3b1f21", "#ffb4ab"),
-
-                    "warning": ("#3b3017", "#ffe082"),
-
-                    "info": ("#1b2f47", "#90caf9"),
-
-                    "ok": ("#1f3325", "#a5d6a7"),
-
-                }
-
-            else:
-
-                severity_styles = {
-
-                    "critical": ("#ffebee", "#c62828"),
-
-                    "warning": ("#fff8e1", "#ef6c00"),
-
-                    "info": ("#e3f2fd", "#1565c0"),
-
-                    "ok": ("#e8f5e9", "#2e7d32"),
-
-                }
-
-            bg_color, fg_color = severity_styles.get(dominant, severity_styles["info"])
-
-            style_block = (
-
-                f"background:{bg_color};color:{fg_color};padding:6px;border-radius:4px;"
-
-                "border:1px solid rgba(255,255,255,0.05);"
-
-            )
-
-            self._summary.setStyleSheet(style_block)
-
-            self._scripts.setStyleSheet(style_block)
-
-            self._opportunities.setStyleSheet(
-
-                "color:#f0f0f0;margin-top:6px;" if dark_theme else "color:#202124;margin-top:6px;"
-
-            )
-
-
-
-            issue_rows: List[List[str]] = []
-            issue_keys: List[str] = []
-            for issue in metrics.issues:
-                issue_rows.append(
-                    [
-                        issue.message or "-",
-                        issue.severity.title(),
-                        issue.evidence or "-",
-                        issue.recommendation or "-",
-                    ]
-                )
-                issue_keys.append(issue.key)
-            if not issue_rows:
-                issue_rows = [["No major performance issues detected", "OK", "-", "-"]]
-                issue_keys = [""]
-
+            self._summary.setText(self._summary_html(metrics))
+            self._summary.setToolTip(performance_summary_tooltip())
+            self._scripts.setText(self._scripts_html(metrics))
+            self._scripts.setToolTip(performance_resource_tooltip())
+            self._apply_summary_styles(metrics, dark_theme)
+            issue_rows, issue_keys = self._issue_table_data(metrics)
             model = PerformanceIssueModel(["Issue", "Severity", "Evidence", "Recommendation"], issue_rows, issue_keys)
             self.set_model(model)
-            header = _header(self.view)
-            header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-            header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
-            header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
-
-
-
-            if dark_theme:
-
-                badge_colors = {"critical": "#ff5252", "warning": "#ffca28", "info": "#64b5f6", "ok": "#81c784"}
-
-                badge_text_color = "#121212"
-
-            else:
-
-                badge_colors = {"critical": "#d32f2f", "warning": "fbc02d", "info": "#1976d2", "ok": "#2e7d32"}
-
-                badge_text_color = "#ffffff"
-
-            opportunity_items: List[str] = []
-
-            if metrics.opportunity_details:
-
-                for detail in metrics.opportunity_details:
-
-                    severity = detail.severity.lower() if detail.severity else "info"
-
-                    color = badge_colors.get(severity, badge_colors["info"])
-
-                    badge = (
-
-                        "<span style='display:inline-block;padding:1px 6px;"
-
-                        f"border-radius:10px;background:{color};color:{badge_text_color};"
-
-                        "font-weight:bold;font-size:11px;'>"
-
-                        f"{severity.title()}</span>"
-
-                    )
-
-                    opportunity_items.append(f"<li>{badge} {_html.escape(detail.message)}</li>")
-
-            elif metrics.opportunities:
-
-                opportunity_items = [f"<li>{_html.escape(item)}</li>" for item in metrics.opportunities]
-
-
-
-            if opportunity_items:
-
-                self._opportunities.setText(f"<b>Opportunities</b><ul>{''.join(opportunity_items)}</ul>")
-
-            else:
-
-                ok_color = badge_colors["ok"]
-
-                ok_text = "#b2dfdb" if dark_theme else "#2e7d32"
-
-                self._opportunities.setText(
-
-                    "<b>Opportunities</b><br/>"
-
-                    "<span style='display:inline-block;padding:2px 6px;border-radius:10px;"
-
-                    f"background:{ok_color};color:{badge_text_color};font-weight:bold;font-size:11px;'>OK</span> "
-
-                    f"<span style='color:{ok_text}'>No issues detected.</span>"
-
-                )
-
-
-
-            offenders_rows: List[List[str]] = []
-            for offender in metrics.top_offenders:
-                offenders_rows.append([
-                    offender.resource_type.upper() or "-",
-                    offender.url or "-",
-                    "Blocking" if offender.blocking else "Async",
-                    self._format_bytes(offender.bytes),
-                ])
-            if not offenders_rows:
-                offenders_rows = [["-", "-", "-", "-"]]
-
-            offender_model = GenericModel(["Type", "URL", "Script", "Bytes"], offenders_rows)
-
-            self._offender_view.setModel(offender_model)
-
-            offender_header = _header(self._offender_view)
-
-            offender_header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-
-            offender_header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-
-            offender_header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-
-            offender_header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-
-
-
+            _set_header_modes(
+                _header(self.view),
+                (0, QtWidgets.QHeaderView.Stretch),
+                (1, QtWidgets.QHeaderView.ResizeToContents),
+                (2, QtWidgets.QHeaderView.Stretch),
+                (3, QtWidgets.QHeaderView.Stretch),
+            )
+            self._opportunities.setText(self._opportunities_html(metrics, dark_theme))
+            self._offender_view.setModel(GenericModel(["Type", "URL", "Script", "Bytes"], self._offender_rows(metrics)))
+            _set_header_modes(
+                _header(self._offender_view),
+                (0, QtWidgets.QHeaderView.ResizeToContents),
+                (1, QtWidgets.QHeaderView.Stretch),
+                (2, QtWidgets.QHeaderView.ResizeToContents),
+                (3, QtWidgets.QHeaderView.ResizeToContents),
+            )
             self._apply_table_palette(self.view)
-
             self._apply_table_palette(self._offender_view)
-
         finally:
-
             self._is_rendering = False
+
+    def _resource_bytes(self, metrics: PerformanceMetrics) -> dict[str, int]:
+        if metrics.resource_breakdown:
+            return {row.resource_type: row.bytes for row in metrics.resource_breakdown}
+        return {name: info.get("bytes", 0) for name, info in metrics.resource_summary.items()}
+
+    def _summary_html(self, metrics: PerformanceMetrics) -> str:
+        summary = metrics.summary
+        total_bytes = summary.total_page_bytes or (
+            metrics.transfer_size + sum(info.get("bytes", 0) for info in metrics.resource_summary.values())
+        )
+        resource_count = summary.total_resource_count or sum(info.get("count", 0) for info in metrics.resource_summary.values())
+        return (
+            f"<b>Verdict:</b> {summary.verdict or 'Good'} &nbsp; "
+            f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
+            f"<b>TTFB:</b> {metrics.nav_ttfb_ms:.0f} ms &nbsp; "
+            f"<b>Total:</b> {metrics.nav_total_ms:.0f} ms &nbsp; "
+            f"<b>Transfer:</b> {self._format_bytes(summary.transfer_size or metrics.transfer_size)} &nbsp; "
+            f"<b>Page weight:</b> {self._format_bytes(total_bytes)} &nbsp; "
+            f"<b>Resources:</b> {resource_count} &nbsp; "
+            f"<b>Third-party:</b> {self._format_bytes(summary.third_party_bytes)}"
+        )
+
+    def _scripts_html(self, metrics: PerformanceMetrics) -> str:
+        resource_bytes = self._resource_bytes(metrics)
+        return (
+            f"<b>Blocking JS:</b> {metrics.scripts.blocking_count} "
+            f"({self._format_bytes(metrics.scripts.blocking_bytes)}) &nbsp; "
+            f"<b>Async/Deferred JS:</b> {metrics.scripts.async_count} "
+            f"({self._format_bytes(metrics.scripts.async_bytes)})<br/>"
+            f"<b>CSS:</b> {self._format_bytes(resource_bytes.get('css', 0))} &nbsp; "
+            f"<b>JS:</b> {self._format_bytes(resource_bytes.get('js', 0))} &nbsp; "
+            f"<b>Images:</b> {self._format_bytes(resource_bytes.get('img', 0))} &nbsp; "
+            f"<b>Fonts:</b> {self._format_bytes(resource_bytes.get('font', 0))}"
+        )
+
+    @staticmethod
+    def _dominant_severity(metrics: PerformanceMetrics) -> str:
+        summary = metrics.summary
+        if summary.critical_issue_count > 0:
+            return "critical"
+        if summary.warning_issue_count > 0:
+            return "warning"
+        if summary.info_issue_count > 0:
+            return "info"
+        if metrics.opportunity_details:
+            severity_order = {"critical": 3, "warning": 2, "info": 1, "ok": 0}
+            return max(
+                (detail.severity.lower() or "info" for detail in metrics.opportunity_details),
+                key=lambda severity: severity_order.get(severity, 1),
+                default="info",
+            )
+        return "info" if metrics.opportunities else "ok"
+
+    @staticmethod
+    def _severity_styles(dark_theme: bool) -> dict[str, tuple[str, str]]:
+        if dark_theme:
+            return {
+                "critical": ("#3b1f21", "#ffb4ab"),
+                "warning": ("#3b3017", "#ffe082"),
+                "info": ("#1b2f47", "#90caf9"),
+                "ok": ("#1f3325", "#a5d6a7"),
+            }
+        return {
+            "critical": ("#ffebee", "#c62828"),
+            "warning": ("#fff8e1", "#ef6c00"),
+            "info": ("#e3f2fd", "#1565c0"),
+            "ok": ("#e8f5e9", "#2e7d32"),
+        }
+
+    def _apply_summary_styles(self, metrics: PerformanceMetrics, dark_theme: bool) -> None:
+        bg_color, fg_color = self._severity_styles(dark_theme).get(
+            self._dominant_severity(metrics),
+            self._severity_styles(dark_theme)["info"],
+        )
+        style_block = (
+            f"background:{bg_color};color:{fg_color};padding:6px;border-radius:4px;"
+            "border:1px solid rgba(255,255,255,0.05);"
+        )
+        self._summary.setStyleSheet(style_block)
+        self._scripts.setStyleSheet(style_block)
+        self._opportunities.setStyleSheet(
+            "color:#f0f0f0;margin-top:6px;" if dark_theme else "color:#202124;margin-top:6px;"
+        )
+
+    @staticmethod
+    def _issue_table_data(metrics: PerformanceMetrics) -> tuple[List[List[str]], List[str]]:
+        rows = [
+            [
+                issue.message or "-",
+                issue.severity.title(),
+                issue.evidence or "-",
+                issue.recommendation or "-",
+            ]
+            for issue in metrics.issues
+        ]
+        if rows:
+            return rows, [issue.key for issue in metrics.issues]
+        return [["No major performance issues detected", "OK", "-", "-"]], [""]
+
+    @staticmethod
+    def _badge_palette(dark_theme: bool) -> tuple[dict[str, str], str, str]:
+        if dark_theme:
+            return (
+                {"critical": "#ff5252", "warning": "#ffca28", "info": "#64b5f6", "ok": "#81c784"},
+                "#121212",
+                "#b2dfdb",
+            )
+        return (
+            {"critical": "#d32f2f", "warning": "#fbc02d", "info": "#1976d2", "ok": "#2e7d32"},
+            "#ffffff",
+            "#2e7d32",
+        )
+
+    @staticmethod
+    def _badge_html(color: str, text_color: str, label: str) -> str:
+        return (
+            "<span style='display:inline-block;padding:1px 6px;"
+            f"border-radius:10px;background:{color};color:{text_color};"
+            "font-weight:bold;font-size:11px;'>"
+            f"{label}</span>"
+        )
+
+    def _opportunities_html(self, metrics: PerformanceMetrics, dark_theme: bool) -> str:
+        badge_colors, badge_text_color, ok_text = self._badge_palette(dark_theme)
+        if metrics.opportunity_details:
+            items = [
+                "<li>{badge} {message}</li>".format(
+                    badge=self._badge_html(
+                        badge_colors.get(detail.severity.lower() or "info", badge_colors["info"]),
+                        badge_text_color,
+                        (detail.severity or "Info").title(),
+                    ),
+                    message=_html.escape(detail.message),
+                )
+                for detail in metrics.opportunity_details
+            ]
+            return f"<b>Opportunities</b><ul>{''.join(items)}</ul>"
+        if metrics.opportunities:
+            items = [f"<li>{_html.escape(item)}</li>" for item in metrics.opportunities]
+            return f"<b>Opportunities</b><ul>{''.join(items)}</ul>"
+        return (
+            "<b>Opportunities</b><br/>"
+            f"{self._badge_html(badge_colors['ok'], badge_text_color, 'OK')} "
+            f"<span style='color:{ok_text}'>No issues detected.</span>"
+        )
+
+    def _offender_rows(self, metrics: PerformanceMetrics) -> List[List[str]]:
+        rows = [
+            [
+                offender.resource_type.upper() or "-",
+                offender.url or "-",
+                "Blocking" if offender.blocking else "Async",
+                self._format_bytes(offender.bytes),
+            ]
+            for offender in metrics.top_offenders
+        ]
+        return rows or [["-", "-", "-", "-"]]
 
     def clear(self) -> None:
         self.update({})

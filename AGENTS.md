@@ -10,6 +10,13 @@ This file is the local execution contract for Codex in this repository.
 - Avoid chained `if/else` blocks when a map, helper, or `match` is clearer.
 - New code must stay readable by a human maintainer first.
 - Keep imports minimal and remove dead code.
+- Target a maximum nesting depth of `2` in new code. If you need more, extract helpers first.
+- Avoid `if/elif` ladders for string dispatch. Prefer constants, maps, or typed strategy helpers.
+- Keep parsing, derivation, orchestration, and UI rendering in separate functions/modules.
+- Avoid boolean-flag soup in function signatures. If behavior splits, create a named helper or typed config.
+- Prefer typed dataclasses/models over loose dict passing when data crosses module boundaries.
+- Comments must explain intent or tradeoffs, not restate the code.
+- Do not add a new baseline exception for code-shape violations unless refactoring first has been considered and rejected for a documented reason.
 
 ## 2) Change workflow (mandatory)
 
@@ -22,12 +29,15 @@ For every non-trivial change:
    - `poetry run python tools/doctor.py`
 
 If tests cannot run, report why and what remains unverified.
+If the code-shape guard fails, refactor the touched code instead of weakening the rule or silently growing the baseline.
+Before closing a non-trivial code task, run the review questions in `docs/code_review_checklist.md`.
 
 ## 3) Testing policy
 
 - Every bug fix should have a regression test.
 - Prefer small unit tests near the changed module.
 - Keep integration tests stable; do not rewrite snapshots unless behavior changed intentionally.
+- For GUI work, prefer user-path tests over implementation-only tests when behavior depends on clicks, sorting, tooltips, or visible layout.
 
 ## 4) UI and UX policy
 

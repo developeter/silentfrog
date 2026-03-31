@@ -725,6 +725,32 @@ def test_ai_tab_shows_access_summary(qtbot) -> None:
     assert "Nonstandard AI directives" in tooltip
 
 
+def test_ai_tab_headers_and_empty_state_are_stable(qtbot) -> None:
+    tab = AiTab()
+    qtbot.addWidget(tab)
+    tab.update([])
+
+    assert "Allowed 0" in tab._summary.text()
+    assert "Limited 0" in tab._summary.text()
+    assert "Blocked 0" in tab._summary.text()
+    model = tab.view.model()
+    assert model is not None
+    headers = [
+        model.headerData(column, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole)
+        for column in range(model.columnCount())
+    ]
+    assert headers == [
+        "Agent",
+        "Token",
+        "Robots.txt OK",
+        "Nonstandard directive",
+        "Google controls",
+        "Verdict",
+        "Notes",
+    ]
+    assert model.rowCount() == 0
+
+
 def test_ai_tab_header_tooltip_event(qtbot, monkeypatch) -> None:
     tab = AiTab()
     qtbot.addWidget(tab)
@@ -1071,6 +1097,34 @@ def test_images_tab_sorting_reorders_rows_and_keeps_diagnostics(qtbot) -> None:
     assert model.data(model.index(0, SIZE_COL), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
 
 
+def test_images_tab_header_click_sorts_size_desc(qtbot) -> None:
+    tab = ImagesTab()
+    qtbot.addWidget(tab)
+    tab.update(
+        [
+            normalize_image_row(
+                ["https://example.com/light.png", "Alt", "Title", "image/png", "", "", "10 KB", "1h", "Lazy", "Low"]
+            ),
+            normalize_image_row(
+                ["https://example.com/heavy.png", "Alt", "Title", "image/png", "", "", "250 KB", "1h", "Lazy", "Low"]
+            ),
+        ]
+    )
+    tab.show()
+    qtbot.waitExposed(tab)
+
+    header = tab.view.horizontalHeader()
+    position = QtCore.QPoint(header.sectionViewportPosition(SIZE_COL) + 8, max(header.height() // 2, 1))
+
+    qtbot.mouseClick(header.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=position)
+    qtbot.mouseClick(header.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=position)
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.data(model.index(0, 0)) == "https://example.com/heavy.png"
+    assert header.sortIndicatorSection() == SIZE_COL
+
+
 def test_schema_tab_theme_toggle(qtbot):
     tab = SchemaTab()
     qtbot.addWidget(tab)
@@ -1255,6 +1309,27 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     assert offender_model.data(offender_model.index(0, 3)) == "40.0 KB"
     assert offender_model.data(offender_model.index(1, 2)) == "Async"
     assert offender_model.data(offender_model.index(1, 3)) == "80.0 KB"
+
+
+def test_performance_tab_empty_state_is_stable(qtbot) -> None:
+    tab = PerformanceTab()
+    qtbot.addWidget(tab)
+    tab.update({})
+
+    assert "Verdict:" in tab._summary.text()
+    assert "Resources:" in tab._summary.text()
+    assert "No issues detected" in tab._opportunities.text()
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 1
+    assert model.data(model.index(0, 0)) == "No major performance issues detected"
+    assert model.data(model.index(0, 1)) == "OK"
+    offender_model = tab._offender_view.model()
+    assert offender_model is not None
+    assert offender_model.rowCount() == 1
+    assert offender_model.data(offender_model.index(0, 0)) == "-"
+    assert offender_model.data(offender_model.index(0, 1)) == "-"
+
 
 def test_robots_tab_appends_empty_state(qtbot):
     tab = RobotsTab()
