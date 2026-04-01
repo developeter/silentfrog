@@ -13,8 +13,17 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def __init__(self, options: CrawlOptions, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+        theme = self._configure_dialog()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self._build_general_group())
+        layout.addWidget(self._build_advanced_group(theme))
+        layout.addWidget(self._build_button_box())
+        self._connect_signals()
+        self._applying_preset = False
+        self._initialize_options(options)
+
+    def _configure_dialog(self) -> str:
         self.setWindowTitle("Crawl settings")
-        # Slightly taller minimum to avoid cramped content on macOS/Windows
         self.setMinimumSize(440, 520)
         help_flag = QtCore.Qt.WindowType.WindowContextHelpButtonHint
         self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowFlags(help_flag))
@@ -22,22 +31,24 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         if style:
             self.setStyle(style)
         app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
-        theme = current_theme(app)
+        return current_theme(app)
 
-        layout = QtWidgets.QVBoxLayout(self)
-
+    def _build_general_group(self) -> QtWidgets.QGroupBox:
         general_box = QtWidgets.QGroupBox("General behaviour")
         general_layout = QtWidgets.QFormLayout(general_box)
         self.chk_gentle = QtWidgets.QCheckBox("Enable gentle crawl mode")
-        self.chk_gentle.setChecked(options.gentle_mode)
-        self.chk_gentle.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_gentle.setStyleSheet(self._checkbox_stylesheet(current_theme(QtWidgets.QApplication.instance())))
         general_layout.addRow(self.chk_gentle)
 
         self.spin_parallel = QtWidgets.QSpinBox()
         self.spin_parallel.setRange(1, 8)
-        self.spin_parallel.setValue(options.max_concurrent_per_host or 2)
         general_layout.addRow("Max parallel requests", self.spin_parallel)
 
+        presets_widget = self._build_presets_widget()
+        general_layout.addRow("Presets", presets_widget)
+        return general_box
+
+    def _build_presets_widget(self) -> QtWidgets.QWidget:
         presets_widget = QtWidgets.QWidget()
         presets_layout = QtWidgets.QHBoxLayout(presets_widget)
         presets_layout.setContentsMargins(0, 0, 0, 0)
@@ -48,11 +59,10 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         for btn in (self.btn_preset_standard, self.btn_preset_gentle, self.btn_preset_custom):
             self.preset_group.addButton(btn)
             presets_layout.addWidget(btn)
-        general_layout.addRow("Presets", presets_widget)
-        layout.addWidget(general_box)
+        return presets_widget
 
+    def _build_advanced_group(self, theme: str) -> QtWidgets.QGroupBox:
         self.adv_group = QtWidgets.QGroupBox("Advanced headers")
-        layout.addWidget(self.adv_group)
         adv_layout = QtWidgets.QVBoxLayout(self.adv_group)
         self.headers_label = QtWidgets.QLabel("Custom headers (Key: Value per line)")
         adv_layout.addWidget(self.headers_label)
@@ -81,7 +91,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
         self.edit_cookies.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.edit_cookies)
+        return self.adv_group
 
+    def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
@@ -89,10 +101,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         help_btn.clicked.connect(self._show_help)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        # Let the dialog grow to fit content across platforms while honoring the minimum.
-        self.resize(self.sizeHint().expandedTo(self.minimumSize()))
+        return buttons
 
+    def _connect_signals(self) -> None:
         self.chk_gentle.toggled.connect(self._on_gentle_toggled)
         self.spin_parallel.valueChanged.connect(self._mark_custom)
         self.txt_headers.textChanged.connect(self._on_header_text_changed)
@@ -101,9 +112,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.btn_preset_gentle.toggled.connect(lambda checked: checked and self._apply_preset("gentle"))
         self.btn_preset_custom.toggled.connect(lambda checked: checked and self._sync_state())
 
-        self._applying_preset = False
+    def _initialize_options(self, options: CrawlOptions) -> None:
+        self.chk_gentle.setChecked(options.gentle_mode)
+        self.spin_parallel.setValue(options.max_concurrent_per_host or 2)
         self._load_from_options(options)
         self._sync_state()
+        self.resize(self.sizeHint().expandedTo(self.minimumSize()))
 
     @staticmethod
     def _checkbox_stylesheet(theme: str) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64encode
 import re
 import asyncio
 from dataclasses import dataclass
@@ -316,31 +317,45 @@ def _link_heading(tag: Tag) -> str:
     return ""
 
 
+def _content_type(headers: Any) -> str:
+    return str(headers.get("Content-Type") or "").split(";", 1)[0].lower()
+
+
+def _image_data_uri(raw: bytes, content_type: str) -> str:
+    if not raw or len(raw) > 200_000 or not content_type.startswith("image/"):
+        return ""
+    return f"data:{content_type};base64,{b64encode(raw).decode()}"
+
+
+def _decode_image_size(raw: bytes, content_type: str) -> tuple[int, int, str]:
+    try:
+        from io import BytesIO
+        from PIL import Image  # type: ignore
+
+        with Image.open(BytesIO(raw)) as image:
+            width, height = image.size
+            if content_type or not image.format:
+                return int(width or 0), int(height or 0), content_type
+            return int(width or 0), int(height or 0), f"image/{image.format.lower()}"
+    except Exception:
+        return 0, 0, content_type
+
+
+async def _download_image(url: str, timeout: int) -> tuple[bytes, str]:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=ClientTimeout(total=timeout)) as response:
+            raw = await response.read()
+            return raw, _content_type(response.headers)
+
+
 async def _fetch_image_details(url: str, timeout: int = 5) -> tuple[int, int, int, str, str]:
     if not url:
         return 0, 0, 0, "-", ""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=ClientTimeout(total=timeout)) as r:
-                raw = await r.read()
-                size_b = len(raw)
-                content_type = (r.headers.get("Content-Type") or "").split(";", 1)[0].lower()
-                data_uri = ""
-                if size_b and size_b <= 200_000 and content_type.startswith("image/"):
-                    from base64 import b64encode
-
-                    data_uri = f"data:{content_type};base64,{b64encode(raw).decode()}"
-                try:
-                    from io import BytesIO
-                    from PIL import Image  # type: ignore
-
-                    with Image.open(BytesIO(raw)) as im:
-                        w, h = im.size
-                        if not content_type and im.format:
-                            content_type = f"image/{im.format.lower()}"
-                except Exception:
-                    w, h = 0, 0
-                return int(w or 0), int(h or 0), int(size_b or 0), content_type or "-", data_uri
+        raw, content_type = await _download_image(url, timeout)
+        width, height, mime = _decode_image_size(raw, content_type)
+        size_b = int(len(raw) or 0)
+        return width, height, size_b, mime or "-", _image_data_uri(raw, mime or content_type)
     except Exception:
         return 0, 0, 0, "-", ""
 

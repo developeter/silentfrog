@@ -420,10 +420,30 @@ class AiVisibilityTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
         self._summary = _rich_label(ai_visibility_summary_tooltip())
+        self._row_resize_pending = False
         self.view.setWordWrap(True)
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
         self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        _header(self.view).sectionResized.connect(self._schedule_row_resize)
         self._layout.insertWidget(0, self._summary)
+
+    def _schedule_row_resize(self, *_args: object) -> None:
+        if self._row_resize_pending:
+            return
+        self._row_resize_pending = True
+        QtCore.QTimer.singleShot(0, self._apply_row_resize)
+
+    def _apply_row_resize(self) -> None:
+        self._row_resize_pending = False
+        if self.view.model() is None:
+            return
+        if not self.isVisible() or self.view.viewport().width() <= 0:
+            return
+        self.view.resizeRowsToContents()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        self._schedule_row_resize()
+        super().showEvent(event)
 
     def update(self, data: object) -> None:
         payload = data if isinstance(data, AiVisibilityPayload) else AiVisibilityPayload.from_raw(data)
@@ -454,7 +474,7 @@ class AiVisibilityTab(TableTab):
             (3, QtWidgets.QHeaderView.Stretch),
             (4, QtWidgets.QHeaderView.Stretch),
         )
-        self.view.resizeRowsToContents()
+        self._schedule_row_resize()
 
 
 class KeywordsTab(TableTab):

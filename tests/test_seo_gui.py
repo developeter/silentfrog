@@ -610,6 +610,17 @@ def test_recent_urls_persisted_and_ordered(qtbot, tmp_path: Path) -> None:
     assert win2.url_edit.itemText(1) == "https://example.com/two"
     assert win2.url_edit.count() == 2
 
+
+def test_seo_window_primary_controls_exist(qtbot) -> None:
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    assert win.btn_go.text() == "Analyze"
+    assert win.btn_export.text() == "Export Excel"
+    assert win.btn_img_dl.text() == "Analyze images"
+    assert win.btn_settings.text() == "Crawl settings..."
+    assert win.body_stack.currentWidget() is win._intro_panel
+
 def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
     _configure_settings(tmp_path)
     win = WebpageSeoWindow()
@@ -867,6 +878,55 @@ def test_ai_visibility_tab_empty_state_is_stable(qtbot) -> None:
     assert model.data(model.index(0, 0)) == "Info"
     assert model.data(model.index(0, 1)) == "No AI visibility data yet"
     assert model.data(model.index(0, 3)) == "Run an analysis to populate this tab."
+
+
+def test_ai_visibility_tab_resizes_rows_when_first_shown(qtbot, monkeypatch) -> None:
+    container = QtWidgets.QTabWidget()
+    intro = QtWidgets.QWidget()
+    tab = AiVisibilityTab()
+    container.addTab(intro, "Intro")
+    container.addTab(tab, "AI Visibility")
+    container.setCurrentWidget(intro)
+    qtbot.addWidget(container)
+
+    resize_calls: list[int] = []
+    original_apply = tab._apply_row_resize
+
+    def _tracked_apply() -> None:
+        resize_calls.append(tab.view.viewport().width())
+        original_apply()
+
+    monkeypatch.setattr(tab, "_apply_row_resize", _tracked_apply)
+
+    tab.update(
+        {
+            "summary": {
+                "verdict": "Needs work",
+                "good_count": 1,
+                "warning_count": 1,
+                "critical_count": 0,
+            },
+            "checks": [
+                {
+                    "area": "Answerability",
+                    "check": "The page answers the topic early",
+                    "status": "warning",
+                    "details": "This is deliberately long so the wrapped row height depends on the final visible width of the table.",
+                    "recommendation": "Add a concise opening summary paragraph near the top of the page.",
+                    "key": "answer_intro",
+                }
+            ],
+        }
+    )
+
+    container.resize(900, 400)
+    container.show()
+    qtbot.waitExposed(container)
+    container.setCurrentWidget(tab)
+    qtbot.wait(50)
+
+    assert resize_calls
+    assert any(width > 0 for width in resize_calls)
 
 
 def test_ai_visibility_tab_viewport_tooltip_event(qtbot, monkeypatch) -> None:

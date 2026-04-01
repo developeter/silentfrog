@@ -193,28 +193,42 @@ def _crawl_delay_for(options: CrawlOptions, host: str, robots: dict[str, list[tu
     return 0.0
 
 
+def _redirect_hops_result(hop_urls: list[str], status: str, is_loop: bool) -> tuple[list[str], str, int, bool]:
+    return hop_urls, status, len(hop_urls) - 1, is_loop
+
+
+def _redirect_target(current_url: str, response: Any) -> str | None:
+    if not 300 <= response.status < 400:
+        return None
+    location = response.headers.get("Location")
+    if not location:
+        return None
+    return urljoin(current_url, location)
+
+
+def _is_redirect_loop(hop_urls: list[str], next_url: str) -> bool:
+    return next_url in hop_urls
+
+
 async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
     max_hops = 6
     hop_urls: list[str] = [url]
     try:
-        async with aiohttp.ClientSession() as sess:
-            cur = url
+        async with aiohttp.ClientSession() as session:
+            current_url = url
             for _ in range(max_hops):
-                async with sess.head(
-                    cur,
+                async with session.head(
+                    current_url,
                     allow_redirects=False,
                     timeout=ClientTimeout(total=timeout),
-                ) as r:
-                    status = r.status
-                    if 300 <= status < 400 and "Location" in r.headers:
-                        nxt = urljoin(cur, r.headers["Location"])
-                        if nxt in hop_urls:
-                            hop_urls.append(nxt)
-                            return hop_urls, str(status), len(hop_urls) - 1, True
-                        hop_urls.append(nxt)
-                        cur = nxt
-                        continue
-                    return hop_urls, str(status), len(hop_urls) - 1, False
-        return hop_urls, "max-hops", len(hop_urls) - 1, False
+                ) as response:
+                    next_url = _redirect_target(current_url, response)
+                    if next_url is None:
+                        return _redirect_hops_result(hop_urls, str(response.status), False)
+                    hop_urls.append(next_url)
+                    if _is_redirect_loop(hop_urls[:-1], next_url):
+                        return _redirect_hops_result(hop_urls, str(response.status), True)
+                    current_url = next_url
+        return _redirect_hops_result(hop_urls, "max-hops", False)
     except Exception as exc:
-        return hop_urls, f"error {exc.__class__.__name__}", len(hop_urls) - 1, False
+        return _redirect_hops_result(hop_urls, f"error {exc.__class__.__name__}", False)

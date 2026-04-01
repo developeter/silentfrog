@@ -1,28 +1,3 @@
 {
-  "allowed": [
-    {
-      "id": "src/silentfrog/crawl_http.py:_trace_redirects|depth"
-    },
-    {
-      "id": "src/silentfrog/indexability.py:_verdict|bool_args"
-    },
-    {
-      "id": "src/silentfrog/keywords.py:_extract_keywords|branches"
-    },
-    {
-      "id": "src/silentfrog/keywords.py:_extract_keywords|length"
-    },
-    {
-      "id": "src/silentfrog/parsers_meta.py:_fetch_image_details|depth"
-    },
-    {
-      "id": "src/silentfrog/redirect.py:check_redirects|length"
-    },
-    {
-      "id": "src/silentfrog/seo_gui.py:_build_ui|length"
-    },
-    {
-      "id": "src/silentfrog/settings_dialog.py:__init__|length"
-    }
-  ]
+  "allowed": []
 }

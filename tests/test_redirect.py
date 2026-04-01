@@ -2,6 +2,7 @@ import pathlib
 import pandas as pd
 import requests_mock  # type: ignore[reportMissingImports]
 import pytest
+from openpyxl import load_workbook
 
 from silentfrog.redirect import check_redirects  # type: ignore[reportMissingImports]
 
@@ -65,3 +66,23 @@ def test_check_redirects_callback_and_rows(monkeypatch: pytest.MonkeyPatch, tmp_
     assert list(out_df["Redirect Correct"]) == ["Yes", "No"]
     assert list(out_df["Status Code"]) == [301, 404]
     assert calls and calls[-1][0] == len(out_df)
+
+
+def test_check_redirects_styles_404_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    df = pd.DataFrame({"Old URL": ["https://old.example.com/a"], "New URL": ["https://new.example.com/a"]})
+    in_xlsx = tmp_path / "input.xlsx"
+    df.to_excel(in_xlsx, index=False)
+
+    monkeypatch.setattr("silentfrog.redirect._single", lambda *args, **kwargs: (404, "", False, 0, ""))
+    monkeypatch.setattr("silentfrog.redirect._new_session", lambda verify_ssl: object())
+
+    out = check_redirects(excel_path=in_xlsx, timeout=1, max_workers=1, respect_robots=False)
+
+    workbook = load_workbook(out)
+    try:
+        sheet = workbook["Results"]
+        assert sheet["E2"].value == "No"
+        assert sheet["A2"].fill.start_color.rgb == "FFFFC7CE"
+        assert sheet["B2"].fill.start_color.rgb == "FFFFC7CE"
+    finally:
+        workbook.close()

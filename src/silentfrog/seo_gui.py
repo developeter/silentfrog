@@ -164,7 +164,13 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
+        layout.addLayout(self._build_url_bar())
+        layout.addWidget(self._build_body_stack(), 1)
+        layout.addLayout(self._build_controls_row())
+        layout.addWidget(self._build_progress_bar())
+        self._finalize_initial_ui()
 
+    def _build_url_bar(self) -> QtWidgets.QHBoxLayout:
         url_bar = QtWidgets.QHBoxLayout()
         self.url_edit = QtWidgets.QComboBox()
         self.url_edit.setEditable(True)
@@ -188,96 +194,83 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             line_edit.setFont(font)
             line_edit.setMinimumHeight(30)
         url_bar.addWidget(self.url_edit, 1)
-
         self.btn_go = QtWidgets.QPushButton("Analyze")
         self.btn_go.clicked.connect(self._start_analysis)
         self.btn_go.setMinimumHeight(30)
         url_bar.addWidget(self.btn_go)
-        layout.addLayout(url_bar)
+        return url_bar
 
+    def _build_body_stack(self) -> QtWidgets.QStackedWidget:
         self.tabs = QtWidgets.QTabWidget()
         self.body_stack = QtWidgets.QStackedWidget()
-        layout.addWidget(self.body_stack, 1)
         self._intro_panel = self._build_intro_panel()
         self.body_stack.addWidget(self._intro_panel)
+        self._populate_tabs()
+        self.body_stack.addWidget(self.tabs)
+        return self.body_stack
 
+    def _populate_tabs(self) -> None:
         self.meta_tab = MetaTab()
         self.tabs.addTab(self.meta_tab, "Meta tag")
-
         self.headers_tab = HeadersTab()
         self.tabs.addTab(self.headers_tab, "Header H1-H6")
-
         self.images_tab = ImagesTab()
         self.social_tab = SocialTab()
         self.tabs.addTab(self.images_tab, "Images")
         self.tabs.addTab(self.social_tab, "Social")
-
         self.links_tab = LinksTab()
         self.tabs.addTab(self.links_tab, "Link")
-
         self.redirect_tab = RedirectTab()
         self.tabs.addTab(self.redirect_tab, "Redirect")
-
         self.canonical_tab = CanonicalTab()
         self.tabs.addTab(self.canonical_tab, "Canonical")
-
         self.indexability_tab = IndexabilityTab()
         self.tabs.addTab(self.indexability_tab, "Indexability")
-
         self.robots_tab = RobotsTab()
         self.tabs.addTab(self.robots_tab, "Robots")
-
         self.hreflang_tab = HreflangTab()
         self.tabs.addTab(self.hreflang_tab, "Hreflang")
-
         self.schema_tab = SchemaTab()
         self.tabs.addTab(self.schema_tab, "Structured data")
-
         self.content_quality_tab = ContentQualityTab()
         self.tabs.addTab(self.content_quality_tab, "Content quality")
-
         self.keywords_tab = KeywordsTab()
         self.tabs.addTab(self.keywords_tab, "Keywords")
-
         self.ai_tab = AiTab()
         self.ai_visibility_tab = AiVisibilityTab()
         self.performance_tab = PerformanceTab()
         self.tabs.addTab(self.ai_tab, "AI crawl")
         self.tabs.addTab(self.ai_visibility_tab, "AI Visibility")
         self.tabs.addTab(self.performance_tab, "Performance")
-
         self.serp_tab = SerpTab()
         self.tabs.addTab(self.serp_tab, "SERP")
-        self.body_stack.addWidget(self.tabs)
 
+    def _build_controls_row(self) -> QtWidgets.QHBoxLayout:
         controls = QtWidgets.QHBoxLayout()
         self.btn_export = QtWidgets.QPushButton("Export Excel")
         self.btn_export.setEnabled(False)
         self._register_dimmed_button(self.btn_export)
         self.btn_export.clicked.connect(self._export_excel)
         controls.addWidget(self.btn_export)
-
         self.btn_img_dl = QtWidgets.QPushButton("Analyze images")
         self.btn_img_dl.setEnabled(False)
         self._register_dimmed_button(self.btn_img_dl)
         self.btn_img_dl.clicked.connect(self._start_img_analysis)
         controls.addWidget(self.btn_img_dl)
-
         self.btn_settings = QtWidgets.QPushButton("Crawl settings...")
         self.btn_settings.setToolTip("Adjust gentle crawl preferences")
         self.btn_settings.clicked.connect(self._open_crawl_settings)
         controls.addWidget(self.btn_settings)
-
         self.lbl_settings_state = QtWidgets.QLabel("Standard")
         font = self.lbl_settings_state.font()
         font.setPointSizeF(font.pointSizeF() - 1)
         self.lbl_settings_state.setFont(font)
         self.lbl_settings_state.setStyleSheet("color:#6b6b6b;")
         controls.addWidget(self.lbl_settings_state)
-
         controls.addStretch()
-        layout.addLayout(controls)
+        return controls
 
+    def _build_progress_bar(self) -> QtWidgets.QProgressBar:
         self.bar = QtWidgets.QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
@@ -285,7 +278,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bar.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.bar.setTextVisible(True)
         self.bar.setVisible(False)
-        layout.addWidget(self.bar)
+        return self.bar
+
+    def _finalize_initial_ui(self) -> None:
         self._update_settings_label()
         self._show_placeholder()
         self._set_intro_state(False)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
@@ -59,28 +60,33 @@ def _is_good_canonical_status(value: str) -> bool:
     return code is not None and 200 <= code < 400
 
 
-def _verdict(
-    final_status: str,
-    hops: int,
-    crawl_allowed: bool,
-    index_directive: str,
-    canonical_url: str,
-    canonical_self: bool,
-    canonical_status: str,
-    multiple_canonicals: bool,
-) -> str:
-    status_code = _to_int(final_status)
+@dataclass(frozen=True, slots=True)
+class _IndexabilityInputs:
+    final_status: str
+    hops: int
+    crawl_allowed: bool
+    index_directive: str
+    canonical_url: str
+    canonical_self: bool
+    canonical_status: str
+    multiple_canonicals: bool
+
+
+def _verdict(inputs: _IndexabilityInputs) -> str:
+    status_code = _to_int(inputs.final_status)
     if status_code is None or not 200 <= status_code < 300:
         return "Not indexable"
-    if not crawl_allowed:
+    if not inputs.crawl_allowed:
         return "Blocked by robots.txt"
-    if index_directive == "Noindex":
+    if inputs.index_directive == "Noindex":
         return "Noindex"
-    if hops > 0:
+    if inputs.hops > 0:
         return "Redirected"
-    if canonical_url and not canonical_self:
+    if inputs.canonical_url and not inputs.canonical_self:
         return "Canonicalized elsewhere"
-    if multiple_canonicals or (canonical_url and not _is_good_canonical_status(canonical_status)):
+    if inputs.multiple_canonicals:
+        return "Indexable with warnings"
+    if inputs.canonical_url and not _is_good_canonical_status(inputs.canonical_status):
         return "Indexable with warnings"
     return "Indexable"
 
@@ -106,14 +112,16 @@ def build_indexability_rows(
     canonical_status = str(canonical.get("status", "") or "")
     multiple_canonicals = bool(canonical.get("multiple"))
     verdict = _verdict(
-        final_status,
-        hops,
-        crawl_allowed,
-        index_directive,
-        canonical_url,
-        canonical_self,
-        canonical_status,
-        multiple_canonicals,
+        _IndexabilityInputs(
+            final_status=final_status,
+            hops=hops,
+            crawl_allowed=crawl_allowed,
+            index_directive=index_directive,
+            canonical_url=canonical_url,
+            canonical_self=canonical_self,
+            canonical_status=canonical_status,
+            multiple_canonicals=multiple_canonicals,
+        )
     )
     return [
         ["Requested URL", requested_url or "-"],

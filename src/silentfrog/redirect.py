@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Tuple
 from urllib.parse import urlparse
@@ -18,6 +19,13 @@ __all__ = ["check_redirects"]
 
 USER_AGENT = "SilentFrog/1.0 (+https://example.com)"
 _logger = logging.getLogger(__name__)
+_RESULT_COLUMNS = (
+    "Status Code",
+    "Final URL",
+    "Redirect Correct",
+    "Redirect Chain Length",
+    "Redirect Chain URLs",
+)
 
 
 def _robots_allowed(url: str) -> bool:
@@ -70,6 +78,102 @@ def _single(
         return "Error", "", False, 0, str(exc)
 
 
+@dataclass(frozen=True, slots=True)
+class _RedirectRowResult:
+    index: int
+    old_url: str
+    status: str | int
+    final_url: str
+    is_correct: bool
+    chain_length: int
+    chain_urls: str
+
+
+def _load_redirect_frame(excel_path: Path) -> pd.DataFrame:
+    first_df = pd.read_excel(excel_path, nrows=1)
+    has_headers = {"Old URL", "New URL"}.issubset(first_df.columns)
+    if has_headers:
+        return pd.read_excel(excel_path)
+    return pd.read_excel(excel_path, header=None, names=["Old URL", "New URL"])
+
+
+def _ensure_result_columns(df: pd.DataFrame) -> None:
+    for column in _RESULT_COLUMNS:
+        if column not in df.columns:
+            df[column] = ""
+
+
+def _redirect_jobs(df: pd.DataFrame) -> list[tuple[int, str, str]]:
+    jobs: list[tuple[int, str, str]] = []
+    for index, row in df.iterrows():
+        jobs.append((index, str(row["Old URL"]), str(row["New URL"])))
+    return jobs
+
+
+def _run_redirect_job(
+    job: tuple[int, str, str],
+    *,
+    timeout: int,
+    respect_robots: bool,
+    verify_ssl: bool,
+) -> _RedirectRowResult:
+    index, old_url, new_url = job
+    session = _new_session(verify_ssl)
+    status, final_url, is_correct, chain_length, chain_urls = _single(
+        session,
+        old_url,
+        new_url,
+        timeout,
+        respect_robots,
+    )
+    return _RedirectRowResult(index, old_url, status, final_url, is_correct, chain_length, chain_urls)
+
+
+def _apply_redirect_result(df: pd.DataFrame, result: _RedirectRowResult) -> None:
+    df.loc[result.index, "Status Code"] = result.status
+    df.loc[result.index, "Final URL"] = result.final_url
+    df.loc[result.index, "Redirect Correct"] = "Yes" if result.is_correct else "No"
+    df.loc[result.index, "Redirect Chain Length"] = result.chain_length
+    df.loc[result.index, "Redirect Chain URLs"] = result.chain_urls
+
+
+def _pause_if_requested(pause_flag: threading.Event | None) -> None:
+    if pause_flag is None:
+        return
+    while pause_flag.is_set():
+        time.sleep(0.2)
+
+
+def _status_column_index(worksheet) -> int | None:
+    for index, cell in enumerate(worksheet[1], start=1):
+        if cell.value == "Status Code":
+            return index
+    return None
+
+
+def _style_redirect_sheet(worksheet) -> None:
+    from openpyxl.styles import Font, PatternFill
+
+    default_font = Font(name="Arial", size=10)
+    red_fill = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
+    status_idx = _status_column_index(worksheet)
+
+    for row in worksheet.iter_rows():
+        for cell in row:
+            cell.font = default_font
+        if status_idx and row[status_idx - 1].value == 404:
+            for cell in row:
+                cell.fill = red_fill
+
+
+def _write_redirect_results(df: pd.DataFrame, output_path: Path) -> Path:
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Results")
+        worksheet = writer.sheets["Results"]
+        _style_redirect_sheet(worksheet)
+    return output_path
+
+
 def check_redirects(
     excel_path: str | Path,
     *,
@@ -85,82 +189,27 @@ def check_redirects(
     crea <nome>_results.xlsx con font Arial 10 pt e righe 404 rosso chiaro.
     """
     excel_path = Path(excel_path)
-
-    first_df = pd.read_excel(excel_path, nrows=1)
-    if {"Old URL", "New URL"}.issubset(first_df.columns):
-        df = pd.read_excel(excel_path)
-    else:
-        df = pd.read_excel(excel_path, header=None, names=["Old URL", "New URL"])
-
+    df = _load_redirect_frame(excel_path)
+    _ensure_result_columns(df)
     total = len(df)
-    for col in (
-        "Status Code",
-        "Final URL",
-        "Redirect Correct",
-        "Redirect Chain Length",
-        "Redirect Chain URLs",
-    ):
-        if col not in df.columns:
-            df[col] = ""
-
     done = 0
-    lock = threading.Lock()
-
-    def _task(idx_row: Tuple[int, pd.Series]) -> None:
-        nonlocal done
-        idx, row = idx_row
-        sess = _new_session(verify_ssl)
-        status, final, ok, length, chain = _single(
-            sess,
-            str(row["Old URL"]),
-            str(row["New URL"]),
-            timeout,
-            respect_robots,
+    jobs = _redirect_jobs(df)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(
+            lambda job: _run_redirect_job(
+                job,
+                timeout=timeout,
+                respect_robots=respect_robots,
+                verify_ssl=verify_ssl,
+            ),
+            jobs,
         )
-
-        df.loc[idx, "Status Code"] = status
-        df.loc[idx, "Final URL"] = final
-        df.loc[idx, "Redirect Correct"] = "Yes" if ok else "No"
-        df.loc[idx, "Redirect Chain Length"] = length
-        df.loc[idx, "Redirect Chain URLs"] = chain
-
-        with lock:
+        for result in results:
+            _apply_redirect_result(df, result)
             done += 1
             if progress_callback:
-                progress_callback(done, total, row["Old URL"], status)
+                progress_callback(done, total, result.old_url, result.status)
+            _pause_if_requested(pause_flag)
 
-        if pause_flag is not None:
-            while pause_flag.is_set():
-                time.sleep(0.2)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        list(ex.map(_task, df.iterrows()))
-
-    out = excel_path.with_stem(excel_path.stem + "_results")
-    # ---------- scrittura + styling ----------------------------------- #
-    from openpyxl.styles import Font, PatternFill
-
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Results")
-
-        wb = writer.book
-        ws = writer.sheets["Results"]
-
-        default_font = Font(name="Arial", size=10)
-        red_fill = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
-
-        # trova indice colonna Status Code
-        status_idx = None
-        for i, c in enumerate(ws[1], 1):
-            if c.value == "Status Code":
-                status_idx = i
-                break
-
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.font = default_font
-            if status_idx and row[status_idx - 1].value == 404:
-                for cell in row:
-                    cell.fill = red_fill
-
-    return out
+    output_path = excel_path.with_stem(excel_path.stem + "_results")
+    return _write_redirect_results(df, output_path)
