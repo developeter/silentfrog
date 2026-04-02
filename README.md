@@ -104,7 +104,7 @@ $ poetry run silentfrog
 $ poetry run python -m silentfrog
 ```
 
-`doctor` also runs the repository **code-shape guard**, which blocks new deeply nested or branch-heavy functions unless they are intentionally grandfathered in the baseline.
+`doctor` also runs the repository **code-shape guard**, which blocks new deeply nested or branch-heavy functions. The baseline is intentionally kept empty after the latest cleanup, so new violations should be refactored instead of silently allowed.
 
 ### Entry points (explicit)
 
@@ -270,6 +270,12 @@ For a full quality gate (environment checks + compile + tests), use:
 poetry run python tools/doctor.py
 ```
 
+For the faster local loop, use:
+
+```bash
+poetry run python tools/doctor.py --quick
+```
+
 Install automatic hooks once if you want tests to run on commit/push:
 
 ```bash
@@ -294,7 +300,7 @@ silentfrog/
 │   ├── source_install.py  # Local .venv installer and launcher generation
 │   ├── doctor.py          # Env/dependency/resource/compile/test checks
 │   ├── code_shape_guard.py # AST-based complexity/nesting guard
-│   ├── code_shape_baseline.json # Grandfathered legacy guard exceptions
+│   ├── code_shape_baseline.json # Temporary allowlist for legacy exceptions (currently empty)
 │   └── install_hooks.py   # Configures git to use .githooks/
 ├── .githooks/
 │   ├── pre-commit         # Runs doctor --quick automatically
@@ -310,7 +316,10 @@ silentfrog/
 │   ├── __main__.py        # Enables `python -m silentfrog`
 │   ├── ai_visibility.py   # AI Visibility heuristics and tooltip text
 │   ├── content_quality.py # Content quality heuristics for single-page analysis
-│   ├── gui.py            # Home launcher / theme switcher
+│   ├── crawl_options.py   # Typed crawl/gentle-mode settings
+│   ├── crawler_api.py     # Public crawler-facing helpers
+│   ├── crawler_utils.py   # Shared crawler utility helpers
+│   ├── gui.py             # Home launcher / theme switcher
 │   ├── image_diagnostics.py # Shared image-table schema and diagnostics helpers
 │   ├── indexability.py   # Indexability verdict helpers
 │   ├── seo_gui.py        # Single-page analysis window
@@ -329,6 +338,7 @@ silentfrog/
 │   ├── keywords.py       # Keyword tokenization and density analysis
 │   ├── redirect.py       # Redirect export / parsing helpers
 │   ├── redirect_gui.py   # Massive redirect check window
+│   ├── nltk_data/        # Bundled tokenization/stopword resources
 │   ├── resources/        # Bundled stopword lists
 │   ├── assets/           # Bundled icons and UI assets
 │   ├── settings_dialog.py # Crawl settings dialog
