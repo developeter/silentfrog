@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Dict, List
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt
+from qtpy import QtCore
+from qtpy.QtCore import Qt
 
 from ..theme import StatusBrushPalette, status_brushes
 from .base import _BaseModel

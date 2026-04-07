@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from typing import List
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt
+from qtpy import QtCore
+from qtpy.QtCore import Qt
 
 from ..image_diagnostics import (
     ACTUAL_HEIGHT_COL,

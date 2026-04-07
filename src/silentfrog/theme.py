@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from PyQt5 import QtGui, QtWidgets
+from qtpy import QtGui, QtWidgets
 
 DARK_STYLESHEET = """
 QWidget            { background: #1e1e1e; color: #f0f0f0; }

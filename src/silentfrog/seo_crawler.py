@@ -5,6 +5,7 @@ and keyword extraction into the public `analyse` / `analyse_images` API.
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any, cast
 from urllib.parse import urljoin
 
@@ -54,6 +55,21 @@ from .schema_extractor import _extract_schema_all
 _HOST_DELAYS = crawl_http._HOST_DELAYS
 
 
+def _fetch_failure_message(url: str) -> str:
+    base = (
+        f"Unable to fetch {url}. "
+        "Check the URL, network connectivity, and HTTPS/TLS certificate setup."
+    )
+    if sys.platform == "darwin":
+        return (
+            f"{base}\n\n"
+            "macOS note: if you installed Python from python.org, run the matching "
+            "'Install Certificates.command' and retry. Silentfrog's installer path is "
+            "currently tested with Python 3.12 on macOS."
+        )
+    return base
+
+
 async def _fetch_analysis_response(
     url: str,
     timeout: int,
@@ -79,6 +95,8 @@ async def _fetch_analysis_response(
                 break
             await asyncio.sleep(_BACKOFF_DELAY)
         assert resp is not None
+        if resp.status == 0 and not resp.body:
+            raise RuntimeError(_fetch_failure_message(url))
     return resp, robots_snapshot
 
 

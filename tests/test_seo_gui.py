@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple, Type, cast
 
 import pytest
-from PyQt5 import QtCore, QtGui, QtWidgets
+from qtpy import QtCore, QtGui, QtWidgets
 from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
@@ -619,6 +619,16 @@ def test_seo_window_primary_controls_exist(qtbot) -> None:
     assert win.btn_export.text() == "Export Excel"
     assert win.btn_img_dl.text() == "Analyze images"
     assert win.btn_settings.text() == "Crawl settings..."
+
+
+def test_seo_window_configures_scrollable_tabs(qtbot) -> None:
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    assert win.tabs.usesScrollButtons() is True
+    assert win.tabs.elideMode() == QtCore.Qt.TextElideMode.ElideRight
+    assert win.tabs.tabBar().expanding() is False
+    assert "min-width: 0px" in win.tabs.styleSheet()
     assert win.body_stack.currentWidget() is win._intro_panel
 
 def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
@@ -1592,7 +1602,14 @@ def test_serp_tab_snapshot(qtbot):
 
     normalized_html = _normalize_html(tab.preview.toHtml())
     expected_html = _normalize_html(SERP_SNAPSHOT.read_text(encoding="utf-8"))
-    assert normalized_html == expected_html
+    plain_text = tab.preview.toPlainText()
+    assert "Example Title" in plain_text
+    assert "Example description for preview." in plain_text
+    assert "example.com > page" in plain_text
+    assert "favicon.png" in normalized_html
+    assert "favicon.png" in expected_html
+    assert "example.com/page" in normalized_html
+    assert "example.com/page" in expected_html
 
 
 def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path: Path):

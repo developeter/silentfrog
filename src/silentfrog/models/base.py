@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Any, List, Sequence
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt
+from qtpy import QtCore
+from qtpy.QtCore import Qt
 
 
 class _BaseModel(QtCore.QAbstractTableModel):

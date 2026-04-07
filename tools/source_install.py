@@ -25,8 +25,15 @@ def is_windows(system_name: str | None = None) -> bool:
     return (system_name or platform.system()).lower().startswith("win")
 
 
-def validate_python_version(version: tuple[int, int]) -> str | None:
+def _is_macos(system_name: str | None = None) -> bool:
+    return (system_name or platform.system()).lower() == "darwin"
+
+
+def validate_python_version(version: tuple[int, int], system_name: str | None = None) -> str | None:
     if version >= MIN_PYTHON:
+        if _is_macos(system_name) and version != MIN_PYTHON:
+            found = ".".join(map(str, version))
+            return f"Python 3.12 is required for the macOS installer path. Found {found}."
         return None
     required = ".".join(map(str, MIN_PYTHON))
     found = ".".join(map(str, version))
@@ -70,6 +77,7 @@ def render_run_bat() -> str:
             "@echo off",
             "setlocal",
             "pushd %~dp0",
+            'set "QT_API=pyside6"',
             'set "LAUNCHER=%~dp0.venv\\Scripts\\silentfrog.exe"',
             'if exist "%LAUNCHER%" (',
             '  call "%LAUNCHER%" %*',
@@ -87,6 +95,7 @@ def render_run_sh() -> str:
             "#!/usr/bin/env bash",
             "set -euo pipefail",
             'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'export QT_API="${QT_API:-pyside6}"',
             'launcher="$script_dir/.venv/bin/silentfrog"',
             'if [[ -x "$launcher" ]]; then',
             '  exec "$launcher" "$@"',
@@ -193,10 +202,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    version_error = validate_python_version((sys.version_info.major, sys.version_info.minor))
+    version_error = validate_python_version((sys.version_info.major, sys.version_info.minor), platform.system())
     if version_error:
         print(f"[install] {version_error}")
-        print("[install] Install Python 3.12 or newer, then run this command again.")
+        if _is_macos():
+            print("[install] Use Python 3.12 on macOS, then run this command again.")
+        else:
+            print("[install] Install Python 3.12 or newer, then run this command again.")
         return 1
 
     root = Path(__file__).resolve().parents[1]

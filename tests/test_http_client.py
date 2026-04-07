@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import ssl
 
 from silentfrog.http_client import HttpResponse, fetch_page  # type: ignore[reportMissingImports]
 
@@ -34,3 +35,26 @@ async def test_fetch_page_uses_supplied_headers(monkeypatch):
     await fetch_page("https://example.com", headers=custom_headers)
 
     assert captured["headers"] == custom_headers
+
+
+def test_ssl_context_uses_certifi_bundle(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class DummyContext:
+        def set_ciphers(self, value: str) -> None:
+            captured["ciphers"] = value
+
+    def fake_create_default_context(*, cafile=None):
+        captured["cafile"] = cafile
+        return DummyContext()
+
+    monkeypatch.setattr("silentfrog.http_client.certifi.where", lambda: "/tmp/cacert.pem")
+    monkeypatch.setattr(ssl, "create_default_context", fake_create_default_context)
+
+    from silentfrog.http_client import _ssl_context  # type: ignore[reportMissingImports]
+
+    context = _ssl_context()
+
+    assert isinstance(context, DummyContext)
+    assert captured["cafile"] == "/tmp/cacert.pem"
+    assert captured["ciphers"] == "DEFAULT:@SECLEVEL=1"

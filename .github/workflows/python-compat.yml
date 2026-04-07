@@ -1,0 +1,40 @@
+name: Python Compatibility
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  compatibility:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+    env:
+      QT_API: pyside6
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      POETRY_VIRTUALENVS_CREATE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: abatilo/actions-poetry@v4
+        with:
+          poetry-version: "2.1.4"
+      - name: Install dependencies
+        run: poetry install
+      - name: Dependency install smoke
+        run: poetry run python -c "from qtpy import API_NAME; import silentfrog; print(API_NAME)"
+      - name: Unit smoke
+        run: poetry run pytest -q tests/test_sanity.py tests/test_http_client.py tests/test_source_install_unit.py tests/test_package_app_unit.py
+      - name: GUI smoke
+        run: poetry run pytest -q tests/test_qt_runtime_smoke.py tests/test_seo_gui.py -k "seo_window_primary_controls_exist or seo_window_configures_scrollable_tabs"
+      - name: Crawl smoke
+        run: poetry run pytest -q tests/test_seo_crawler.py -k "test_analyse"
+      - name: Packaging dry-run smoke
+        run: poetry run python tools/package_app.py --dry-run

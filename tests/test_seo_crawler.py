@@ -369,3 +369,24 @@ async def test_gentle_mode_toggles_backoff_behavior(monkeypatch, aiohttp_server)
     fast_options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4)
     await crawler.analyse(url, timeout=5, options=fast_options)
     assert not sleep_calls  # no backoff when gentle mode is off
+
+
+@pytest.mark.asyncio
+async def test_fetch_analysis_response_raises_helpful_error_on_fetch_failure(monkeypatch):
+    class DummyResponse:
+        status = 0
+        body = ""
+        url = "https://example.com"
+        headers: dict[str, str] = {}
+
+    async def fake_fetch_page(url, timeout, headers=None):
+        return DummyResponse()
+
+    monkeypatch.setattr(crawler, "fetch_page", fake_fetch_page)
+
+    with pytest.raises(RuntimeError, match="Unable to fetch https://example.com"):
+        await crawler._fetch_analysis_response(
+            "https://example.com",
+            timeout=5,
+            crawl_options=CrawlOptions.default(),
+        )

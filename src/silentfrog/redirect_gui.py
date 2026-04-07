@@ -4,14 +4,14 @@ import threading
 import time
 import sys
 from pathlib import Path
-from PyQt5 import QtCore, QtGui, QtWidgets
+from qtpy import QtCore, QtGui, QtWidgets
 from .redirect import check_redirects
 
 
 class RedirectWorker(QtCore.QThread):
-    progress = QtCore.pyqtSignal(int)
-    log = QtCore.pyqtSignal(str)
-    finished = QtCore.pyqtSignal(str)
+    progress = QtCore.Signal(int)
+    log = QtCore.Signal(str)
+    finished = QtCore.Signal(str)
 
     def __init__(
         self,

@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import (
+from qtpy import QtCore, QtGui, QtWidgets
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QIcon
+from qtpy.QtWidgets import (
     QApplication,
     QButtonGroup,
     QDialog,
@@ -91,7 +91,7 @@ class HomeWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self)
-        dlg.exec_()
+        dlg.exec()
 
 
 class _SettingsDialog(QDialog):
@@ -145,7 +145,7 @@ def main() -> None:
 
     window = HomeWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

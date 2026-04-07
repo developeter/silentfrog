@@ -4,6 +4,7 @@ import ssl
 from typing import Optional
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+import certifi
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from time import perf_counter
@@ -19,6 +20,13 @@ class HttpResponse:
     headers: dict[str, str]
     ttfb_ms: float
     total_ms: float
+
+
+def _ssl_context() -> ssl.SSLContext:
+    cafile = certifi.where()
+    ssl_ctx = ssl.create_default_context(cafile=cafile)
+    ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
+    return ssl_ctx
 
 
 async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
@@ -45,14 +53,12 @@ async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpR
 
 
 async def fetch_page(url: str, timeout: int = 10, headers: Optional[dict[str, str]] = None) -> HttpResponse:
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
     base_headers = headers or {
         "User-Agent": DEFAULT_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    connector = aiohttp.TCPConnector(ssl=_ssl_context())
     async with aiohttp.ClientSession(headers=base_headers, connector=connector) as session:
         return await fetch(session, url, timeout)
 

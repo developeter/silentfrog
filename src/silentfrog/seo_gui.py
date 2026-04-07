@@ -7,7 +7,7 @@ from typing import Any, Callable
 import sys
 from urllib.parse import urlparse
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from qtpy import QtCore, QtGui, QtWidgets
 
 from .crawl_types import CrawlPayload
 from .crawl_options import CrawlOptions
@@ -131,13 +131,12 @@ log = logging.getLogger(__name__)
 class WebpageSeoWindow(QtWidgets.QWidget):
     """Main SEO analysis window wiring reusable tabs and async workers."""
 
-    dataReady = QtCore.pyqtSignal(dict)  # payload dei dati
-    errorSig = QtCore.pyqtSignal(str)    # messaggio d'errore
+    dataReady = QtCore.Signal(dict)  # payload dei dati
+    errorSig = QtCore.Signal(str)    # messaggio d'errore
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog - SEO webpage analysis")
-        self.resize(950, 620)
         icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         self._latest_payload: CrawlPayload | None = None
@@ -145,6 +144,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._crawl_options: CrawlOptions = CrawlOptions.default()
 
         self._build_ui()
+        self._apply_initial_window_size()
         app = QtWidgets.QApplication.instance()
         org = app.organizationName() or "Silentfrog" if app else "Silentfrog"
         name = app.applicationName() or "Silentfrog" if app else "Silentfrog"
@@ -187,6 +187,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._recent_view.setStyleSheet("QListView::item { padding-right: 26px; }")
         self._recent_view.setItemDelegate(self._recent_delegate)
         self.url_edit.setView(self._recent_view)
+        self._recent_view.viewport().installEventFilter(self)
         line_edit = self.url_edit.lineEdit()
         if line_edit:
             line_edit.setPlaceholderText("https://example.com")
@@ -202,12 +203,29 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _build_body_stack(self) -> QtWidgets.QStackedWidget:
         self.tabs = QtWidgets.QTabWidget()
+        self._configure_main_tabs()
         self.body_stack = QtWidgets.QStackedWidget()
         self._intro_panel = self._build_intro_panel()
         self.body_stack.addWidget(self._intro_panel)
         self._populate_tabs()
         self.body_stack.addWidget(self.tabs)
         return self.body_stack
+
+    def _configure_main_tabs(self) -> None:
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(QtCore.Qt.TextElideMode.ElideRight)
+        self.tabs.tabBar().setExpanding(False)
+        self.tabs.setStyleSheet("QTabBar::tab { min-width: 0px; }")
+
+    def _apply_initial_window_size(self) -> None:
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self.resize(950, 620)
+            return
+        available = screen.availableGeometry()
+        target_width = min(950, max(720, available.width() - 80))
+        target_height = min(620, max(520, available.height() - 100))
+        self.resize(target_width, target_height)
 
     def _populate_tabs(self) -> None:
         self.meta_tab = MetaTab()

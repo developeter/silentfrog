@@ -1,6 +1,12 @@
 ﻿# Silentfrog - Desktop SEO Toolkit
 
-Silentfrog is a **desktop SEO auditor** built with **Python 3.12** and **PyQt 5**.
+Silentfrog is a **desktop SEO auditor** built with **Python** and **Qt for Python**.
+
+The current GUI runtime targets:
+
+- **QtPy** as the abstraction layer
+- **PySide6** as the primary Qt backend
+- **PyQt5** only as a temporary transition fallback
 
 It lets you quickly:
 
@@ -17,18 +23,39 @@ It lets you quickly:
 
 |            | Recommended   | Why                                                                 |
 | ---------- | ------------- | ------------------------------------------------------------------- |
-| **Python** | **3.12**      | Matches `pyproject.toml` and the tested dependency set              |
+| **Python** | **3.12**      | Current tested baseline for local development and the macOS source installer |
 | **Poetry** | >= 1.8        | Development workflow only                                           |
 | **Git**    | any           | Clone updates                                                       |
 
 > On **Windows** enable "Add Python to PATH" during install.  
-> On **macOS** use Homebrew (`brew install python@3.12`).
+> On **macOS** use **Python 3.12** (`brew install python@3.12` or the python.org 3.12 installer). The installer path is not supported on Python 3.14 yet.
 
 ---
 
-## 2. One-command install (from source)
+## 2. Packaged app path (recommended for end users)
 
-You only need **Python 3.12+** installed manually.
+This is the intended long-term install path for normal users.
+
+The repository now includes:
+
+- a packaging helper based on **`pyside6-deploy`**
+- a GitHub Actions packaging workflow for **macOS** and **Windows**
+- a Python compatibility workflow for **3.12 / 3.13 / 3.14**
+
+If packaged release artifacts are available for your platform, use those first.
+
+If you are working from source before packaged artifacts are published, use the fallback source installer in **Section 3**.
+
+---
+
+## 3. Source install (developers / advanced users)
+
+This path is still supported, but it is no longer the preferred end-user story.
+
+You only need Python installed manually:
+
+- **Windows**: Python **3.12+**
+- **macOS**: Python **3.12** for now
 
 The installer will:
 
@@ -36,6 +63,7 @@ The installer will:
 - upgrade `pip`, `setuptools`, and `wheel`
 - install Silentfrog into that `.venv`
 - refresh the launcher scripts
+- default the GUI runtime to `QT_API=pyside6`
 - create a Desktop launcher:
   - Windows: `Silentfrog.lnk`
   - macOS: `Silentfrog.command`
@@ -50,7 +78,7 @@ py install_silentfrog.py
 python3 install_silentfrog.py
 ```
 
-If Python is missing or too old, the installer stops with a clear message instead of failing later.
+If Python is missing, too old, or unsupported for the installer path, the installer stops with a clear message instead of failing later.
 
 ### Launch after install
 
@@ -79,11 +107,15 @@ install_silentfrog.bat
 
 ---
 
-## 3. Quick start (recommended: Poetry for development)
+## 4. Developer setup (Poetry)
+
+This section is for contributors and local development.
+
+If you only want to run the app, prefer packaged artifacts from **Section 2**, or use the fallback source installer from **Section 3**.
 
 ```bash
 # clone
-$ git clone https://github.com/your-org/silentfrog.git
+$ git clone https://github.com/developeter/silentfrog.git
 $ cd silentfrog
 
 # pick the right interpreter
@@ -113,6 +145,8 @@ $ poetry run python -m silentfrog
 
 ### Running without Poetry
 
+This is a manual developer alternative. For normal end-user installation, prefer **Section 2**.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
@@ -129,12 +163,13 @@ py -m venv .venv
 .venv\Scripts\python.exe -m silentfrog
 ```
 
-Use Python 3.12; that is the tested baseline for this repository.
+The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the GUI runtime targets `PySide6 + QtPy`, but the tested local baseline remains **3.12** until the compatibility matrix stays green.
 
 **macOS first-run notes**
+- The supported installer path is **Python 3.12** on macOS. Do not use Python 3.14 for first-time installs yet.
 - If `pip`/HTTPS certificate validation fails with the python.org installer build, run:  
   `open "/Applications/Python 3.12/Install Certificates.command"` and retry the install.
-- Use `python3.12` (PyQt 5.15 has universal2 wheels); avoid 3.13 until lxml/extruct wheels land.
+- The packaged app path is the preferred way to avoid local Python/bootstrap issues on macOS.
 
 ## Support & project status
 
@@ -142,6 +177,7 @@ Use Python 3.12; that is the tested baseline for this repository.
 - Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs, feature requests, or security reports. Everything is tracked publicly.
 - Code is written from scratch for this project; if you suspect unintentional reuse, open an issue and it will be addressed.
 - The `dev` branch reflects ongoing work, while `main` only contains tagged releases.
+- The runtime migration targets **QtPy + PySide6**. `PyQt5` remains in the dependency set temporarily as a fallback while the transition stabilizes.
 
 ## Exporting reports
 
@@ -229,7 +265,8 @@ Unset the variable (or set it to `1`) to re-enable the guidance.
 
 * **Gatekeeper** – if the window will not open: `xattr -dr com.apple.quarantine silentfrog`
 * **lxml build fails** with CPython 3.13 – use Python 3.12 **or** follow the manual-compile instructions in §7.
-* **Standalone bundles** – packaged binaries are not a supported release path right now; use the local source installer or run via Poetry.
+* **HTTPS fetch failures** after a python.org install – run `Install Certificates.command`, then retry.
+* **Packaged apps** – if a packaged artifact is available for your platform, prefer it over manual source installation.
 
 ---
 
@@ -296,15 +333,22 @@ silentfrog/
 ├── README.md
 ├── run_silentfrog.bat
 ├── run_silentfrog.sh
+├── deploy/
+│   └── main.py           # Packaging entrypoint for pyside6-deploy
 ├── tools/
 │   ├── source_install.py  # Local .venv installer and launcher generation
 │   ├── doctor.py          # Env/dependency/resource/compile/test checks
 │   ├── code_shape_guard.py # AST-based complexity/nesting guard
 │   ├── code_shape_baseline.json # Temporary allowlist for legacy exceptions (currently empty)
-│   └── install_hooks.py   # Configures git to use .githooks/
+│   ├── install_hooks.py   # Configures git to use .githooks/
+│   └── package_app.py     # Wrapper around pyside6-deploy
 ├── .githooks/
 │   ├── pre-commit         # Runs doctor --quick automatically
 │   └── pre-push           # Runs full doctor automatically
+├── .github/
+│   └── workflows/
+│       ├── python-compat.yml # Windows/macOS compatibility matrix
+│       └── package-app.yml   # Packaged app workflow
 ├── docs/
 │   └── tests/
 │       ├── README.md
@@ -346,6 +390,9 @@ silentfrog/
 │   ├── workers.py        # Thread helpers wrapping async tasks
 │   └── seo_crawler.py    # Orchestrator wiring the modules above
 ├── tests/
+│   ├── conftest.py
+│   ├── test_qt_runtime_smoke.py
+│   ├── test_package_app_unit.py
 │   ├── test_ai_visibility_unit.py
 │   ├── test_source_install_unit.py
 │   ├── test_image_diagnostics_unit.py
@@ -362,11 +409,11 @@ silentfrog/
 
 ---
 
-## 6. Packaging binaries (optional)
+## 6. Packaging binaries (preferred release path)
 
 | OS      | Command                                    | Output                |
 | ------- | ------------------------------------------ | --------------------- |
-| Windows / macOS | Standalone packaging is currently not a supported release path; use `install_silentfrog.py` for a local `.venv` install or run `poetry run silentfrog` during development. | Local source install |
+| Windows / macOS | `poetry run python tools/package_app.py --mode standalone` | Packaged desktop artifact |
 
 --- 
 

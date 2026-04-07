@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import List, Sequence
 
-from PyQt5 import QtCore
-from PyQt5.QtCore import Qt
+from qtpy import QtCore
+from qtpy.QtCore import Qt
 
 from ..ai_visibility import ai_visibility_check_tooltip
 from ..theme import StatusBrushPalette, status_brushes

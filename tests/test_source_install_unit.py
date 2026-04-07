@@ -23,6 +23,14 @@ def test_validate_python_version_rejects_old_versions() -> None:
     assert validate_python_version((3, 12)) is None
 
 
+def test_validate_python_version_requires_python_312_on_macos() -> None:
+    assert validate_python_version((3, 12), "Darwin") is None
+    assert validate_python_version((3, 14), "Darwin") == (
+        "Python 3.12 is required for the macOS installer path. Found 3.14."
+    )
+    assert validate_python_version((3, 14), "Windows") is None
+
+
 def test_installer_paths_for_windows_and_unix(tmp_path: Path) -> None:
     windows_paths = installer_paths(tmp_path, "Windows")
     unix_paths = installer_paths(tmp_path, "Darwin")
@@ -52,8 +60,10 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     install_sh = render_install_sh()
 
     assert ".venv\\Scripts\\silentfrog.exe" in run_bat
+    assert 'QT_API=pyside6' in run_bat
     assert "poetry run silentfrog" in run_bat
     assert ".venv/bin/silentfrog" in run_sh
+    assert 'QT_API="${QT_API:-pyside6}"' in run_sh
     assert 'poetry run silentfrog "$@"' in run_sh
     assert "install_silentfrog.py" in install_bat
     assert "install_silentfrog.py" in install_sh

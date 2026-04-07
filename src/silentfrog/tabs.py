@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, cast
 import sys
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPalette, QColor
+from qtpy import QtCore, QtGui, QtWidgets
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette, QColor
 from .ai_visibility import ai_visibility_summary_tooltip
 from .content_quality import build_content_quality_rows
 from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_rows
@@ -78,6 +78,14 @@ def _set_header_modes(
         header.setSectionResizeMode(column, mode)
 
 
+def _configure_table_view_geometry(view: QtWidgets.QTableView) -> None:
+    policy = view.sizePolicy()
+    policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Policy.Ignored)
+    policy.setVerticalPolicy(QtWidgets.QSizePolicy.Policy.Expanding)
+    view.setSizePolicy(policy)
+    view.setSizeAdjustPolicy(QtWidgets.QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+
+
 def _rich_label(tooltip: str = "") -> QtWidgets.QLabel:
     label = QtWidgets.QLabel()
     label.setWordWrap(True)
@@ -89,10 +97,14 @@ def _rich_label(tooltip: str = "") -> QtWidgets.QLabel:
 
 def _is_dark(widget: QtWidgets.QWidget) -> bool:
     base = widget.palette().color(QPalette.Base)
-    if base.isValid():
+    if widget.testAttribute(QtCore.Qt.WidgetAttribute.WA_SetPalette) and base.isValid():
         return base.value() < 128
     app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
-    return current_theme(app) == "dark"
+    if app is not None:
+        return current_theme(app) == "dark"
+    if base.isValid():
+        return base.value() < 128
+    return False
 
 
 class _TooltipTableView(QtWidgets.QTableView):
@@ -132,6 +144,7 @@ class TableTab(QtWidgets.QWidget):
     def __init__(self, sorting: bool = True, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._table = _TooltipTableView()
+        _configure_table_view_geometry(self._table)
         self._table.setHorizontalHeader(_TooltipHeaderView(QtCore.Qt.Orientation.Horizontal, self._table))
         self._table.setSortingEnabled(sorting)
         header = _header(self._table)
@@ -180,6 +193,7 @@ class SocialTab(QtWidgets.QWidget):
             view.setMaximumHeight(320)
             view.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         self._issues = QtWidgets.QTableView()
+        _configure_table_view_geometry(self._issues)
         self._issues.setSortingEnabled(True)
         layout = QtWidgets.QVBoxLayout(self)
         previews = QtWidgets.QHBoxLayout()
@@ -590,6 +604,7 @@ class PerformanceTab(TableTab):
         self._opportunities = _rich_label()
         self._scripts = _rich_label()
         self._offender_view: QtWidgets.QTableView = QtWidgets.QTableView()
+        _configure_table_view_geometry(self._offender_view)
         self._offender_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._offender_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._offender_view.setSortingEnabled(True)
@@ -1129,6 +1144,7 @@ class SerpTab(QtWidgets.QWidget):
         self.preview = QtWidgets.QTextBrowser()
         self.preview.setOpenExternalLinks(True)
         self.table = QtWidgets.QTableView()
+        _configure_table_view_geometry(self.table)
         self.table.setSortingEnabled(False)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

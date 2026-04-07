@@ -1,0 +1,37 @@
+name: Package App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      QT_API: pyside6
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      POETRY_VIRTUALENVS_CREATE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: abatilo/actions-poetry@v4
+        with:
+          poetry-version: "2.1.4"
+      - name: Install dependencies
+        run: poetry install
+      - name: Build packaged application
+        run: poetry run python tools/package_app.py --mode standalone --keep-deployment-files
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: silentfrog-${{ matrix.os }}
+          path: deploy/deployment

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from PyQt5 import QtCore, QtWidgets
+from qtpy import QtCore, QtWidgets
 
 from .crawl_options import CrawlOptions, parse_header_lines
 from .theme import current_theme
