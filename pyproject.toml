@@ -10,17 +10,14 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "pyside6 (>=6.8,<7.0)",
     "qtpy (>=2.4.3,<3.0.0)",
-    "pyqt5 (==5.15.11)",
-    "pyqt5-sip (>=12.11,<13)",
     "pandas (>=2.2.3,<3.0.0)",
     "urllib3 (>=2.4.0,<3.0.0)",
     "requests (>=2.32.3,<3.0.0)",
     "openpyxl (>=3.1)",
     "httpx[http2] (>=0.28.1,<0.29.0)",
     "beautifulsoup4 (>=4.13.4,<5.0.0)",
-    # Wheels 4.9.x supportano già Python 3.12; consentiamo patch future,
-    # ma restiamo <6 finché non testiamo bene lxml 5/6.
-    "lxml (>=4.9.4,<6.0)",
+    # lxml 6.x publishes wheels for Python 3.12/3.13/3.14 on the CI targets we support.
+    "lxml (>=6.0.2,<7.0)",
     # Parser pure-python usato da extruct quando tree_builder='html5lib'
     "html5lib (>=1.1,<2.0)",
     "tldextract (>=5.3.0,<6.0.0)",
@@ -30,6 +27,12 @@ dependencies = [
     "nltk (>=3.9.1,<4.0.0)",
     "pillow (>=11.2.1,<12.0.0)",
     "humanize (>=4.12.3,<5.0.0)"
+]
+
+[project.optional-dependencies]
+pyqt5-backend = [
+    "pyqt5 (==5.15.11)",
+    "pyqt5-sip (>=12.11,<13)",
 ]
 
 [tool.poetry]

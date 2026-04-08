@@ -13,7 +13,7 @@ import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
-from .image_diagnostics import format_hint_for_mime, responsive_label
+from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
 
 Tag = bs4.element.Tag
 NavigableString = bs4.element.NavigableString
@@ -159,17 +159,27 @@ def _srcset_url(srcset: str, target_width: int = 0) -> str:
     return candidates[-1][0]
 
 
-def _srcset_candidates(srcset: str) -> list[tuple[str, int]]:
-    candidates: list[tuple[str, int]] = []
+def _srcset_entries(srcset: str) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
     for chunk in srcset.split(","):
         parts = chunk.strip().split()
         if not parts:
             continue
         url = parts[0].strip()
         descriptor = parts[1].strip().lower() if len(parts) > 1 else ""
-        width = int(descriptor[:-1]) if descriptor.endswith("w") and descriptor[:-1].isdigit() else 0
-        candidates.append((url, width))
-    return candidates
+        entries.append((url, descriptor))
+    return entries
+
+
+def _srcset_candidates(srcset: str) -> list[tuple[str, int]]:
+    return [
+        (url, int(descriptor[:-1]) if descriptor.endswith("w") and descriptor[:-1].isdigit() else 0)
+        for url, descriptor in _srcset_entries(srcset)
+    ]
+
+
+def _srcset_descriptors(srcset: str) -> list[str]:
+    return [descriptor for _url, descriptor in _srcset_entries(srcset) if descriptor]
 
 
 def _picture_source_url(img: Tag, target_width: int) -> str:
@@ -212,10 +222,38 @@ def _image_sizes(img: Tag) -> str:
     sizes = _non_empty_attr(img, "sizes")
     if sizes:
         return sizes
-    for source in _picture_sources(img):
+    sources = _picture_sources(img)
+    for source in sources:
         sizes = _non_empty_attr(source, "sizes")
         if sizes:
             return sizes
+    media_values = [_non_empty_attr(source, "media") for source in sources]
+    media_values = [value for value in media_values if value]
+    if media_values:
+        preview = "; ".join(media_values[:2])
+        suffix = "; ..." if len(media_values) > 2 else ""
+        return f"{INFERRED_SIZES_PREFIX}picture media ({preview}{suffix})"
+    descriptor_values: list[str] = []
+    raw_values = [
+        _non_empty_attr(img, "srcset"),
+        _non_empty_attr(img, "data-srcset"),
+    ]
+    raw_values.extend(_non_empty_attr(source, "srcset", "data-srcset") for source in sources)
+    for raw in raw_values:
+        descriptor_values.extend(_srcset_descriptors(raw))
+    unique_descriptors = list(dict.fromkeys(descriptor_values))
+    width_descriptors = [descriptor for descriptor in unique_descriptors if descriptor.endswith("w")]
+    density_descriptors = [descriptor for descriptor in unique_descriptors if descriptor.endswith("x")]
+    if width_descriptors:
+        preview = ", ".join(width_descriptors[:3])
+        suffix = ", ..." if len(width_descriptors) > 3 else ""
+        return f"{INFERRED_SIZES_PREFIX}srcset widths ({preview}{suffix})"
+    if density_descriptors:
+        preview = ", ".join(density_descriptors[:3])
+        suffix = ", ..." if len(density_descriptors) > 3 else ""
+        return f"{INFERRED_SIZES_PREFIX}srcset densities ({preview}{suffix})"
+    if _responsive_candidates(img) > 1:
+        return f"{INFERRED_SIZES_PREFIX}multiple responsive candidates"
     return ""
 
 

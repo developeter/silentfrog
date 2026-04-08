@@ -6,7 +6,7 @@ The current GUI runtime targets:
 
 - **QtPy** as the abstraction layer
 - **PySide6** as the primary Qt backend
-- **PyQt5** only as a temporary transition fallback
+- **PyQt5** only as an optional temporary transition fallback
 
 It lets you quickly:
 
@@ -177,7 +177,7 @@ The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because 
 - Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs, feature requests, or security reports. Everything is tracked publicly.
 - Code is written from scratch for this project; if you suspect unintentional reuse, open an issue and it will be addressed.
 - The `dev` branch reflects ongoing work, while `main` only contains tagged releases.
-- The runtime migration targets **QtPy + PySide6**. `PyQt5` remains in the dependency set temporarily as a fallback while the transition stabilizes.
+- The runtime migration targets **QtPy + PySide6**. `PyQt5` remains available only as an optional fallback backend while the transition stabilizes.
 
 ## Exporting reports
 

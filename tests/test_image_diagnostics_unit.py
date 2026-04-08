@@ -86,3 +86,28 @@ def test_normalize_image_row_preserves_sizes_and_next_gen_state() -> None:
     assert row[SIZES_COL] == "(min-width: 1024px) 50vw, 100vw"
     assert row[FORMAT_HINT_COL] == "Next-gen format"
     assert row[DIAGNOSTIC_COL] == "OK"
+
+
+def test_inferred_sizes_still_flags_missing_explicit_sizes() -> None:
+    row = normalize_image_row(
+        [
+            "https://example.com/hero.jpg",
+            "Hero",
+            "",
+            "image/jpeg",
+            "",
+            "",
+            "",
+            "",
+            "Lazy",
+            "High",
+            "640",
+            "360",
+            "2 candidates",
+            "Inferred: srcset widths (640w, 1280w)",
+            "",
+            "",
+        ]
+    )
+
+    assert "Responsive candidates without sizes" in row[DIAGNOSTIC_COL]

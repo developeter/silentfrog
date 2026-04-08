@@ -41,6 +41,7 @@ DIAGNOSTIC_COL = 15
 _LEGACY_ROW_LENGTH = 10
 _ROW_LENGTH = len(IMAGE_HEADERS)
 _NEXT_GEN_MIMES = {"image/avif", "image/webp"}
+INFERRED_SIZES_PREFIX = "Inferred: "
 _LEGACY_FORMAT_HINTS = {
     "image/jpeg": "Consider WebP or AVIF",
     "image/jpg": "Consider WebP or AVIF",
@@ -59,6 +60,11 @@ def _to_int(value: object) -> int:
         return int(_text(value))
     except (TypeError, ValueError):
         return 0
+
+
+def has_explicit_sizes(value: object) -> bool:
+    text = _text(value)
+    return bool(text) and not text.startswith(INFERRED_SIZES_PREFIX)
 
 
 def _has_analysis_data(row: Sequence[str]) -> bool:
@@ -86,7 +92,7 @@ def diagnostic_text(row: Sequence[str]) -> str:
     declared_height = _to_int(row[DECLARED_HEIGHT_COL])
     actual_width = _to_int(row[ACTUAL_WIDTH_COL])
     actual_height = _to_int(row[ACTUAL_HEIGHT_COL])
-    sizes = _text(row[SIZES_COL])
+    sizes = row[SIZES_COL]
     responsive = _text(row[RESPONSIVE_COL]).lower()
     format_hint = _text(row[FORMAT_HINT_COL])
     analysed = _has_analysis_data(row)
@@ -103,7 +109,7 @@ def diagnostic_text(row: Sequence[str]) -> str:
         too_tall = actual_height >= declared_height * 2
         if too_wide or too_tall:
             notes.append("Source much larger than declared slot")
-    if responsive not in {"", "1 candidate"} and not sizes:
+    if responsive not in {"", "1 candidate"} and not has_explicit_sizes(sizes):
         notes.append("Responsive candidates without sizes")
     return "; ".join(notes) or "OK"
 

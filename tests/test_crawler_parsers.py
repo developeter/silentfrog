@@ -103,7 +103,29 @@ def test_extract_images_uses_picture_source_when_img_src_is_empty(base_url: str)
     assert image[DECLARED_WIDTH_COL] == "640"
     assert image[DECLARED_HEIGHT_COL] == "480"
     assert image[RESPONSIVE_COL] == "2 candidates"
+    assert image[SIZES_COL] == "Inferred: picture media ((min-width: 1024px))"
     assert image[FORMAT_HINT_COL] == "Next-gen format"
+
+
+def test_extract_images_infers_sizes_from_srcset_width_descriptors(base_url: str) -> None:
+    html = """
+    <html>
+      <body>
+        <img
+          src="/images/hero-640.jpg"
+          srcset="/images/hero-320.jpg 320w, /images/hero-640.jpg 640w, /images/hero-1280.jpg 1280w"
+          alt="Hero image"
+        >
+      </body>
+    </html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    images = crawler._extract_images(base_url, soup)
+    assert len(images) == 1
+    image = images[0]
+    assert image[RESPONSIVE_COL] == "3 candidates"
+    assert image[SIZES_COL] == "Inferred: srcset widths (320w, 640w, 1280w)"
 
 
 def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup) -> None:
