@@ -136,7 +136,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Silentfrog - SEO webpage analysis")
+        self.setWindowTitle("Silentfrog - Single Page SEO Check")
         icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
         self.setWindowIcon(QtGui.QIcon(str(icon_path)))
         self._latest_payload: CrawlPayload | None = None

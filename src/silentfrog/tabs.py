@@ -449,11 +449,15 @@ class AiVisibilityTab(TableTab):
 
     def _apply_row_resize(self) -> None:
         self._row_resize_pending = False
-        if self.view.model() is None:
+        try:
+            if self.view.model() is None:
+                return
+            if not self.isVisible() or self.view.viewport().width() <= 0:
+                return
+            self.view.resizeRowsToContents()
+        except RuntimeError:
+            # A queued resize can fire after a transient detail dialog is closed.
             return
-        if not self.isVisible() or self.view.viewport().width() <= 0:
-            return
-        self.view.resizeRowsToContents()
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         self._schedule_row_resize()

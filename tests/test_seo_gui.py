@@ -615,6 +615,7 @@ def test_seo_window_primary_controls_exist(qtbot) -> None:
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
 
+    assert win.windowTitle() == "Silentfrog - Single Page SEO Check"
     assert win.btn_go.text() == "Analyze"
     assert win.btn_export.text() == "Export Excel"
     assert win.btn_img_dl.text() == "Analyze images"

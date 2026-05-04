@@ -50,17 +50,18 @@ class HomeWindow(QMainWindow):
         logo.setPixmap(logo_pix)
         self.main_layout.addWidget(logo)
 
-        for idx, label in enumerate(("Massive Redirect Check", "SEO Webpage analysis")):
+        actions = (
+            ("Massive Redirect Check", self.open_redirect),
+            ("Single Page SEO Check", self.open_seo),
+            ("Site Crawl", self.open_site_crawl),
+        )
+        for label, callback in actions:
             btn = QPushButton(label)
             font = btn.font()
             font.setPointSize(font.pointSize() + 4)
             btn.setFont(font)
             btn.setFixedHeight(48)
-
-            if idx == 0:
-                btn.clicked.connect(self.open_redirect)
-            elif idx == 1:
-                btn.clicked.connect(self.open_seo)
+            btn.clicked.connect(callback)
             self.main_layout.addWidget(btn)
 
         gear = QToolButton()
@@ -88,6 +89,12 @@ class HomeWindow(QMainWindow):
 
         self.seo_win = WebpageSeoWindow()
         self.seo_win.show()
+
+    def open_site_crawl(self) -> None:
+        from .site_crawl_gui import SiteCrawlWindow
+
+        self.site_crawl_win = SiteCrawlWindow()
+        self.site_crawl_win.show()
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self)

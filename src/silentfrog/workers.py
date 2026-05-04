@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 import asyncio
 import threading
 
 from .seo_crawler import analyse, analyse_images
 from .crawl_options import CrawlOptions
+from .site_crawler import crawl_site
+from .site_crawl_types import SiteCrawlConfig, SiteCrawlReport
 
 
 def run_crawl(
@@ -45,3 +47,31 @@ def run_image_analysis(
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()
     return thread
+
+
+def run_site_crawl(
+    config: SiteCrawlConfig,
+    timeout: int,
+    on_progress: Callable[[dict[str, Any]], None],
+    on_success: Callable[[SiteCrawlReport], None],
+    on_error: Callable[[str], None],
+) -> tuple[threading.Thread, threading.Event]:
+    cancel_event = threading.Event()
+
+    def _target() -> None:
+        try:
+            report = asyncio.run(
+                crawl_site(
+                    config,
+                    timeout=timeout,
+                    on_event=on_progress,
+                    cancel_event=cancel_event,
+                )
+            )
+            on_success(report)
+        except Exception as exc:  # noqa: BLE001
+            on_error(str(exc))
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    return thread, cancel_event

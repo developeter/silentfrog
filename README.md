@@ -13,7 +13,8 @@ It lets you quickly:
 | Capability | Status |
 | --- | --- |
 | Bulk-check redirects from Excel | ✅ |
-| Single-page SEO analysis (meta, headers, images, social, links, canonical, robots, hreflang, structured data, keywords, performance, SERP) | ✅ |
+| Single Page SEO Check (meta, headers, images, social, links, canonical, robots, hreflang, structured data, keywords, performance, SERP) | ✅ |
+| Site Crawl mode for sitemap/branch/URL-list audits | ✅ |
 | Single-page AI / GEO support (AI crawl audit + AI Visibility heuristics) | ✅ |
 | Export results to Excel | ✅ |
 
@@ -181,7 +182,7 @@ The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because 
 
 ## Exporting reports
 
-1. Run a page analysis with **Analyze**.
+1. Run a Single Page SEO Check with **Analyze**.
 2. Click **Export Excel** and pick a filename (the `.xlsx` extension is appended if missing).
 3. Silentfrog exports the current analysis into dedicated worksheets, including:
    - `Meta`
@@ -206,9 +207,9 @@ The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because 
    - `SERP Audit`
 4. Re-run the export after a new crawl to refresh the workbook.
 
-### Single-page analysis tabs
+### Single Page SEO Check tabs
 
-The **SEO webpage analysis** window currently includes these tabs:
+The **Single Page SEO Check** window currently includes these tabs:
 
 - `Meta tag`
 - `Header H1-H6`
@@ -227,6 +228,47 @@ The **SEO webpage analysis** window currently includes these tabs:
 - `AI Visibility`
 - `Performance`
 - `SERP`
+
+### Site Crawl mode
+
+The **Site Crawl** window audits multiple URLs without recursively following every link on the page.
+
+Supported crawl sources:
+
+- base URL, with automatic sitemap detection from `robots.txt` and common sitemap paths
+- sitemap URL
+- sitemap index URL
+- pasted URL list
+- include prefixes such as `/design/`, `/news/`, `/en/design/`
+- exclude patterns such as `?store=`, `/privacy`, `/cookies`
+
+Defaults are intentionally conservative:
+
+- URL cap: **500**
+- speed: **Gentle crawl**
+- per-host concurrency: **2**
+- robots crawl-delay: respected when available
+- recursive link discovery: **off** in v1
+
+Leaving the sitemap field empty lets Silentfrog auto-detect sitemaps from the base URL. If no sitemap yields URLs, Silentfrog falls back to auditing the base URL only.
+
+The setup form and results table are separate screens. After **Start crawl**, the setup form is hidden and the results screen shows the discovered URL count, filters, table, export action, and crawl progress.
+
+Rows in the results table keep cached page payloads. Double-click a successful row to open the same detailed tab report used by the single-page checker, without re-crawling the URL. Detail windows also include **Analyze images** so image dimensions, size, type, and cache headers can be fetched for that page snapshot.
+
+Bulk export creates a workbook with high-level sheets:
+
+- `Summary`
+- `Indexability issues`
+- `Meta issues`
+- `Structured data`
+- `Images`
+- `AI Visibility`
+- `Errors`
+
+The same workbook also includes consolidated per-page detail sheets such as `Meta detail`, `Images detail`, `Links detail`, `Structured detail`, `AI Visibility detail`, `Performance detail`, and `SERP detail`. These sheets use `Page URL` as the first column so hundreds of pages remain filterable without creating one worksheet per URL.
+
+For Cloudflare/WAF-protected sites, start slowly and use approved headers/cookies or allowlisting from the site owner when needed. Silentfrog does not impersonate verified bots or attempt to bypass protections.
 
 ### Keyword analysis & fine tuning
 
@@ -350,6 +392,8 @@ silentfrog/
 │       ├── python-compat.yml # Windows/macOS compatibility matrix
 │       └── package-app.yml   # Packaged app workflow
 ├── docs/
+│   ├── site_crawl_feature_spec.md
+│   ├── site_crawl_roadmap.md
 │   └── tests/
 │       ├── README.md
 │       └── fixtures/
@@ -367,8 +411,12 @@ silentfrog/
 │   ├── image_diagnostics.py # Shared image-table schema and diagnostics helpers
 │   ├── indexability.py   # Indexability verdict helpers
 │   ├── seo_gui.py        # Single-page analysis window
+│   ├── site_crawler.py   # Scoped sitemap/URL-list site crawler
+│   ├── site_crawl_gui.py # Site Crawl window
+│   ├── site_crawl_types.py # Typed Site Crawl config/results
 │   ├── exporters/
-│   │   └── excel.py      # Excel export helpers
+│   │   ├── excel.py      # Single-page Excel export helpers
+│   │   └── site_crawl_excel.py # Site Crawl Excel export helpers
 │   ├── tabs.py           # Per-tab Qt widgets
 │   ├── models/           # Table models feeding tabs
 │   ├── crawl_types.py    # Typed crawl payloads
