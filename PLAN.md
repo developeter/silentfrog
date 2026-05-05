@@ -126,6 +126,13 @@ The diff should show:
 - recurring issues
 - health trend over time
 
+Visible local UX:
+
+- **View past scans** opens saved Site Crawl runs
+- saved runs are listed by site/date
+- selecting a run shows summary and diff against the previous local run for that site
+- selected runs can be exported as JSON or deleted locally
+
 ### M5 Google Search Console Integration
 
 Add GSC URL Inspection, indexing/page state, and crawl stats.

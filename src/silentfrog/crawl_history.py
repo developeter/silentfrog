@@ -173,6 +173,13 @@ class CrawlHistoryStore:
         runs = self.load_runs(scope_key)
         return runs[-1] if runs else None
 
+    def delete_run(self, run_id: str) -> bool:
+        path = self.root / f"{_safe_filename(run_id)}.json"
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
 
 def build_history_run(
     report: SiteCrawlReport,

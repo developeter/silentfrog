@@ -99,6 +99,16 @@ def test_history_store_saves_and_loads_runs_by_scope(tmp_path: Path) -> None:
     assert store.latest_run("missing.example") is None
 
 
+def test_history_store_deletes_runs_by_id(tmp_path: Path) -> None:
+    run = _run("run-1", [_issue("meta.title_missing", IssueSeverity.WARNING, "https://example.com/page")])
+    store = CrawlHistoryStore(tmp_path)
+    store.save_run(run)
+
+    assert store.delete_run(run.run_id) is True
+    assert store.load_runs("example.com") == []
+    assert store.delete_run(run.run_id) is False
+
+
 def test_diff_runs_reports_new_fixed_recurring_worsened_and_health_trend() -> None:
     previous = _run(
         "run-1",

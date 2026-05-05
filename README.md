@@ -254,6 +254,8 @@ Leaving the sitemap field empty lets Silentfrog auto-detect sitemaps from the ba
 
 The setup form and results table are separate screens. After **Start crawl**, the setup form is hidden and the results screen shows the discovered URL count, filters, table, export action, and crawl progress.
 
+Completed Site Crawls are saved locally and can be opened from **View past scans**. The history browser lists saved runs by site/date, shows a summary and diff against the previous local run for the same site, and lets you export or delete selected local history files. This is local-only; it does not sync to Google Drive or any remote service.
+
 Rows in the results table keep cached page payloads. Double-click a successful row to open the same detailed tab report used by the single-page checker, without re-crawling the URL. Detail windows also include **Analyze images** so image dimensions, size, type, and cache headers can be fetched for that page snapshot.
 
 Bulk export creates a workbook with high-level sheets:
@@ -413,6 +415,7 @@ silentfrog/
 │   ├── seo_gui.py        # Single-page analysis window
 │   ├── site_crawler.py   # Scoped sitemap/URL-list site crawler
 │   ├── site_crawl_gui.py # Site Crawl window
+│   ├── site_crawl_history_gui.py # Local Site Crawl history browser
 │   ├── site_crawl_types.py # Typed Site Crawl config/results
 │   ├── exporters/
 │   │   ├── excel.py      # Single-page Excel export helpers

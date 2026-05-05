@@ -51,10 +51,36 @@ def test_site_crawl_window_defaults(qtbot) -> None:
     assert win.stack.currentWidget() is win.setup_page
     assert win.base_url.toolTip()
     assert win.btn_start.toolTip()
+    assert win.btn_history_setup.text() == "View past scans"
+    assert win.btn_history.text() == "View past scans"
     assert win.progress.minimumHeight() >= 32
     assert win.lbl_eta.text() == "ETA: -"
     assert win.recap_widget.health_text().startswith("<b>Ready</b>")
     assert win.lbl_history.text() == "History: no completed crawl yet."
+
+
+def test_site_crawl_window_opens_history_browser(monkeypatch, qtbot, tmp_path: Path) -> None:
+    opened: dict[str, object] = {}
+
+    class FakeHistoryDialog:
+        def __init__(self, store, parent=None) -> None:
+            opened["store"] = store
+            opened["parent"] = parent
+
+        def exec(self) -> int:
+            opened["exec"] = True
+            return QtWidgets.QDialog.Accepted
+
+    monkeypatch.setattr("silentfrog.site_crawl_gui.CrawlHistoryDialog", FakeHistoryDialog)
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    qtbot.mouseClick(win.btn_history_setup, QtCore.Qt.MouseButton.LeftButton)
+
+    assert opened["store"] is win._history_store
+    assert opened["parent"] is win
+    assert opened["exec"] is True
 
 
 def test_start_crawl_button_populates_rows(monkeypatch, qtbot, tmp_path: Path) -> None:

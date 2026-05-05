@@ -16,6 +16,7 @@ from .crawl_history import CrawlHistoryStore, format_history_status, save_report
 from .crawl_types import CrawlPayload
 from .exporters import export_site_crawl_report
 from .settings_dialog import CrawlSettingsDialog
+from .site_crawl_history_gui import CrawlHistoryDialog
 from .site_crawl_types import (
     DEFAULT_SITE_CRAWL_LIMIT,
     SITE_CRAWL_TABLE_HEADERS,
@@ -327,9 +328,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self.btn_start = QtWidgets.QPushButton("Start crawl")
         self.btn_settings = QtWidgets.QPushButton("Crawl settings...")
+        self.btn_history_setup = QtWidgets.QPushButton("View past scans")
         self.lbl_speed = QtWidgets.QLabel()
         row.addWidget(self.btn_start)
         row.addWidget(self.btn_settings)
+        row.addWidget(self.btn_history_setup)
         row.addWidget(self.lbl_speed)
         row.addStretch()
         return row
@@ -338,9 +341,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_export = QtWidgets.QPushButton("Export Excel")
+        self.btn_history = QtWidgets.QPushButton("View past scans")
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
         row.addWidget(self.btn_export)
+        row.addWidget(self.btn_history)
         row.addWidget(self.btn_new_crawl)
         row.addStretch()
         return row
@@ -359,6 +364,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.clicked.connect(self._stop_crawl)
         self.btn_export.clicked.connect(self._export_excel)
         self.btn_new_crawl.clicked.connect(self._show_setup)
+        self.btn_history.clicked.connect(self._open_history_browser)
+        self.btn_history_setup.clicked.connect(self._open_history_browser)
         self.btn_settings.clicked.connect(self._open_crawl_settings)
         self.search_edit.textChanged.connect(self.proxy.set_search)
         self.status_filter.currentTextChanged.connect(self.proxy.set_status)
@@ -388,8 +395,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.limit_spin.setToolTip("Maximum number of URLs Silentfrog will crawl in this run.")
         self.btn_start.setToolTip("Start crawling with the current setup and switch to the results screen.")
         self.btn_settings.setToolTip("Open crawl speed, headers, cookies, and robots settings.")
+        self.btn_history_setup.setToolTip("Open saved local Site Crawl runs and compare past scans.")
         self.btn_stop.setToolTip("Request cancellation. Active requests finish before the crawl fully stops.")
         self.btn_export.setToolTip("Export the current Site Crawl results to an Excel workbook.")
+        self.btn_history.setToolTip("Open saved local Site Crawl runs and compare past scans.")
         self.btn_new_crawl.setToolTip("Return to setup for another Site Crawl run.")
 
     def _start_crawl(self) -> None:
@@ -547,6 +556,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if dialog.exec() == QtWidgets.QDialog.Accepted:
             self._crawl_options = dialog.options()
             self._update_speed_label()
+
+    def _open_history_browser(self) -> None:
+        dialog = CrawlHistoryDialog(self._history_store, self)
+        dialog.exec()
 
     def _update_speed_label(self) -> None:
         mode = "Gentle" if self._crawl_options.gentle_mode else "Standard"
