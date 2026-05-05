@@ -188,6 +188,8 @@ Real provider calls and UI controls remain future slices.
 
 ### M8 Remote Save / Import / Sync
 
+Status: implemented foundation.
+
 Explore optional remote report storage and import/export sync.
 
 Candidate target:
@@ -200,6 +202,17 @@ Rules:
 - sync is never automatic
 - user must authenticate explicitly
 - UI must clearly state what data is uploaded
+
+Implemented foundation:
+
+- provider-neutral sync plans and manifests
+- explicit confirmation required before upload or download
+- public upload/download summaries that omit local absolute paths
+- mockable remote sync client boundary
+- local-folder client for tests and future UI prototyping
+- local OAuth/remote-sync placeholders in `secrets.example.json`
+
+Real Google Drive OAuth and UI controls remain future slices.
 
 ### M9 Future Integrations / APIs
 
