@@ -12,6 +12,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
 from .audit_recap import AuditRecapWidget
 from .crawl_options import CrawlOptions
+from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_types import CrawlPayload
 from .exporters import export_site_crawl_report
 from .settings_dialog import CrawlSettingsDialog
@@ -141,18 +142,16 @@ class SiteCrawlFilterProxy(QtCore.QSortFilterProxyModel):
         self._search = ""
         self._status = "All"
         self._indexability = "All"
+        self._filter_revision = 0
 
     def set_search(self, text: str) -> None:
-        self._search = text.strip().lower()
-        self.invalidateFilter()
+        self._set_filter_value("_search", text.strip().lower())
 
     def set_status(self, value: str) -> None:
-        self._status = value
-        self.invalidateFilter()
+        self._set_filter_value("_status", value)
 
     def set_indexability(self, value: str) -> None:
-        self._indexability = value
-        self.invalidateFilter()
+        self._set_filter_value("_indexability", value)
 
     def filterAcceptsRow(self, source_row: int, source_parent: QtCore.QModelIndex) -> bool:
         source = self.sourceModel()
@@ -174,6 +173,16 @@ class SiteCrawlFilterProxy(QtCore.QSortFilterProxyModel):
     def _matches_indexability(self, result: SiteCrawlResult) -> bool:
         return self._indexability == "All" or result.indexability == self._indexability
 
+    def _set_filter_value(self, attribute: str, value: str) -> None:
+        if getattr(self, attribute) == value:
+            return
+        setattr(self, attribute, value)
+        self._refresh_filter()
+
+    def _refresh_filter(self) -> None:
+        self._filter_revision += 1
+        self.setFilterFixedString(str(self._filter_revision))
+
 
 class SiteCrawlWindow(QtWidgets.QWidget):
     progressSig = QtCore.Signal(dict)
@@ -192,6 +201,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._eta_timer = QtCore.QTimer(self)
         self._eta_timer.setInterval(1000)
         self._detail_windows: list[QtWidgets.QDialog] = []
+        self._history_store = CrawlHistoryStore()
         self._build_ui()
         self._apply_tooltips()
         self._connect_signals()
@@ -222,6 +232,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.recap_widget = AuditRecapWidget("Site Crawl recap")
         self.recap_widget.issueActivated.connect(self._focus_recap_issue)
         layout.addWidget(self.recap_widget)
+        layout.addWidget(self._build_history_label())
         layout.addLayout(self._build_filter_row())
         layout.addWidget(self._build_table(), 1)
         layout.addLayout(self._build_result_actions())
@@ -238,6 +249,12 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row.addWidget(self.lbl_discovery, 1)
         row.addWidget(self.lbl_eta)
         return row
+
+    def _build_history_label(self) -> QtWidgets.QLabel:
+        self.lbl_history = QtWidgets.QLabel("History: no completed crawl yet.")
+        self.lbl_history.setWordWrap(True)
+        self.lbl_history.setToolTip("Local crawl history diff against the previous run for the same host.")
+        return self.lbl_history
 
     def _build_source_form(self) -> QtWidgets.QFormLayout:
         form = QtWidgets.QFormLayout()
@@ -358,6 +375,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
         self.recap_widget.reset("Start a crawl to build the site action recap.")
+        self.lbl_history.setText("History: no completed crawl yet.")
         self._reset_eta_tracking()
         self._update_speed_label()
 
@@ -381,6 +399,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.model.clear()
         self._latest_report = None
         self.recap_widget.reset("Crawl in progress. The recap updates when results are complete.")
+        self.lbl_history.setText("History: waiting for completed crawl...")
         self._reset_eta_tracking()
         self._show_results()
         self.lbl_discovery.setText("Discovering URLs from sitemap sources...")
@@ -456,6 +475,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._set_running(False)
         self.btn_export.setEnabled(bool(report.results))
         self._update_recap_from_report(report)
+        self._update_history_from_report(report)
         summary = self._report_summary(report)
         self.lbl_discovery.setText(summary if not report.warning else f"{summary}. {report.warning}")
         self.lbl_eta.setText("ETA: complete")
@@ -499,6 +519,14 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             item_count=max(1, report.discovered_count),
             item_label="crawl",
         )
+
+    def _update_history_from_report(self, report: SiteCrawlReport) -> None:
+        try:
+            run, diff = save_report_and_diff(self._history_store, report)
+        except Exception as exc:  # noqa: BLE001
+            self.lbl_history.setText(f"History: unavailable ({exc})")
+            return
+        self.lbl_history.setText(format_history_status(run, diff))
 
     def _focus_recap_issue(self, issue: AuditIssue) -> None:
         if not issue.url:

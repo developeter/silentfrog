@@ -6,6 +6,7 @@ import threading
 from qtpy import QtCore, QtWidgets
 
 import silentfrog.site_crawl_gui as site_crawl_gui  # type: ignore[reportMissingImports]
+from silentfrog.crawl_history import CrawlHistoryStore  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import ACTUAL_WIDTH_COL, CACHE_COL, SIZE_COL, normalize_image_row  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_gui import SiteCrawlDetailDialog, SiteCrawlTableModel, SiteCrawlWindow  # type: ignore[reportMissingImports]
@@ -53,9 +54,10 @@ def test_site_crawl_window_defaults(qtbot) -> None:
     assert win.progress.minimumHeight() >= 32
     assert win.lbl_eta.text() == "ETA: -"
     assert win.recap_widget.health_text().startswith("<b>Ready</b>")
+    assert win.lbl_history.text() == "History: no completed crawl yet."
 
 
-def test_start_crawl_button_populates_rows(monkeypatch, qtbot) -> None:
+def test_start_crawl_button_populates_rows(monkeypatch, qtbot, tmp_path: Path) -> None:
     payload = _payload()
     result = SiteCrawlResult.from_payload("https://example.com/page", payload)
     report = SiteCrawlReport.from_results([result], discovered_count=1)
@@ -70,6 +72,7 @@ def test_start_crawl_button_populates_rows(monkeypatch, qtbot) -> None:
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
     win.base_url.setText("https://example.com")
     win.url_list.setPlainText("https://example.com/page")
     qtbot.mouseClick(win.btn_start, QtCore.Qt.MouseButton.LeftButton)
@@ -82,6 +85,7 @@ def test_start_crawl_button_populates_rows(monkeypatch, qtbot) -> None:
     assert win.progress.value() == 100
     assert "Found 1 URLs" in win.lbl_discovery.text()
     assert "Healthy" in win.recap_widget.health_text()
+    assert "saved first run" in win.lbl_history.text()
 
     qtbot.mouseClick(win.btn_new_crawl, QtCore.Qt.MouseButton.LeftButton)
 
@@ -115,11 +119,12 @@ def test_site_crawl_eta_updates_from_completed_rows(monkeypatch, qtbot) -> None:
     assert win.lbl_eta.text() == "ETA: 30s remaining"
 
 
-def test_site_crawl_recap_issue_activation_filters_to_url(qtbot) -> None:
+def test_site_crawl_recap_issue_activation_filters_to_url(qtbot, tmp_path: Path) -> None:
     result = SiteCrawlResult.failed("https://example.com/fail", "boom")
     report = SiteCrawlReport.from_results([result], discovered_count=1)
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
 
     win._show_results()
     win._handle_report(report)
@@ -128,6 +133,20 @@ def test_site_crawl_recap_issue_activation_filters_to_url(qtbot) -> None:
 
     assert win.search_edit.text() == "https://example.com/fail"
     assert win.table.selectionModel().hasSelection()
+
+
+def test_site_crawl_history_label_compares_previous_run(qtbot, tmp_path: Path) -> None:
+    failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
+    fixed = SiteCrawlResult.from_payload("https://example.com/fail", _payload("https://example.com/fail"))
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+
+    win._handle_report(SiteCrawlReport.from_results([failed], discovered_count=1))
+    win._handle_report(SiteCrawlReport.from_results([fixed], discovered_count=1))
+
+    assert "1 fixed" in win.lbl_history.text()
+    assert "Health improved" in win.lbl_history.text()
 
 
 def test_site_crawl_coloring_keeps_skipped_neutral_and_errors_readable() -> None:

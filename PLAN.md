@@ -114,6 +114,8 @@ evidence was found, and what action is recommended.
 
 ### M4 Crawl History And Diff
 
+Status: implemented.
+
 Save completed crawl summaries locally and compare runs.
 
 The diff should show:
