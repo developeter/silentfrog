@@ -155,6 +155,8 @@ Imported logs remain local.
 
 ### M7 AI-Assisted SEO/GEO Review
 
+Status: implemented foundation.
+
 Add optional AI integration for higher-quality recommendations.
 
 Rules:
@@ -172,6 +174,17 @@ Candidate use cases:
 - AI/GEO answerability suggestions
 - issue prioritization
 - client-friendly explanations
+
+Implemented foundation:
+
+- typed AI review inputs, findings, results, and local provider config
+- ignored local secrets support through environment variables or `secrets.local.json`
+- evidence-bound prompt builder
+- provider response parser for mocked JSON responses
+- mockable client seam
+- mapping from AI findings into the shared `AuditIssue` model
+
+Real provider calls and UI controls remain future slices.
 
 ### M8 Remote Save / Import / Sync
 
