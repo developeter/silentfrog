@@ -26,6 +26,7 @@ class IssueCategory(str, Enum):
     STRUCTURED_DATA = "structured_data"
     PERFORMANCE = "performance"
     AI_GEO = "ai_geo"
+    LOGS = "logs"
     CRAWL = "crawl"
 
 

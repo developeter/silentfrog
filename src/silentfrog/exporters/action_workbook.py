@@ -123,6 +123,7 @@ def _write_category_sheets(
             IssueCategory.CANONICAL,
             IssueCategory.CRAWL,
             IssueCategory.LINKS,
+            IssueCategory.LOGS,
             IssueCategory.PERFORMANCE,
             IssueCategory.STRUCTURED_DATA,
         },

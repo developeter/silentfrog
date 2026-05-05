@@ -139,6 +139,8 @@ Rules:
 
 ### M6 Log File Analysis
 
+Status: implemented.
+
 Import server logs from local files and map findings into the issue model.
 
 Target findings:
