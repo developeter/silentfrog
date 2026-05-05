@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 from qtpy import QtCore, QtGui, QtWidgets
 
+from .audit_issues import AuditIssue, issues_for_payload
+from .audit_recap import AuditRecapWidget
 from .crawl_types import CrawlPayload
 from .crawl_options import CrawlOptions
 from .settings_dialog import CrawlSettingsDialog
@@ -127,6 +129,23 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+_RECAP_SOURCE_TABS = {
+    "Meta": "Meta tag",
+    "Headers": "Header H1-H6",
+    "Images": "Images",
+    "Links": "Link",
+    "Redirect": "Redirect",
+    "Canonical": "Canonical",
+    "Indexability": "Indexability",
+    "Robots": "Robots",
+    "Hreflang": "Hreflang",
+    "Structured data": "Structured data",
+    "Structured eligibility": "Structured data",
+    "Content quality": "Content quality",
+    "AI Visibility": "AI Visibility",
+    "Performance": "Performance",
+}
+
 
 class WebpageSeoWindow(QtWidgets.QWidget):
     """Main SEO analysis window wiring reusable tabs and async workers."""
@@ -228,6 +247,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.resize(target_width, target_height)
 
     def _populate_tabs(self) -> None:
+        self.recap_tab = AuditRecapWidget("Page recap")
+        self.recap_tab.issueActivated.connect(self._focus_recap_issue)
+        self.tabs.addTab(self.recap_tab, "Recap")
         self.meta_tab = MetaTab()
         self.tabs.addTab(self.meta_tab, "Meta tag")
         self.headers_tab = HeadersTab()
@@ -506,6 +528,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.performance_tab.update({})
         self.schema_tab.update({})
         self.serp_tab.update({}, {})
+        self.recap_tab.reset()
         self.btn_export.setEnabled(False)
         self.btn_img_dl.setEnabled(False)
 
@@ -630,9 +653,36 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._set_progress(100)
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
+        self._update_recap_from_payload()
         self._reset_ui()
         self._set_intro_state(False)
         self._show_results_panel()
+        self.tabs.setCurrentWidget(self.recap_tab)
+
+    def _update_recap_from_payload(self) -> None:
+        if self._latest_payload is None:
+            self.recap_tab.reset()
+            return
+        url = self._latest_payload.serp.url or self.url_edit.currentText().strip()
+        self.recap_tab.update_issues(
+            issues_for_payload(url, self._latest_payload),
+            item_count=1,
+            item_label="page",
+        )
+
+    def _focus_recap_issue(self, issue: AuditIssue) -> None:
+        label = _RECAP_SOURCE_TABS.get(issue.source)
+        if not label:
+            return
+        index = self._tab_index(label)
+        if index >= 0:
+            self.tabs.setCurrentIndex(index)
+
+    def _tab_index(self, label: str) -> int:
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == label:
+                return index
+        return -1
 
     def _update_intro_colors(self) -> None:
         if not hasattr(self, "_intro_title"):

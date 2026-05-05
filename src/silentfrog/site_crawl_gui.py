@@ -3,18 +3,22 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import threading
+from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
 
 from qtpy import QtCore, QtGui, QtWidgets
 
+from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
+from .audit_recap import AuditRecapWidget
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .exporters import export_site_crawl_report
 from .settings_dialog import CrawlSettingsDialog
 from .site_crawl_types import (
     DEFAULT_SITE_CRAWL_LIMIT,
-    SITE_CRAWL_HEADERS,
+    SITE_CRAWL_TABLE_HEADERS,
+    SITE_CRAWL_TABLE_TOOLTIPS,
     SiteCrawlConfig,
     SiteCrawlReport,
     SiteCrawlResult,
@@ -60,13 +64,13 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
         return 0 if parent.isValid() else len(self._rows)
 
     def columnCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(SITE_CRAWL_HEADERS)
+        return 0 if parent.isValid() else len(SITE_CRAWL_TABLE_HEADERS)
 
     def data(self, index: QtCore.QModelIndex, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
         result = self._rows[index.row()]
-        value = result.row()[index.column()]
+        value = result.table_row()[index.column()]
         if role in (QtCore.Qt.ItemDataRole.DisplayRole, QtCore.Qt.ItemDataRole.EditRole):
             return value
         if role == QtCore.Qt.ItemDataRole.UserRole:
@@ -78,9 +82,13 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
         return None
 
     def headerData(self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
-        if role != QtCore.Qt.ItemDataRole.DisplayRole or orientation != QtCore.Qt.Orientation.Horizontal:
+        if orientation != QtCore.Qt.Orientation.Horizontal:
             return None
-        return SITE_CRAWL_HEADERS[section]
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            return SITE_CRAWL_TABLE_HEADERS[section]
+        if role == QtCore.Qt.ItemDataRole.ToolTipRole:
+            return SITE_CRAWL_TABLE_TOOLTIPS[section]
+        return None
 
     def clear(self) -> None:
         self.beginResetModel()
@@ -115,9 +123,9 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
         return list(self._rows)
 
     def _background(self, result: SiteCrawlResult):
-        if result.status in {"error", "skipped"}:
+        if _is_error_status(result.status):
             return self._bad
-        if result.indexability not in {"", "-", "Indexable"}:
+        if _is_warning_result(result):
             return self._warn
         return None
 
@@ -179,6 +187,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
         self._discovered_total = 0
+        self._completed_count = 0
+        self._crawl_started_at: float | None = None
+        self._eta_timer = QtCore.QTimer(self)
+        self._eta_timer.setInterval(1000)
         self._detail_windows: list[QtWidgets.QDialog] = []
         self._build_ui()
         self._apply_tooltips()
@@ -206,13 +218,26 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _build_results_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-        self.lbl_discovery = QtWidgets.QLabel("Ready")
-        layout.addWidget(self.lbl_discovery)
+        layout.addLayout(self._build_status_row())
+        self.recap_widget = AuditRecapWidget("Site Crawl recap")
+        self.recap_widget.issueActivated.connect(self._focus_recap_issue)
+        layout.addWidget(self.recap_widget)
         layout.addLayout(self._build_filter_row())
         layout.addWidget(self._build_table(), 1)
         layout.addLayout(self._build_result_actions())
         layout.addWidget(self._build_progress())
         return page
+
+    def _build_status_row(self) -> QtWidgets.QHBoxLayout:
+        row = QtWidgets.QHBoxLayout()
+        self.lbl_discovery = QtWidgets.QLabel("Ready")
+        self.lbl_eta = QtWidgets.QLabel("ETA: -")
+        self.lbl_eta.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
+        row.addWidget(self.lbl_discovery, 1)
+        row.addWidget(self.lbl_eta)
+        return row
 
     def _build_source_form(self) -> QtWidgets.QFormLayout:
         form = QtWidgets.QFormLayout()
@@ -242,7 +267,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.search_edit = QtWidgets.QLineEdit()
         self.search_edit.setPlaceholderText("Filter URL or title")
         self.status_filter = QtWidgets.QComboBox()
-        self.status_filter.addItems(["All", "200", "301", "302", "404", "error", "skipped"])
+        self.status_filter.addItems(["All", "200", "301", "302", "403", "404", "429", "error", "skipped"])
         self.indexability_filter = QtWidgets.QComboBox()
         self.indexability_filter.addItems([
             "All",
@@ -271,9 +296,15 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self._configure_table_header()
         self.table.doubleClicked.connect(self._open_result_detail)
         return self.table
+
+    def _configure_table_header(self) -> None:
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+        for column, width in _site_crawl_table_widths().items():
+            self.table.setColumnWidth(column, width)
 
     def _build_setup_actions(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
@@ -318,12 +349,16 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.progressSig.connect(self._handle_progress)
         self.reportSig.connect(self._handle_report)
         self.errorSig.connect(self._show_error)
+        self._eta_timer.timeout.connect(self._update_eta_label)
 
     def _apply_initial_state(self) -> None:
         self.stack.setCurrentIndex(_SETUP_PAGE)
         self.btn_stop.setEnabled(False)
+        self.btn_stop.setVisible(False)
         self.btn_export.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
+        self.recap_widget.reset("Start a crawl to build the site action recap.")
+        self._reset_eta_tracking()
         self._update_speed_label()
 
     def _apply_tooltips(self) -> None:
@@ -345,9 +380,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             return
         self.model.clear()
         self._latest_report = None
-        self._discovered_total = 0
+        self.recap_widget.reset("Crawl in progress. The recap updates when results are complete.")
+        self._reset_eta_tracking()
         self._show_results()
         self.lbl_discovery.setText("Discovering URLs from sitemap sources...")
+        self.lbl_eta.setText("ETA: waiting for URL discovery")
         self.progress.setValue(0)
         self.progress.setFormat("Discovering URLs...")
         self._set_running(True)
@@ -381,6 +418,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if self._active_cancel:
             self._active_cancel.set()
         self.lbl_discovery.setText("Stopping after active requests finish...")
+        self.lbl_eta.setText("ETA: stopping...")
         self.progress.setFormat("Stopping after active requests finish...")
         self.btn_stop.setEnabled(False)
 
@@ -388,9 +426,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if event.get("event") == "discovered":
             total = int(event.get("total", 0))
             self._discovered_total = total
+            self._crawl_started_at = monotonic()
             self.lbl_discovery.setText(f"Found {total} URLs to crawl.")
             self.progress.setFormat(f"Found {total} URLs")
             self.progress.setValue(0)
+            self._update_eta_label()
             return
         if event.get("event") == "row":
             self._append_progress_row(event)
@@ -401,17 +441,24 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             self.model.add_result(result)
         total = max(1, self._discovered_total or self.limit_spin.value())
         completed = min(total, int(event.get("completed", self.model.rowCount())))
+        self._completed_count = completed
+        if self._crawl_started_at is None:
+            self._crawl_started_at = monotonic()
         self.progress.setValue(int((completed / total) * 100))
         self.progress.setFormat(f"Crawled {completed} of {total} URLs")
+        self._update_eta_label()
 
     def _handle_report(self, report: SiteCrawlReport) -> None:
         self._latest_report = report
         self._discovered_total = report.discovered_count
+        self._completed_count = report.crawled_count + report.skipped_count
         self.model.set_results(list(report.results))
         self._set_running(False)
         self.btn_export.setEnabled(bool(report.results))
+        self._update_recap_from_report(report)
         summary = self._report_summary(report)
         self.lbl_discovery.setText(summary if not report.warning else f"{summary}. {report.warning}")
+        self.lbl_eta.setText("ETA: complete")
         self.progress.setFormat("Done")
         self.progress.setValue(100)
 
@@ -425,13 +472,19 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _set_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_settings.setEnabled(not running)
+        self.btn_stop.setVisible(running)
         self.btn_stop.setEnabled(running)
         self.btn_export.setEnabled(False if running else bool(self._latest_report and self._latest_report.results))
         self.btn_new_crawl.setEnabled(not running)
+        if running:
+            self._eta_timer.start()
+        else:
+            self._eta_timer.stop()
 
     def _show_error(self, message: str) -> None:
         self._set_running(False)
         self.lbl_discovery.setText("Site crawl failed.")
+        self.lbl_eta.setText("ETA: failed")
         QtWidgets.QMessageBox.warning(self, "Site crawl failed", message)
 
     def _show_results(self) -> None:
@@ -439,6 +492,27 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _show_setup(self) -> None:
         self.stack.setCurrentIndex(_SETUP_PAGE)
+
+    def _update_recap_from_report(self, report: SiteCrawlReport) -> None:
+        self.recap_widget.update_issues(
+            issues_for_site_report(report),
+            item_count=max(1, report.discovered_count),
+            item_label="crawl",
+        )
+
+    def _focus_recap_issue(self, issue: AuditIssue) -> None:
+        if not issue.url:
+            return
+        self.search_edit.setText(issue.url)
+        self._select_result_url(issue.url)
+
+    def _select_result_url(self, url: str) -> None:
+        for row in range(self.proxy.rowCount()):
+            index = self.proxy.index(row, 0)
+            if index.data() == url:
+                self.table.selectRow(row)
+                self.table.scrollTo(index)
+                return
 
     def _open_crawl_settings(self) -> None:
         dialog = CrawlSettingsDialog(self._crawl_options, self)
@@ -449,6 +523,26 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _update_speed_label(self) -> None:
         mode = "Gentle" if self._crawl_options.gentle_mode else "Standard"
         self.lbl_speed.setText(f"{mode} crawl, max {self._crawl_options.max_concurrent_per_host}/host")
+
+    def _reset_eta_tracking(self) -> None:
+        self._discovered_total = 0
+        self._completed_count = 0
+        self._crawl_started_at = None
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.setText("ETA: -")
+
+    def _update_eta_label(self) -> None:
+        if self._completed_count <= 0:
+            self.lbl_eta.setText(_eta_waiting_text(self._discovered_total))
+            return
+        total = max(self._discovered_total, self._completed_count)
+        remaining = max(0, total - self._completed_count)
+        if remaining <= 0:
+            self.lbl_eta.setText("ETA: finishing...")
+            return
+        elapsed = max(0.1, monotonic() - (self._crawl_started_at or monotonic()))
+        seconds = int(round((elapsed / self._completed_count) * remaining))
+        self.lbl_eta.setText(f"ETA: {_format_duration(seconds)} remaining")
 
     def _open_result_detail(self, index: QtCore.QModelIndex) -> None:
         source_index = self.proxy.mapToSource(index)
@@ -522,8 +616,18 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
 
     def _populate_tabs(self, payload: CrawlPayload) -> None:
         data = payload.to_mapping()
+        self._add_recap_tab(payload)
         self._add_table_tabs(data)
         self._add_special_tabs(payload, data)
+
+    def _add_recap_tab(self, payload: CrawlPayload) -> None:
+        self.recap_tab = AuditRecapWidget("Page recap")
+        self.recap_tab.update_issues(
+            issues_for_payload(self._base_url, payload),
+            item_count=1,
+            item_label="page",
+        )
+        self.tabs.addTab(self.recap_tab, "Recap")
 
     def _add_table_tabs(self, data: dict[str, Any]) -> None:
         self.images_tab = ImagesTab()
@@ -608,6 +712,27 @@ def _title_from_meta(rows: object) -> str:
     return ""
 
 
+def _is_error_status(status: str) -> bool:
+    if status == "error":
+        return True
+    return _status_code(status) >= 400
+
+
+def _is_warning_result(result: SiteCrawlResult) -> bool:
+    if result.status == "skipped":
+        return False
+    if result.indexability in {"", "-", "Indexable"}:
+        return False
+    return True
+
+
+def _status_code(value: object) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
 def _progress_stylesheet() -> str:
     return """
     QProgressBar {
@@ -624,3 +749,38 @@ def _progress_stylesheet() -> str:
         border-radius: 6px;
     }
     """
+
+
+def _eta_waiting_text(total: int) -> str:
+    if total > 0:
+        return "ETA: calculating after first page"
+    return "ETA: waiting for URL discovery"
+
+
+def _format_duration(seconds: int) -> str:
+    normalized = max(0, int(seconds))
+    if normalized < 60:
+        return f"{normalized}s"
+    minutes, remaining_seconds = divmod(normalized, 60)
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds:02d}s"
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{hours}h {remaining_minutes:02d}m"
+
+
+def _site_crawl_table_widths() -> dict[int, int]:
+    return {
+        0: 360,
+        1: 72,
+        2: 150,
+        3: 260,
+        4: 95,
+        5: 95,
+        6: 90,
+        7: 80,
+        8: 90,
+        9: 90,
+        10: 80,
+        11: 85,
+        12: 300,
+    }

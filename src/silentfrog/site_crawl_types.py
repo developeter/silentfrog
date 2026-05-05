@@ -13,6 +13,7 @@ DEFAULT_SITE_CRAWL_LIMIT = 500
 SITE_CRAWL_HEADERS = [
     "URL",
     "Status",
+    "Redirect status",
     "Final URL",
     "Title",
     "Description",
@@ -25,7 +26,38 @@ SITE_CRAWL_HEADERS = [
     "AI Visibility",
     "Error",
 ]
+SITE_CRAWL_TABLE_HEADERS = [
+    "URL",
+    "Status",
+    "Indexability",
+    "Title",
+    "Meta desc",
+    "Canonical",
+    "H1",
+    "Words",
+    "Img issues",
+    "Link issues",
+    "Schema",
+    "Hreflang",
+    "Issues",
+]
+SITE_CRAWL_TABLE_TOOLTIPS = [
+    "Requested URL from the crawl input or sitemap selection.",
+    "HTTP status from the main page fetch.",
+    "Final indexability verdict for this URL.",
+    "Page title text.",
+    "Meta description presence and length state.",
+    "Canonical state: self, different, missing, or multiple.",
+    "H1 state: missing, OK, or multiple.",
+    "Detected body word count.",
+    "Number of image rows with diagnostics.",
+    "Number of links returning fetch, client, or server errors.",
+    "Detected structured data block count.",
+    "Detected hreflang alternate count.",
+    "Most important issue signals for quick scanning.",
+]
 _WAF_STATUSES = {"403", "429"}
+_LINK_STATUS_COL = 4
 
 
 def _split_lines(text: str) -> list[str]:
@@ -84,6 +116,7 @@ class SiteCrawlConfig:
 class SiteCrawlResult:
     url: str
     status: str
+    redirect_status: str
     final_url: str
     title: str
     description_state: str
@@ -92,6 +125,9 @@ class SiteCrawlResult:
     hreflang_count: int
     schema_count: int
     image_issue_count: int
+    h1_state: str
+    word_count: int
+    link_issue_count: int
     performance_verdict: str
     ai_visibility_verdict: str
     error: str = ""
@@ -102,6 +138,7 @@ class SiteCrawlResult:
         return cls(
             url=url,
             status=_payload_status(payload),
+            redirect_status=_payload_redirect_status(payload),
             final_url=_payload_final_url(payload, url),
             title=_meta_value(payload, "title"),
             description_state=_description_state(_meta_value(payload, "description")),
@@ -110,6 +147,9 @@ class SiteCrawlResult:
             hreflang_count=len(payload.hreflang),
             schema_count=payload.schema.summary.total,
             image_issue_count=_image_issue_count(payload.images),
+            h1_state=_h1_state(payload),
+            word_count=max(0, payload.content_quality.word_count),
+            link_issue_count=_link_issue_count(payload.links),
             performance_verdict=payload.performance.summary.verdict or "-",
             ai_visibility_verdict=payload.ai_visibility.summary.verdict or "-",
             payload=payload,
@@ -120,6 +160,7 @@ class SiteCrawlResult:
         return cls(
             url=url,
             status="error",
+            redirect_status="",
             final_url="",
             title="",
             description_state="",
@@ -128,6 +169,9 @@ class SiteCrawlResult:
             hreflang_count=0,
             schema_count=0,
             image_issue_count=0,
+            h1_state="",
+            word_count=0,
+            link_issue_count=0,
             performance_verdict="-",
             ai_visibility_verdict="-",
             error=error,
@@ -138,6 +182,7 @@ class SiteCrawlResult:
         return cls(
             url=url,
             status="skipped",
+            redirect_status="",
             final_url="",
             title="",
             description_state="",
@@ -146,6 +191,9 @@ class SiteCrawlResult:
             hreflang_count=0,
             schema_count=0,
             image_issue_count=0,
+            h1_state="",
+            word_count=0,
+            link_issue_count=0,
             performance_verdict="-",
             ai_visibility_verdict="-",
             error=reason,
@@ -155,6 +203,7 @@ class SiteCrawlResult:
         return [
             self.url,
             self.status,
+            self.redirect_status,
             self.final_url,
             self.title,
             self.description_state,
@@ -168,9 +217,33 @@ class SiteCrawlResult:
             self.error,
         ]
 
+    def table_row(self) -> list[object]:
+        return [
+            self.url,
+            self.status,
+            self.indexability,
+            self.title,
+            self.description_state,
+            self.canonical_state,
+            self.h1_state,
+            self.word_count,
+            self.image_issue_count,
+            self.link_issue_count,
+            self.schema_count,
+            self.hreflang_count,
+            self.issue_summary(),
+        ]
+
+    def issue_summary(self) -> str:
+        if self.error:
+            return self.error
+        issues = _issue_summary_items(self)
+        return "; ".join(issues[:3]) if issues else "-"
+
     @property
     def has_waf_signal(self) -> bool:
-        return self.status in _WAF_STATUSES or any(code in self.error for code in _WAF_STATUSES)
+        statuses = {self.status, self.redirect_status}
+        return bool(statuses & _WAF_STATUSES) or any(code in self.error for code in _WAF_STATUSES)
 
 
 @dataclass(frozen=True)
@@ -199,6 +272,11 @@ class SiteCrawlReport:
 
 
 def _payload_status(payload: CrawlPayload) -> str:
+    status = str(payload.performance.status or "").strip()
+    return status or _payload_redirect_status(payload) or "0"
+
+
+def _payload_redirect_status(payload: CrawlPayload) -> str:
     status = str(payload.redirect.final_status or "").strip()
     return status or "0"
 
@@ -257,6 +335,55 @@ def _image_issue_count(rows: Iterable[Iterable[object]]) -> int:
     return count
 
 
+def _h1_state(payload: CrawlPayload) -> str:
+    h1_count = sum(1 for row in payload.headers if row and str(row[0]).strip().lower() == "h1")
+    if h1_count == 0:
+        return "Missing"
+    if h1_count == 1:
+        return "OK"
+    return f"Multiple ({h1_count})"
+
+
+def _link_issue_count(rows: Iterable[Iterable[object]]) -> int:
+    count = 0
+    for row in rows:
+        values = list(row)
+        if len(values) <= _LINK_STATUS_COL:
+            continue
+        status = _status_code(values[_LINK_STATUS_COL])
+        if status == 0 or status >= 400:
+            count += 1
+    return count
+
+
+def _status_code(value: object) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _issue_summary_items(result: SiteCrawlResult) -> list[str]:
+    issues: list[str] = []
+    if result.status in {"error", "skipped"}:
+        issues.append(result.status.title())
+    if result.indexability not in {"", "-", "Indexable"}:
+        issues.append(result.indexability)
+    if not result.title:
+        issues.append("Missing title")
+    if result.description_state not in {"", "OK"}:
+        issues.append(f"Meta desc: {result.description_state}")
+    if result.canonical_state not in {"", "Self"}:
+        issues.append(f"Canonical: {result.canonical_state}")
+    if result.h1_state not in {"", "OK"}:
+        issues.append(f"H1: {result.h1_state}")
+    if result.image_issue_count:
+        issues.append(f"{result.image_issue_count} image issues")
+    if result.link_issue_count:
+        issues.append(f"{result.link_issue_count} link issues")
+    return issues
+
+
 def _waf_warning(results: Iterable[SiteCrawlResult]) -> str:
     signals = sum(1 for result in results if result.has_waf_signal)
     if signals < 3:
@@ -270,6 +397,8 @@ def _waf_warning(results: Iterable[SiteCrawlResult]) -> str:
 __all__ = [
     "DEFAULT_SITE_CRAWL_LIMIT",
     "SITE_CRAWL_HEADERS",
+    "SITE_CRAWL_TABLE_HEADERS",
+    "SITE_CRAWL_TABLE_TOOLTIPS",
     "SiteCrawlConfig",
     "SiteCrawlReport",
     "SiteCrawlResult",

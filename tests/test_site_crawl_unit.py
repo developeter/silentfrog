@@ -33,6 +33,23 @@ def _payload(url: str, title: str = "Example Title") -> CrawlPayload:
     )
 
 
+def test_site_crawl_result_uses_fetch_status_before_redirect_probe_status() -> None:
+    url = "https://example.com/page"
+    payload = CrawlPayload.from_raw(
+        {
+            **_payload(url).to_mapping(),
+            "redirect": {"chain": [url], "hops": 0, "final_status": "403", "loop": False},
+            "performance": {"status": 200, "summary": {"verdict": "Good"}},
+        }
+    )
+
+    result = site_crawler.SiteCrawlResult.from_payload(url, payload)
+
+    assert result.status == "200"
+    assert result.redirect_status == "403"
+    assert result.row()[1:4] == ["200", "403", url]
+
+
 @pytest.mark.asyncio
 async def test_resolve_site_urls_parses_sitemap_index_filters_and_caps(aiohttp_server):
     async def index(_):

@@ -5,6 +5,7 @@ import threading
 
 from qtpy import QtCore, QtWidgets
 
+import silentfrog.site_crawl_gui as site_crawl_gui  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import ACTUAL_WIDTH_COL, CACHE_COL, SIZE_COL, normalize_image_row  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_gui import SiteCrawlDetailDialog, SiteCrawlTableModel, SiteCrawlWindow  # type: ignore[reportMissingImports]
@@ -45,10 +46,13 @@ def test_site_crawl_window_defaults(qtbot) -> None:
     assert win._crawl_options.gentle_mode is True
     assert win.btn_export.isEnabled() is False
     assert win.btn_stop.isEnabled() is False
+    assert win.btn_stop.isHidden() is True
     assert win.stack.currentWidget() is win.setup_page
     assert win.base_url.toolTip()
     assert win.btn_start.toolTip()
     assert win.progress.minimumHeight() >= 32
+    assert win.lbl_eta.text() == "ETA: -"
+    assert win.recap_widget.health_text().startswith("<b>Ready</b>")
 
 
 def test_start_crawl_button_populates_rows(monkeypatch, qtbot) -> None:
@@ -73,21 +77,117 @@ def test_start_crawl_button_populates_rows(monkeypatch, qtbot) -> None:
     assert win.model.rowCount() == 1
     assert win.stack.currentWidget() is win.results_page
     assert win.btn_export.isEnabled() is True
+    assert win.btn_stop.isHidden() is True
+    assert win.lbl_eta.text() == "ETA: complete"
     assert win.progress.value() == 100
     assert "Found 1 URLs" in win.lbl_discovery.text()
+    assert "Healthy" in win.recap_widget.health_text()
 
     qtbot.mouseClick(win.btn_new_crawl, QtCore.Qt.MouseButton.LeftButton)
 
     assert win.stack.currentWidget() is win.setup_page
 
 
-def test_site_crawl_highlighted_rows_keep_readable_foreground() -> None:
-    model = SiteCrawlTableModel()
-    model.set_results([SiteCrawlResult.skipped("https://example.com/skipped", "Cancelled")])
-    index = model.index(0, 0)
+def test_site_crawl_stop_button_only_visible_while_running(qtbot) -> None:
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
 
-    assert model.data(index, QtCore.Qt.ItemDataRole.BackgroundRole) is not None
-    assert model.data(index, QtCore.Qt.ItemDataRole.ForegroundRole) is not None
+    win._set_running(True)
+
+    assert win.btn_stop.isHidden() is False
+    assert win.btn_stop.isEnabled() is True
+
+    win._set_running(False)
+
+    assert win.btn_stop.isHidden() is True
+
+
+def test_site_crawl_eta_updates_from_completed_rows(monkeypatch, qtbot) -> None:
+    current_time = {"value": 100.0}
+    monkeypatch.setattr(site_crawl_gui, "monotonic", lambda: current_time["value"])
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    win._handle_progress({"event": "discovered", "total": 4})
+    current_time["value"] = 110.0
+    win._append_progress_row({"event": "row", "completed": 1})
+
+    assert win.lbl_eta.text() == "ETA: 30s remaining"
+
+
+def test_site_crawl_recap_issue_activation_filters_to_url(qtbot) -> None:
+    result = SiteCrawlResult.failed("https://example.com/fail", "boom")
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    win._show_results()
+    win._handle_report(report)
+    item = win.recap_widget.action_list.item(0)
+    win.recap_widget.action_list.itemActivated.emit(item)
+
+    assert win.search_edit.text() == "https://example.com/fail"
+    assert win.table.selectionModel().hasSelection()
+
+
+def test_site_crawl_coloring_keeps_skipped_neutral_and_errors_readable() -> None:
+    model = SiteCrawlTableModel()
+    model.set_results([
+        SiteCrawlResult.skipped("https://example.com/skipped", "Cancelled"),
+        SiteCrawlResult.failed("https://example.com/error", "boom"),
+    ])
+
+    skipped = model.index(0, 0)
+    error = model.index(1, 0)
+
+    assert model.data(skipped, QtCore.Qt.ItemDataRole.BackgroundRole) is None
+    assert model.data(error, QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+    assert model.data(error, QtCore.Qt.ItemDataRole.ForegroundRole) is not None
+
+
+def test_site_crawl_table_uses_crawler_overview_columns() -> None:
+    raw = _payload("https://example.com/page").to_mapping()
+    payload = CrawlPayload.from_raw(
+        {
+            **raw,
+            "headers": [["h1", "First"], ["h1", "Second"]],
+            "links": [["https://example.com/missing", "Missing", "Interno", "follow", "404", "Client error", "Body", "", "com"]],
+            "content_quality": {"word_count": 240},
+        }
+    )
+    result = SiteCrawlResult.from_payload("https://example.com/page", payload)
+    model = SiteCrawlTableModel()
+    model.set_results([result])
+
+    headers = [
+        model.headerData(column, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole)
+        for column in range(model.columnCount())
+    ]
+    row = [model.index(0, column).data() for column in range(model.columnCount())]
+
+    assert headers == [
+        "URL",
+        "Status",
+        "Indexability",
+        "Title",
+        "Meta desc",
+        "Canonical",
+        "H1",
+        "Words",
+        "Img issues",
+        "Link issues",
+        "Schema",
+        "Hreflang",
+        "Issues",
+    ]
+    assert "Final URL" not in headers
+    assert "Performance" not in headers
+    assert "AI Visibility" not in headers
+    assert row[6] == "Multiple (2)"
+    assert row[7] == 240
+    assert row[9] == 1
+    assert "H1: Multiple (2)" in str(row[-1])
+    assert model.headerData(12, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
 
 
 def test_row_detail_uses_cached_payload(qtbot) -> None:
@@ -101,7 +201,8 @@ def test_row_detail_uses_cached_payload(qtbot) -> None:
 
     assert win._detail_windows
     assert isinstance(win._detail_windows[-1], SiteCrawlDetailDialog)
-    assert win._detail_windows[-1].tabs.count() == 17
+    assert win._detail_windows[-1].tabs.count() == 18
+    assert win._detail_windows[-1].tabs.tabText(0) == "Recap"
     assert win._detail_windows[-1].btn_img_dl.text() == "Analyze images"
 
 

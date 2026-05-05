@@ -31,21 +31,16 @@ def test_host_semaphore_reuse() -> None:
 @pytest.mark.asyncio
 async def test_link_status_backoff(monkeypatch) -> None:
     # Backoff should retry once on 429/403 and sleep the configured delay.
-    calls: list[int] = []
     sleeps: list[float] = []
-
-    async def fake_head_status(_session, _url, _timeout):
-        return calls.pop(0)
 
     async def fake_sleep(delay: float):
         sleeps.append(delay)
 
-    monkeypatch.setattr(crawl_http, "head_status", fake_head_status)
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    calls.extend([429, 200])
 
+    session = _HeadSession([_HeadResponse(429), _HeadResponse(200)], [_HeadResponse(429)])
     options = replace(CrawlOptions.default(), gentle_mode=True, max_concurrent_per_host=2)
-    code = await crawl_http._link_status(object(), "https://example.com", timeout=2, options=options)
+    code = await crawl_http._link_status(session, "https://example.com", timeout=2, options=options)
     assert code == 200
     assert sleeps == [crawl_http._BACKOFF_DELAY]
 
@@ -63,8 +58,9 @@ class _HeadResponse:
 
 
 class _HeadSession:
-    def __init__(self, responses) -> None:
+    def __init__(self, responses, get_responses=None) -> None:
         self._responses = responses
+        self._get_responses = get_responses or []
 
     async def __aenter__(self):
         return self
@@ -78,6 +74,12 @@ class _HeadSession:
             raise response
         return response
 
+    def get(self, url: str, **kwargs):
+        response = self._get_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
 
 @pytest.mark.asyncio
 async def test_trace_redirects_reports_normal_chain(monkeypatch) -> None:
@@ -85,7 +87,7 @@ async def test_trace_redirects_reports_normal_chain(monkeypatch) -> None:
         _HeadResponse(301, {"Location": "/step-2"}),
         _HeadResponse(200),
     ]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
@@ -102,7 +104,7 @@ async def test_trace_redirects_reports_loop(monkeypatch) -> None:
         _HeadResponse(302, {"Location": "/a"}),
         _HeadResponse(302, {"Location": "/b"}),
     ]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/a", timeout=2)
 
@@ -119,7 +121,7 @@ async def test_trace_redirects_reports_loop(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_trace_redirects_reports_max_hops(monkeypatch) -> None:
     responses = [_HeadResponse(301, {"Location": f"/hop-{index}"}) for index in range(10)]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
@@ -130,11 +132,54 @@ async def test_trace_redirects_reports_max_hops(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_trace_redirects_reports_exception(monkeypatch) -> None:
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda: _HeadSession([RuntimeError("boom")]))
+    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession([RuntimeError("boom")]))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
     assert hops == ["https://example.com/start"]
     assert status == "error RuntimeError"
+    assert hop_count == 0
+    assert is_loop is False
+
+
+@pytest.mark.asyncio
+async def test_probe_status_falls_back_to_get_when_head_is_blocked() -> None:
+    session = _HeadSession([_HeadResponse(403)], [_HeadResponse(200)])
+
+    code = await crawl_http._link_status(session, "https://example.com/page", timeout=2, options=CrawlOptions.default())
+
+    assert code == 200
+
+
+@pytest.mark.asyncio
+async def test_probe_status_falls_back_to_get_when_head_is_not_allowed() -> None:
+    session = _HeadSession([_HeadResponse(405)], [_HeadResponse(200)])
+
+    code = await crawl_http._link_status(session, "https://example.com/page", timeout=2, options=CrawlOptions.default())
+
+    assert code == 200
+
+
+@pytest.mark.asyncio
+async def test_probe_status_keeps_unresolved_403_after_get_fallback() -> None:
+    session = _HeadSession([_HeadResponse(403)], [_HeadResponse(403)])
+
+    code = await crawl_http._link_status(session, "https://example.com/page", timeout=2, options=CrawlOptions.default())
+
+    assert code == 403
+
+
+@pytest.mark.asyncio
+async def test_trace_redirects_uses_get_fallback_for_blocked_head(monkeypatch) -> None:
+    monkeypatch.setattr(
+        crawl_http.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: _HeadSession([_HeadResponse(403)], [_HeadResponse(200)]),
+    )
+
+    hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
+
+    assert hops == ["https://example.com/start"]
+    assert status == "200"
     assert hop_count == 0
     assert is_loop is False

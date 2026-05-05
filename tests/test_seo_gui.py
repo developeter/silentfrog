@@ -8,6 +8,7 @@ import pytest
 from qtpy import QtCore, QtGui, QtWidgets
 from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
+from silentfrog.audit_issues import IssueSeverity  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import (
@@ -87,6 +88,14 @@ def _row_count(view: QtWidgets.QTableView) -> int:
     model = view.model()
     assert model is not None
     return model.rowCount()
+
+
+def _recap_item_containing(win: WebpageSeoWindow, text: str) -> QtWidgets.QListWidgetItem:
+    for row in range(win.recap_tab.action_list.count()):
+        item = win.recap_tab.action_list.item(row)
+        if text in item.text():
+            return item
+    raise AssertionError(f"Missing recap item containing {text!r}")
 
 
 def _sample_payload() -> CrawlPayload:
@@ -569,9 +578,10 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    assert win.tabs.count() == 17
+    assert win.tabs.count() == 18
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
+        "Recap",
         "Meta tag",
         "Header H1-H6",
         "Images",
@@ -1052,6 +1062,22 @@ def test_seo_window_reveals_tabs_after_data(qtbot):
     assert win.is_showing_placeholder() is False
     assert win.btn_export.isEnabled() is True
     assert win.btn_img_dl.isEnabled() is True
+    assert win.tabs.currentWidget() is win.recap_tab
+    assert "Warnings found" in win.recap_tab.health_text()
+    assert win.recap_tab.count_text(IssueSeverity.CRITICAL) == "Critical: 0"
+
+
+def test_recap_issue_activation_opens_matching_detail_tab(qtbot) -> None:
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    data = _sample_payload().to_mapping()
+    data["meta"] = [["title", "", "0"], ["description", "", "0"]]
+
+    win._populate_tables(data)
+    item = _recap_item_containing(win, "title tag")
+    win.recap_tab.action_list.itemActivated.emit(item)
+
+    assert win.tabs.tabText(win.tabs.currentIndex()) == "Meta tag"
 
 
 @pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
@@ -1831,3 +1857,4 @@ def test_clear_results_resets_tabs(qtbot):
     assert _row_count(win.images_tab.view) == 0
     assert _row_count(win.links_tab.view) == 0
     assert win.btn_export.isEnabled() is False
+    assert win.recap_tab.health_text().startswith("<b>Ready</b>")

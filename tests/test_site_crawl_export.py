@@ -5,12 +5,18 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
+from silentfrog.exporters.action_workbook import ACTION_SHEET_NAMES  # type: ignore[reportMissingImports]
 from silentfrog.exporters import export_site_crawl_report  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import IMAGE_HEADERS  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult  # type: ignore[reportMissingImports]
 
 
-def _payload(url: str = "https://example.com/page") -> CrawlPayload:
+def _payload(
+    url: str = "https://example.com/page",
+    *,
+    redirect_status: str = "200",
+    fetch_status: int = 200,
+) -> CrawlPayload:
     return CrawlPayload.from_raw(
         {
             "meta": [["title", "Duplicate Title", "15"], ["description", "", "0"]],
@@ -24,7 +30,7 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
                 "issues": [],
             },
             "canonical": {"target": url, "self": True, "multiple": False, "status": "200"},
-            "redirect": {"chain": [url], "hops": 0, "final_status": "200", "loop": False},
+            "redirect": {"chain": [url], "hops": 0, "final_status": redirect_status, "loop": False},
             "robots": {"*": [["Allow", "/"]]},
             "meta_robots": "index, follow",
             "hreflang": [["en", "https://example.com/en", "200", "Yes", "Yes"]],
@@ -38,7 +44,7 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
                 "checks": [{"area": "Access", "check": "AI crawler access", "status": "warning", "details": "Allowed with caveats", "recommendation": "Review robots.txt"}],
             },
             "performance": {
-                "status": 200,
+                "status": fetch_status,
                 "nav_ttfb_ms": 123,
                 "nav_total_ms": 456,
                 "transfer_size": 2048,
@@ -58,7 +64,7 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
 
 
 def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Path) -> None:
-    first = SiteCrawlResult.from_payload("https://example.com/a", _payload("https://example.com/a"))
+    first = SiteCrawlResult.from_payload("https://example.com/a", _payload("https://example.com/a", redirect_status="403"))
     second = SiteCrawlResult.from_payload("https://example.com/b", _payload("https://example.com/b"))
     failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
     report = SiteCrawlReport.from_results([first, second, failed], discovered_count=3)
@@ -69,6 +75,7 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
     workbook = load_workbook(output)
     try:
         assert workbook.sheetnames == [
+            *ACTION_SHEET_NAMES,
             "Summary",
             "Indexability issues",
             "Meta issues",
@@ -95,7 +102,24 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
             "SERP detail",
             "Social detail",
         ]
+        assert workbook["Read me - Legend"]["B4"].value == "Only blockers or high-confidence damage."
+        assert workbook["Executive summary"]["A2"].value == "Report type"
+        assert workbook["Executive summary"]["B3"].value == 3
+        assert workbook["Prioritized issues"]["A1"].value == "Severity"
+        assert workbook["Prioritized issues"]["C2"].value == "https://example.com/fail"
+        assert workbook["Prioritized issues"]["F2"].value
+        assert workbook["Affected URLs"]["A2"].value == "https://example.com/a"
+        assert workbook["Content-meta actions"]["D2"].value in {
+            "The page has no meta description.",
+            "Detected structured data is incomplete for a rich result opportunity.",
+        }
+        assert workbook["Technical actions"]["D2"].value
+        assert workbook["AI-GEO actions"]["D2"].value == "Allowed with caveats"
+        assert workbook["Appendix - raw data"]["A2"].value == "Summary"
         assert workbook["Summary"]["A2"].value == "https://example.com/a"
+        assert workbook["Summary"]["B2"].value == "200"
+        assert workbook["Summary"]["C1"].value == "Redirect status"
+        assert workbook["Summary"]["C2"].value == "403"
         assert workbook["Meta issues"]["B2"].value in {"Duplicate title", "Meta description"}
         assert workbook["Structured data"]["C2"].value == "Product"
         assert workbook["Errors"]["A2"].value == "https://example.com/fail"

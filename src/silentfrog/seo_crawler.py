@@ -166,9 +166,23 @@ async def _collect_analysis_sections(
     image_rows = _extract_images(response.url, soup)
     link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options)
 
-    canonical_url, is_self, many_canon, canon_status = await _check_canonical(response.url, soup, timeout=timeout)
-    hops, final_status, hop_count, is_loop = await _trace_redirects(request_url)
-    hreflang_rows = await _extract_hreflang(response.url, soup, timeout=timeout)
+    canonical_url, is_self, many_canon, canon_status = await _check_canonical(
+        response.url,
+        soup,
+        timeout=timeout,
+        crawl_options=crawl_options,
+    )
+    hops, final_status, hop_count, is_loop = await _trace_redirects(
+        request_url,
+        timeout=timeout,
+        options=crawl_options,
+    )
+    hreflang_rows = await _extract_hreflang(
+        response.url,
+        soup,
+        timeout=timeout,
+        crawl_options=crawl_options,
+    )
     meta_robots = _meta_robots_value(response.headers, soup)
     robots_map = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
     serp_snippet = await _make_serp_snippet(soup, response.url)

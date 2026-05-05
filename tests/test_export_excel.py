@@ -5,6 +5,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
+from silentfrog.exporters.action_workbook import ACTION_SHEET_NAMES  # type: ignore[reportMissingImports]
 from silentfrog.exporters import export_page_analysis  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import normalize_image_row  # type: ignore[reportMissingImports]
 
@@ -281,6 +282,14 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
             sheet = workbook[sheet_name]
             return [[cell.value for cell in row] for row in sheet.iter_rows()]
 
+        assert workbook.sheetnames[: len(ACTION_SHEET_NAMES)] == ACTION_SHEET_NAMES
+        assert workbook["Executive summary"]["B2"].value == "Single page"
+        assert workbook["Prioritized issues"]["A1"].value == "Severity"
+        assert workbook["Prioritized issues"]["D2"].value == "Total page weight is very high."
+        assert workbook["Affected URLs"]["A2"].value == "https://example.com"
+        assert workbook["Technical actions"]["B2"].value == "Performance"
+        assert workbook["AI-GEO actions"]["D2"].value == "OpenGraph title/description: Yes; Twitter title/description: No."
+        assert workbook["Appendix - raw data"]["A2"].value == "Meta / Headers / Images"
         assert "Meta" in workbook.sheetnames
         assert "SERP Preview" in workbook.sheetnames
         assert "Structured summary" in workbook.sheetnames

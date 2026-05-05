@@ -211,6 +211,42 @@ async def test_analyse(local_server):
     assert isinstance(perf.issues, list)
     assert isinstance(perf.opportunity_details, list)
 
+
+@pytest.mark.asyncio
+async def test_analyse_uses_get_fallback_for_blocked_canonical_and_hreflang_head(aiohttp_server):
+    async def page(_):
+        body = f"""
+        <html>
+          <head>
+            <title>Fallback Probe Test</title>
+            <link rel="canonical" href="{server.make_url('/canonical')}">
+            <link rel="alternate" hreflang="en" href="{server.make_url('/en')}">
+          </head>
+          <body><h1>Fallback Probe Test</h1></body>
+        </html>
+        """
+        return web.Response(text=body, content_type="text/html")
+
+    async def blocked_head(_):
+        return web.Response(status=403)
+
+    async def ok_get(_):
+        return web.Response(text="ok", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/", page)
+    app.router.add_route("HEAD", "/canonical", blocked_head)
+    app.router.add_get("/canonical", ok_get, allow_head=False)
+    app.router.add_route("HEAD", "/en", blocked_head)
+    app.router.add_get("/en", ok_get, allow_head=False)
+    server = await aiohttp_server(app)
+
+    payload = await analyse(str(server.make_url("/")), timeout=5)
+
+    assert payload.canonical.status == "200"
+    assert payload.hreflang[0][2] == "200"
+
+
 @pytest.mark.asyncio
 async def test_analyse_images(local_server):
     input_rows = [["/logo.png", "", "", "-", "", "", "", "", "No", ""]]

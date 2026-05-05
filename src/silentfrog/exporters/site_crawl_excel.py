@@ -7,6 +7,7 @@ from typing import Any, Iterable, Mapping
 
 import xlsxwriter
 
+from .action_workbook import write_site_crawl_action_sheets
 from ..content_quality import build_content_quality_rows
 from ..crawl_types import CrawlPayload
 from ..image_diagnostics import IMAGE_HEADERS, normalize_image_rows
@@ -23,6 +24,7 @@ def export_site_crawl_report(report: SiteCrawlReport, file_path: Path) -> None:
     payload_rows = _payload_rows(results)
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _WorkbookFormats(workbook)
+        write_site_crawl_action_sheets(workbook, report)
         _write_summary_sheets(workbook, formats, results)
         _write_detail_sheets(workbook, formats, payload_rows)
 

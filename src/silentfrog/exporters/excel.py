@@ -8,6 +8,7 @@ from typing import Any, Callable, List, Sequence
 
 import xlsxwriter
 
+from .action_workbook import write_page_action_sheets
 from ..crawl_types import AiVisibilityPayload, CrawlPayload, PerformanceMetrics
 from ..content_quality import build_content_quality_rows
 from ..image_diagnostics import (
@@ -1049,6 +1050,7 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
 
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _Formats(workbook)
+        write_page_action_sheets(workbook, payload)
         writers = (
             lambda: _write_performance_sheet(workbook, formats, payload.performance),
             lambda: _write_ai_visibility_sheet(workbook, formats, payload.ai_visibility),

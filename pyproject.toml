@@ -21,11 +21,12 @@ dependencies = [
     # Parser pure-python usato da extruct quando tree_builder='html5lib'
     "html5lib (>=1.1,<2.0)",
     "tldextract (>=5.3.0,<6.0.0)",
-    "xlsxwriter (>=3.2.3,<4.0.0)",
+    "xlsxwriter (>=3.2.9,<4.0.0)",
     "aiohttp (>=3.12.0,<4.0.0)",
     "certifi (>=2025.1.31,<2027.0.0)",
     "nltk (>=3.9.1,<4.0.0)",
-    "pillow (>=11.2.1,<12.0.0)",
+    # Pillow 12.2.x publishes Windows/macOS wheels for Python 3.14.
+    "pillow (>=12.2.0,<13.0.0)",
     "humanize (>=4.12.3,<5.0.0)"
 ]
 

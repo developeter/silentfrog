@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -12,14 +13,22 @@ import re
 import aiohttp  # type: ignore[import]  # aiohttp lacks complete stubs in our environment
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
-from .http_client import head_status, fetch_text
+from .http_client import fetch_text
 from .crawl_options import CrawlOptions
 from .crawl_constants import _ACCEPT_DEFAULT, _ACCEPT_LANGUAGE_DEFAULT
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
 _HOST_DELAYS: dict[str, float] = {}
 _BACKOFF_STATUSES = {403, 429}
+_PROBE_GET_FALLBACK_STATUSES = {0, 403, 405, 429}
 _BACKOFF_DELAY = 1.5
+
+
+@dataclass(frozen=True)
+class _ProbeResponse:
+    status: int
+    headers: dict[str, str]
+    error: str = ""
 
 
 def _host_key(url: str) -> str:
@@ -122,20 +131,105 @@ def _human_duration(seconds: int) -> str:
 
 
 async def _link_status(session: ClientSession, url: str, timeout: int, options: CrawlOptions) -> int:
+    response = await _polite_probe_response(
+        session,
+        url,
+        timeout,
+        options,
+        allow_redirects=False,
+    )
+    return response.status
+
+
+async def _polite_probe_response(
+    session: ClientSession,
+    url: str,
+    timeout: int,
+    options: CrawlOptions,
+    *,
+    allow_redirects: bool,
+) -> _ProbeResponse:
     host = _host_key(url)
     async with _throttle_host(host, options):
-        delay = _HOST_DELAYS.get(host, 0.0) if options.gentle_mode and options.respect_crawl_delay else 0.0
-        if delay > 0:
-            await asyncio.sleep(delay)
-        attempts = 2 if options.gentle_mode else 1
-        code = 0
-        for attempt in range(attempts):
-            code = await head_status(session, url, timeout)
-            should_retry = code in _BACKOFF_STATUSES and attempt < attempts - 1
-            if not should_retry:
-                break
-            await asyncio.sleep(_BACKOFF_DELAY)
-        return code
+        await _apply_host_delay(host, options)
+        return await _probe_response(session, url, timeout, options, allow_redirects=allow_redirects)
+
+
+async def _apply_host_delay(host: str, options: CrawlOptions) -> None:
+    if not options.gentle_mode or not options.respect_crawl_delay:
+        return
+    delay = _HOST_DELAYS.get(host, 0.0)
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+async def _probe_response(
+    session: ClientSession,
+    url: str,
+    timeout: int,
+    options: CrawlOptions,
+    *,
+    allow_redirects: bool,
+) -> _ProbeResponse:
+    attempts = 2 if options.gentle_mode else 1
+    response = _ProbeResponse(0, {})
+    for attempt in range(attempts):
+        response = await _probe_attempt(session, url, timeout, allow_redirects=allow_redirects)
+        should_retry = response.status in _BACKOFF_STATUSES and attempt < attempts - 1
+        if not should_retry:
+            break
+        await asyncio.sleep(_BACKOFF_DELAY)
+    return response
+
+
+async def _probe_attempt(
+    session: ClientSession,
+    url: str,
+    timeout: int,
+    *,
+    allow_redirects: bool,
+) -> _ProbeResponse:
+    response = await _request_probe_response(
+        session,
+        "HEAD",
+        url,
+        timeout,
+        allow_redirects=allow_redirects,
+    )
+    if response.status not in _PROBE_GET_FALLBACK_STATUSES:
+        return response
+    fallback = await _request_probe_response(
+        session,
+        "GET",
+        url,
+        timeout,
+        allow_redirects=allow_redirects,
+    )
+    if fallback.status:
+        return fallback
+    if response.status == 0 and not response.error:
+        return fallback
+    return response
+
+
+async def _request_probe_response(
+    session: ClientSession,
+    method: str,
+    url: str,
+    timeout: int,
+    *,
+    allow_redirects: bool,
+) -> _ProbeResponse:
+    try:
+        request = session.head if method == "HEAD" else session.get
+        async with request(
+            url,
+            allow_redirects=allow_redirects,
+            timeout=ClientTimeout(total=timeout),
+        ) as response:
+            return _ProbeResponse(int(response.status), dict(response.headers))
+    except Exception as exc:
+        return _ProbeResponse(0, {}, f"error {exc.__class__.__name__}")
 
 
 async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
@@ -210,25 +304,34 @@ def _is_redirect_loop(hop_urls: list[str], next_url: str) -> bool:
     return next_url in hop_urls
 
 
-async def _trace_redirects(url: str, timeout: int = 8) -> tuple[list[str], str, int, bool]:
+async def _trace_redirects(
+    url: str,
+    timeout: int = 8,
+    options: CrawlOptions | None = None,
+) -> tuple[list[str], str, int, bool]:
     max_hops = 6
     hop_urls: list[str] = [url]
+    active_options = options or CrawlOptions.default()
     try:
-        async with aiohttp.ClientSession() as session:
+        headers = _headers_from_options(active_options)
+        async with aiohttp.ClientSession(headers=headers) as session:
             current_url = url
             for _ in range(max_hops):
-                async with session.head(
+                response = await _polite_probe_response(
+                    session,
                     current_url,
+                    timeout,
+                    active_options,
                     allow_redirects=False,
-                    timeout=ClientTimeout(total=timeout),
-                ) as response:
-                    next_url = _redirect_target(current_url, response)
-                    if next_url is None:
-                        return _redirect_hops_result(hop_urls, str(response.status), False)
-                    hop_urls.append(next_url)
-                    if _is_redirect_loop(hop_urls[:-1], next_url):
-                        return _redirect_hops_result(hop_urls, str(response.status), True)
-                    current_url = next_url
+                )
+                next_url = _redirect_target(current_url, response)
+                if next_url is None:
+                    status = response.error or str(response.status)
+                    return _redirect_hops_result(hop_urls, status, False)
+                hop_urls.append(next_url)
+                if _is_redirect_loop(hop_urls[:-1], next_url):
+                    return _redirect_hops_result(hop_urls, str(response.status), True)
+                current_url = next_url
         return _redirect_hops_result(hop_urls, "max-hops", False)
     except Exception as exc:
         return _redirect_hops_result(hop_urls, f"error {exc.__class__.__name__}", False)

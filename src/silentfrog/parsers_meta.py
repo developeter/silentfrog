@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
+from .crawl_options import CrawlOptions
+from .crawl_http import _headers_from_options, _polite_probe_response
 from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
 from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
 
@@ -549,7 +551,12 @@ def _meta_robots_value(headers: dict[str, str], soup: BeautifulSoup) -> str:
     )
 
 
-async def _check_canonical(page_url: str, soup: BeautifulSoup, timeout: int = 5) -> tuple[str, bool, bool, str]:
+async def _check_canonical(
+    page_url: str,
+    soup: BeautifulSoup,
+    timeout: int = 5,
+    crawl_options: CrawlOptions | None = None,
+) -> tuple[str, bool, bool, str]:
     links: list[str] = []
     for link_tag in soup.find_all("link", rel="canonical", href=True):
         href_val = _attr(link_tag, "href").strip()
@@ -561,16 +568,16 @@ async def _check_canonical(page_url: str, soup: BeautifulSoup, timeout: int = 5)
 
     status = ""
     if canonical_url:
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.head(
-                    canonical_url,
-                    timeout=ClientTimeout(total=timeout),
-                    allow_redirects=True,
-                ) as r:
-                    status = str(r.status)
-        except Exception as exc:
-            status = f"error {exc.__class__.__name__}"
+        options = crawl_options or CrawlOptions.default()
+        async with aiohttp.ClientSession(headers=_headers_from_options(options)) as sess:
+            response = await _polite_probe_response(
+                sess,
+                canonical_url,
+                timeout,
+                options,
+                allow_redirects=True,
+            )
+            status = str(response.status)
 
     return canonical_url, is_self, has_multiple, status
 
@@ -578,7 +585,12 @@ async def _check_canonical(page_url: str, soup: BeautifulSoup, timeout: int = 5)
 _HREFLANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
 
 
-async def _extract_hreflang(page_url: str, soup: BeautifulSoup, timeout: int = 5) -> list[list[str]]:
+async def _extract_hreflang(
+    page_url: str,
+    soup: BeautifulSoup,
+    timeout: int = 5,
+    crawl_options: CrawlOptions | None = None,
+) -> list[list[str]]:
     rows: list[list[str]] = []
     rels: dict[str, str] = {}
     for tag in soup.find_all("link", rel="alternate", hreflang=True, href=True):
@@ -588,14 +600,17 @@ async def _extract_hreflang(page_url: str, soup: BeautifulSoup, timeout: int = 5
             continue
         rels[lang_val.lower()] = urljoin(page_url, href_val)
 
-    async with aiohttp.ClientSession() as sess:
+    options = crawl_options or CrawlOptions.default()
+    async with aiohttp.ClientSession(headers=_headers_from_options(options)) as sess:
         for lang, href in rels.items():
-            try:
-                async with sess.head(href, allow_redirects=True, timeout=ClientTimeout(total=timeout)) as r:
-                    status = str(r.status)
-            except Exception as exc:
-                status = f"error {exc.__class__.__name__}"
-
+            response = await _polite_probe_response(
+                sess,
+                href,
+                timeout,
+                options,
+                allow_redirects=True,
+            )
+            status = str(response.status)
             rows.append([lang, href, status, "Yes" if _HREFLANG_RE.match(lang) else "No", ""])
 
     for row in rows:

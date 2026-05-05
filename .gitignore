@@ -11,3 +11,10 @@ src/silentfrog/assets/icon-old.png
 .venv/
 build/
 deploy/deployment/
+
+# Local secrets and API credentials. Keep tracked examples only.
+.env
+.env.*
+!.env.example
+secrets.local.json
+*.secrets.json
