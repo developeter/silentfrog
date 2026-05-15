@@ -2246,4 +2246,4 @@ pyqt5-backend = ["pyqt5", "pyqt5-sip"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "6786e463a896cabfe68d366df547bc599f80ae3cb11cc36289425a860f58b645"
+content-hash = "621eaa6a2637fafea78f076228b01fe68fef9768bdde8b24bee5f4eb2d9e9e61"

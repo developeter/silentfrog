@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from tools.source_install import (
+    RUNTIME_WHEEL_REQUIREMENTS,
     create_desktop_launcher,
     desktop_dir,
     installer_paths,
@@ -18,19 +19,20 @@ from tools.source_install import (
     render_run_sh,
     validate_python_version,
     windows_shortcut_command,
+    write_launchers,
 )
 
 
 def test_validate_python_version_rejects_old_versions() -> None:
-    assert validate_python_version((3, 11)) == "Python 3.12+ is required. Found 3.11."
+    assert validate_python_version((3, 11)) == "Python 3.12, 3.13, or 3.14 is required. Found 3.11."
     assert validate_python_version((3, 12)) is None
+    assert validate_python_version((3, 15)) == "Python 3.12, 3.13, or 3.14 is required. Found 3.15."
 
 
-def test_validate_python_version_requires_python_312_on_macos() -> None:
+def test_validate_python_version_accepts_supported_versions_on_macos() -> None:
     assert validate_python_version((3, 12), "Darwin") is None
-    assert validate_python_version((3, 14), "Darwin") == (
-        "Python 3.12 is required for the macOS installer path. Found 3.14."
-    )
+    assert validate_python_version((3, 13), "Darwin") is None
+    assert validate_python_version((3, 14), "Darwin") is None
     assert validate_python_version((3, 14), "Windows") is None
 
 
@@ -53,7 +55,12 @@ def test_install_plan_targets_local_venv(tmp_path: Path) -> None:
 
     assert plan[0] == ["python3", "-m", "venv", str(tmp_path / ".venv")]
     assert plan[1][:5] == [str(tmp_path / ".venv" / "bin" / "python"), "-m", "pip", "install", "--upgrade"]
-    assert plan[2][-1] == "."
+    assert "poetry-core" in plan[1]
+    assert "--only-binary=:all:" in plan[2]
+    assert "pyside6>=6.8,<7.0" in plan[2]
+    assert "numpy>=2.2.6,<3.0.0" in plan[2]
+    assert not any("pyqt5" in requirement.lower() for requirement in RUNTIME_WHEEL_REQUIREMENTS)
+    assert plan[3][-3:] == ["--no-deps", "--no-build-isolation", "."]
 
 
 def test_launcher_renderers_prefer_local_venv() -> None:
@@ -73,9 +80,11 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     assert 'poetry run silentfrog "$@"' in run_sh
     assert "install_silentfrog.py" in install_bat
     assert "install_silentfrog.py" in install_sh
+    assert install_sh.index("python3.14") < install_sh.index("python3.13") < install_sh.index("python3.12")
     assert "python3.12" in install_sh
+    assert "/usr/local/bin/python3.14" in install_sh
     assert "/usr/local/bin/python3.12" in install_sh
-    assert "brew install python@3.12" in install_sh
+    assert "Python 3.12, 3.13, or 3.14 was not found." in install_sh
     assert "install_silentfrog.sh" in install_command
     assert "Press Return to close this window." in install_command
     assert "--recreate-venv" in reinstall_sh
@@ -129,3 +138,10 @@ def test_create_desktop_launcher_writes_command_file_on_unix(tmp_path: Path) -> 
     assert launcher.is_file()
     content = launcher.read_text(encoding="utf-8")
     assert json.dumps(str(root / "run_silentfrog.sh")) in content
+
+
+def test_write_launchers_keeps_macos_scripts_lf_only(tmp_path: Path) -> None:
+    write_launchers(tmp_path)
+
+    for filename in ("install_silentfrog.sh", "reinstall_silentfrog.sh", "run_silentfrog.sh"):
+        assert b"\r\n" not in (tmp_path / filename).read_bytes()

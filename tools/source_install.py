@@ -11,6 +11,43 @@ from stat import S_IXGRP, S_IXOTH, S_IXUSR
 from typing import Iterable
 
 MIN_PYTHON = (3, 12)
+MAX_PYTHON = (3, 15)
+SUPPORTED_PYTHON_LABEL = "Python 3.12, 3.13, or 3.14"
+RUNTIME_WHEEL_REQUIREMENTS = (
+    "pyside6>=6.8,<7.0",
+    "qtpy>=2.4.3,<3.0.0",
+    "numpy>=2.2.6,<3.0.0",
+    "pandas>=2.2.3,<3.0.0",
+    "urllib3>=2.4.0,<3.0.0",
+    "requests>=2.32.3,<3.0.0",
+    "openpyxl>=3.1",
+    "httpx[http2]>=0.28.1,<0.29.0",
+    "beautifulsoup4>=4.13.4,<5.0.0",
+    "lxml>=6.0.2,<7.0",
+    "html5lib>=1.1,<2.0",
+    "tldextract>=5.3.0,<6.0.0",
+    "xlsxwriter>=3.2.9,<4.0.0",
+    "aiohttp>=3.12.0,<4.0.0",
+    "certifi>=2025.1.31,<2027.0.0",
+    "nltk>=3.9.1,<4.0.0",
+    "pillow>=12.2.0,<13.0.0",
+    "humanize>=4.12.3,<5.0.0",
+)
+MACOS_PYTHON_CANDIDATES = (
+    "python3.14",
+    "python3.13",
+    "python3.12",
+    "/usr/local/bin/python3.14",
+    "/opt/homebrew/bin/python3.14",
+    "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+    "/usr/local/bin/python3.13",
+    "/opt/homebrew/bin/python3.13",
+    "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+    "/usr/local/bin/python3.12",
+    "/opt/homebrew/bin/python3.12",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+)
+NON_MACOS_PYTHON_CANDIDATES = ("python3.14", "python3.13", "python3.12", "python3")
 
 
 @dataclass(frozen=True)
@@ -25,19 +62,11 @@ def is_windows(system_name: str | None = None) -> bool:
     return (system_name or platform.system()).lower().startswith("win")
 
 
-def _is_macos(system_name: str | None = None) -> bool:
-    return (system_name or platform.system()).lower() == "darwin"
-
-
 def validate_python_version(version: tuple[int, int], system_name: str | None = None) -> str | None:
-    if version >= MIN_PYTHON:
-        if _is_macos(system_name) and version != MIN_PYTHON:
-            found = ".".join(map(str, version))
-            return f"Python 3.12 is required for the macOS installer path. Found {found}."
+    if MIN_PYTHON <= version < MAX_PYTHON:
         return None
-    required = ".".join(map(str, MIN_PYTHON))
     found = ".".join(map(str, version))
-    return f"Python {required}+ is required. Found {found}."
+    return f"{SUPPORTED_PYTHON_LABEL} is required. Found {found}."
 
 
 def installer_paths(root: Path, system_name: str | None = None) -> InstallerPaths:
@@ -61,8 +90,17 @@ def install_plan(root: Path, interpreter: str, system_name: str | None = None) -
     paths = installer_paths(root, system_name)
     return [
         [interpreter, "-m", "venv", str(paths.venv_dir)],
-        [str(paths.python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
-        [str(paths.python), "-m", "pip", "install", "--upgrade", "."],
+        [str(paths.python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "poetry-core"],
+        [
+            str(paths.python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--only-binary=:all:",
+            *RUNTIME_WHEEL_REQUIREMENTS,
+        ],
+        [str(paths.python), "-m", "pip", "install", "--upgrade", "--no-deps", "--no-build-isolation", "."],
         [
             str(paths.python),
             "-c",
@@ -75,6 +113,9 @@ def render_run_bat() -> str:
     return "\n".join(
         [
             "@echo off",
+            "REM Launch Silentfrog from the local .venv when available.",
+            "REM Falls back to Poetry for developers.",
+            "",
             "setlocal",
             "pushd %~dp0",
             'set "QT_API=pyside6"',
@@ -84,6 +125,9 @@ def render_run_bat() -> str:
             ") else (",
             "  poetry run silentfrog %*",
             ")",
+            "echo.",
+            "echo Silentfrog exited. Press any key to close this window.",
+            "pause >nul",
             "popd",
         ]
     ) + "\n"
@@ -93,13 +137,19 @@ def render_run_sh() -> str:
     return "\n".join(
         [
             "#!/bin/sh",
+            "# Launch Silentfrog from the local .venv when available.",
+            "# Falls back to Poetry for developers.",
+            "",
             "set -eu",
             'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+            'cd "$script_dir"',
             'export QT_API="${QT_API:-pyside6}"',
+            "",
             'launcher="$script_dir/.venv/bin/silentfrog"',
             'if [ -x "$launcher" ]; then',
             '  exec "$launcher" "$@"',
             "fi",
+            "",
             'exec poetry run silentfrog "$@"',
         ]
     ) + "\n"
@@ -227,10 +277,12 @@ def _macos_python_selector_lines() -> list[str]:
         '  [ -n "$candidate" ] || return 1',
         '  if command -v "$candidate" >/dev/null 2>&1; then',
         '    version=$("$candidate" -c \'import sys; print("%d.%d" % sys.version_info[:2])\' 2>/dev/null || true)',
-        '    if [ "$(uname -s)" != "Darwin" ] || [ "$version" = "3.12" ]; then',
-        '      silentfrog_python="$candidate"',
-        "      return 0",
-        "    fi",
+        '    case "$version" in',
+        "      3.12|3.13|3.14)",
+        '        silentfrog_python="$candidate"',
+        "        return 0",
+        "        ;;",
+        "    esac",
         "  fi",
         "  return 1",
         "}",
@@ -238,24 +290,29 @@ def _macos_python_selector_lines() -> list[str]:
         '  try_silentfrog_python "$SILENTFROG_PYTHON" || true',
         "fi",
         'if [ -z "$silentfrog_python" ] && [ "$(uname -s)" = "Darwin" ]; then',
-        "  for candidate in python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3; do",
+        _shell_candidate_loop(MACOS_PYTHON_CANDIDATES),
         '    try_silentfrog_python "$candidate" && break',
         "  done",
         "fi",
         'if [ -z "$silentfrog_python" ] && [ "$(uname -s)" != "Darwin" ]; then',
-        '  try_silentfrog_python python3 || true',
+        _shell_candidate_loop(NON_MACOS_PYTHON_CANDIDATES),
+        '    try_silentfrog_python "$candidate" && break',
+        "  done",
         "fi",
         'if [ -z "$silentfrog_python" ]; then',
-        '  echo "[install] Python 3.12 was not found."',
-        '  echo "[install] On Intel Mac with Homebrew, install it with: brew install python@3.12"',
-        '  echo "[install] Or install Python 3.12 from python.org, then run this installer again."',
+        '  echo "[install] Python 3.12, 3.13, or 3.14 was not found."',
+        '  echo "[install] Install one supported Python version, then run this installer again."',
         "  exit 1",
         "fi",
     ]
 
 
+def _shell_candidate_loop(candidates: tuple[str, ...]) -> str:
+    return f"  for candidate in {' '.join(candidates)}; do"
+
+
 def _write_file(path: Path, content: str, executable: bool = False) -> None:
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
     if executable:
         current = path.stat().st_mode
         path.chmod(current | S_IXUSR | S_IXGRP | S_IXOTH)
@@ -290,6 +347,17 @@ def _run(command: Iterable[str], cwd: Path) -> None:
     subprocess.run(list(command), cwd=str(cwd), check=True)
 
 
+def _is_dependency_wheel_preflight(command: list[str]) -> bool:
+    return "--only-binary=:all:" in command
+
+
+def _print_dependency_wheel_failure() -> None:
+    print("[install] Dependency wheel preflight failed.")
+    print("[install] Silentfrog requires binary wheels for Python 3.12, 3.13, or 3.14 on your OS/CPU.")
+    print("[install] This source installer does not compile desktop dependencies from source.")
+    print("[install] Use a packaged Silentfrog app, or try another supported Python version.")
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Install Silentfrog from source into a local .venv")
     parser.add_argument("--recreate-venv", action="store_true", help="Delete and recreate the local .venv before installing")
@@ -301,10 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     version_error = validate_python_version((sys.version_info.major, sys.version_info.minor), platform.system())
     if version_error:
         print(f"[install] {version_error}")
-        if _is_macos():
-            print("[install] Use Python 3.12 on macOS, then run this command again.")
-        else:
-            print("[install] Install Python 3.12 or newer, then run this command again.")
+        print("[install] Install Python 3.12, 3.13, or 3.14, then run this command again.")
         return 1
 
     root = Path(__file__).resolve().parents[1]
@@ -321,7 +386,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         for command in install_plan(root, sys.executable):
-            _run(command, root)
+            try:
+                _run(command, root)
+            except subprocess.CalledProcessError:
+                if _is_dependency_wheel_preflight(command):
+                    _print_dependency_wheel_failure()
+                raise
         write_launchers(root)
         try:
             launcher_path = create_desktop_launcher(root)

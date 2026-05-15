@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "pyside6 (>=6.8,<7.0)",
     "qtpy (>=2.4.3,<3.0.0)",
+    "numpy (>=2.2.6,<3.0.0)",
     "pandas (>=2.2.3,<3.0.0)",
     "urllib3 (>=2.4.0,<3.0.0)",
     "requests (>=2.32.3,<3.0.0)",
@@ -18,7 +19,7 @@ dependencies = [
     "beautifulsoup4 (>=4.13.4,<5.0.0)",
     # lxml 6.x publishes wheels for Python 3.12/3.13/3.14 on the CI targets we support.
     "lxml (>=6.0.2,<7.0)",
-    # Parser pure-python usato da extruct quando tree_builder='html5lib'
+    # Pure-Python parser used by schema extraction fallbacks.
     "html5lib (>=1.1,<2.0)",
     "tldextract (>=5.3.0,<6.0.0)",
     "xlsxwriter (>=3.2.9,<4.0.0)",
@@ -29,6 +30,9 @@ dependencies = [
     "pillow (>=12.2.0,<13.0.0)",
     "humanize (>=4.12.3,<5.0.0)"
 ]
+
+[project.scripts]
+silentfrog = "silentfrog.gui:main"
 
 [project.optional-dependencies]
 pyqt5-backend = [
@@ -53,9 +57,6 @@ w3lib = "^2.1.0"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
-silentfrog = "silentfrog.gui:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

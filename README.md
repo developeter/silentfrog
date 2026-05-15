@@ -24,12 +24,12 @@ It lets you quickly:
 
 |            | Recommended   | Why                                                                 |
 | ---------- | ------------- | ------------------------------------------------------------------- |
-| **Python** | **3.12**      | Current tested baseline for local development and the macOS source installer |
+| **Python** | **3.12 / 3.13 / 3.14** | Source installer fallback only; packaged apps do not require user-installed Python |
 | **Poetry** | >= 1.8        | Development workflow only                                           |
 | **Git**    | any           | Clone updates                                                       |
 
-> On **Windows** enable "Add Python to PATH" during install.  
-> On **macOS** use **Python 3.12** (`brew install python@3.12` or the python.org 3.12 installer). The installer path is not supported on Python 3.14 yet.
+> On **Windows** enable "Add Python to PATH" during source installs.
+> On **macOS**, packaged apps are preferred. Source installs support Python 3.12, 3.13, or 3.14 when binary wheels are available for your Mac.
 
 ---
 
@@ -43,7 +43,13 @@ The repository now includes:
 - a GitHub Actions packaging workflow for **macOS** and **Windows**
 - a Python compatibility workflow for **3.12 / 3.13 / 3.14**
 
-If packaged release artifacts are available for your platform, use those first.
+If packaged release artifacts are available for your platform, use those first:
+
+- `Silentfrog-macos-intel`
+- `Silentfrog-macos-apple-silicon`
+- `Silentfrog-windows-x64`
+
+Unsigned beta macOS artifacts may still require right-click **Open** the first time. Full Apple notarization and Windows code signing are planned as a release-hardening milestone.
 
 If you are working from source before packaged artifacts are published, use the fallback source installer in **Section 3**.
 
@@ -55,14 +61,15 @@ This path is still supported, but it is no longer the preferred end-user story.
 
 You only need Python installed manually:
 
-- **Windows**: Python **3.12+**
-- **macOS**: Python **3.12** for now
+- **Windows**: Python **3.12 / 3.13 / 3.14**
+- **macOS**: Python **3.12 / 3.13 / 3.14**
 
 The installer will:
 
 - create a local `.venv`
-- upgrade `pip`, `setuptools`, and `wheel`
-- install Silentfrog into that `.venv`
+- upgrade `pip`, `setuptools`, `wheel`, and `poetry-core`
+- preinstall runtime dependencies from binary wheels
+- install Silentfrog into that `.venv` without compiling dependency source packages
 - refresh the launcher scripts
 - default the GUI runtime to `QT_API=pyside6`
 - create a Desktop launcher:
@@ -75,7 +82,7 @@ On macOS, the no-terminal source install path is:
 
 1. Double-click `install_silentfrog.command`.
 2. If macOS asks for confirmation, right-click it and choose **Open**.
-3. The installer will look for Python 3.12, including the Intel Homebrew path `/usr/local/bin/python3.12`.
+3. The installer will look for Python 3.14, then 3.13, then 3.12, including Homebrew and python.org framework paths.
 
 ```bash
 # Windows
@@ -85,7 +92,7 @@ py install_silentfrog.py
 ./install_silentfrog.sh
 ```
 
-If Python is missing, too old, or unsupported for the installer path, the installer stops with a clear message instead of failing later.
+If Python is missing, too old, too new, or dependency wheels are not available for your OS/CPU, the installer stops with a clear message instead of trying to compile desktop dependencies from source.
 
 ### Launch after install
 
@@ -112,10 +119,10 @@ install_silentfrog.bat
 ./install_silentfrog.sh
 ```
 
-For Intel Macs using Homebrew, install the supported interpreter with:
+For Intel Macs using Homebrew, install a supported interpreter with:
 
 ```bash
-brew install python@3.12
+brew install python@3.14
 ```
 
 If a previous macOS install failed, retry with a clean local environment:
@@ -138,8 +145,8 @@ If you only want to run the app, prefer packaged artifacts from **Section 2**, o
 $ git clone https://github.com/developeter/silentfrog.git
 $ cd silentfrog
 
-# pick the right interpreter
-$ poetry env use $(which python3.12)
+# pick a supported interpreter
+$ poetry env use $(which python3.14)
 
 # install (pre-built wheels, no compile step; stopwords are bundled locally)
 $ poetry install
@@ -183,13 +190,12 @@ py -m venv .venv
 .venv\Scripts\python.exe -m silentfrog
 ```
 
-The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the GUI runtime targets `PySide6 + QtPy`, but the tested local baseline remains **3.12** until the compatibility matrix stays green.
+The project metadata allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the GUI runtime targets `PySide6 + QtPy`. Release support is CI-gated across Windows, macOS Intel, and macOS Apple Silicon.
 
 **macOS first-run notes**
-- The supported installer path is **Python 3.12** on macOS. Do not use Python 3.14 for first-time installs yet.
-- For one-click source install, use `install_silentfrog.command`. It detects `python3.12`, `/usr/local/bin/python3.12` on Intel Homebrew, `/opt/homebrew/bin/python3.12` on Apple Silicon Homebrew, and the python.org 3.12 framework path.
+- For one-click source install, use `install_silentfrog.command`. It detects Python 3.14, 3.13, and 3.12 across Homebrew and python.org framework paths.
 - If `pip`/HTTPS certificate validation fails with the python.org installer build, run:  
-  `open "/Applications/Python 3.12/Install Certificates.command"` and retry the install.
+  `open "/Applications/Python 3.14/Install Certificates.command"` and retry the install. Adjust the version folder if you installed Python 3.13 or 3.12.
 - The packaged app path is the preferred way to avoid local Python/bootstrap issues on macOS.
 
 ## Support & project status
@@ -495,22 +501,10 @@ silentfrog/
 
 | Symptom / log snippet                                                        | Root cause                    | Fix                                                                                                   |
 | ---------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `ImportError: cannot import name '_ElementStringResult' from lxml.etree`     | lxml 5.x wheel + extruct 0.16 | Stick to Python 3.11/3.12 – wheel pulls **lxml 4.9.x** automatically, or `poetry add "lxml>=4.9,<5"` |
-| **Poetry fails building lxml 4.9 on macOS**                                  | Using Python 3.13 (no wheels) | `brew install python@3.12 && poetry env use $(which python3.12)`                                      |
+| Source installer says `Dependency wheel preflight failed`                    | A dependency wheel is unavailable for that Python/OS/CPU combination | Use the packaged app, or try another supported Python version: 3.12, 3.13, or 3.14 |
+| `pip` tries to compile Pillow/lxml/aiohttp from source                       | Dependency wheel was not selected | Use the source installer instead of manual `pip install`, because it enforces binary wheels |
 | GUI crashes when clicking **Analyze** and log shows `TypeError: list found` | Mixed schema row formats      | Upgrade to Silentfrog ≥ 0.1.3 (fix merged 2025-06-04)                                                 |
 | `"Cannot load Qt platform plugin 'xcb'"` on Ubuntu                           | Missing Qt runtime libs       | `sudo apt install libxcb-xinerama0`                                                                   |
-
----
-
-## 8. Compiling on Python 3.13 anyway (macOS / Linux)
-
-```bash
-brew install libxml2 libxslt libiconv            # C headers
-poetry env use python3.13
-poetry add "git+https://github.com/scrapinghub/extruct.git@master#egg=extruct"
-poetry add "lxml>=5,<6"    # will build from source
-poetry install --sync
-```
 
 ---
 
