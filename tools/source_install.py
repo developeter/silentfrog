@@ -156,9 +156,59 @@ def render_install_sh() -> str:
             "set -euo pipefail",
             'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
             'cd "$script_dir"',
-            'exec python3 install_silentfrog.py "$@"',
+            *_macos_python_selector_lines(),
+            'exec "$silentfrog_python" install_silentfrog.py "$@"',
         ]
     ) + "\n"
+
+
+def render_install_command() -> str:
+    return "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'cd "$script_dir"',
+            'echo "Installing Silentfrog..."',
+            '"$script_dir/install_silentfrog.sh"',
+            "status=$?",
+            'echo ""',
+            'if [[ "$status" -eq 0 ]]; then',
+            '  echo "Silentfrog installed. You can now use the Desktop launcher or run_silentfrog.sh."',
+            "else",
+            '  echo "Silentfrog installation failed with exit code $status."',
+            "fi",
+            'echo "Press Return to close this window."',
+            "read -r _",
+            'exit "$status"',
+        ]
+    ) + "\n"
+
+
+def _macos_python_selector_lines() -> list[str]:
+    return [
+        'if [[ "$(uname -s)" == "Darwin" ]]; then',
+        '  candidates=("${SILENTFROG_PYTHON:-}" python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3)',
+        "else",
+        '  candidates=("${SILENTFROG_PYTHON:-}" python3)',
+        "fi",
+        'silentfrog_python=""',
+        'for candidate in "${candidates[@]}"; do',
+        '  [[ -n "$candidate" ]] || continue',
+        '  if command -v "$candidate" >/dev/null 2>&1; then',
+        '    version="$("$candidate" -c \'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")\' 2>/dev/null || true)"',
+        '    if [[ "$(uname -s)" != "Darwin" || "$version" == "3.12" ]]; then',
+        '      silentfrog_python="$candidate"',
+        "      break",
+        "    fi",
+        "  fi",
+        "done",
+        'if [[ -z "$silentfrog_python" ]]; then',
+        '  echo "[install] Python 3.12 was not found."',
+        '  echo "[install] On Intel Mac with Homebrew, install it with: brew install python@3.12"',
+        '  echo "[install] Or install Python 3.12 from python.org, then run this installer again."',
+        "  exit 1",
+        "fi",
+    ]
 
 
 def _write_file(path: Path, content: str, executable: bool = False) -> None:
@@ -173,6 +223,7 @@ def write_launchers(root: Path) -> None:
     _write_file(root / "run_silentfrog.sh", render_run_sh(), executable=True)
     _write_file(root / "install_silentfrog.bat", render_install_bat())
     _write_file(root / "install_silentfrog.sh", render_install_sh(), executable=True)
+    _write_file(root / "install_silentfrog.command", render_install_command(), executable=True)
 
 
 def create_desktop_launcher(root: Path, system_name: str | None = None, home: Path | None = None) -> Path | None:

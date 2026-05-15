@@ -10,6 +10,7 @@ from tools.source_install import (
     install_plan,
     render_desktop_command_launcher,
     render_install_bat,
+    render_install_command,
     render_install_sh,
     render_run_bat,
     render_run_sh,
@@ -58,6 +59,7 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     run_sh = render_run_sh()
     install_bat = render_install_bat()
     install_sh = render_install_sh()
+    install_command = render_install_command()
 
     assert ".venv\\Scripts\\silentfrog.exe" in run_bat
     assert 'QT_API=pyside6' in run_bat
@@ -67,6 +69,11 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     assert 'poetry run silentfrog "$@"' in run_sh
     assert "install_silentfrog.py" in install_bat
     assert "install_silentfrog.py" in install_sh
+    assert "python3.12" in install_sh
+    assert "/usr/local/bin/python3.12" in install_sh
+    assert "brew install python@3.12" in install_sh
+    assert "install_silentfrog.sh" in install_command
+    assert "Press Return to close this window." in install_command
 
 
 def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> None:

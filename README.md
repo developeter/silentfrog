@@ -71,12 +71,18 @@ The installer will:
 
 ### Install
 
+On macOS, the no-terminal source install path is:
+
+1. Double-click `install_silentfrog.command`.
+2. If macOS asks for confirmation, right-click it and choose **Open**.
+3. The installer will look for Python 3.12, including the Intel Homebrew path `/usr/local/bin/python3.12`.
+
 ```bash
 # Windows
 py install_silentfrog.py
 
-# macOS
-python3 install_silentfrog.py
+# macOS terminal fallback
+./install_silentfrog.sh
 ```
 
 If Python is missing, too old, or unsupported for the installer path, the installer stops with a clear message instead of failing later.
@@ -104,6 +110,12 @@ install_silentfrog.bat
 
 # macOS
 ./install_silentfrog.sh
+```
+
+For Intel Macs using Homebrew, install the supported interpreter with:
+
+```bash
+brew install python@3.12
 ```
 
 ---
@@ -168,6 +180,7 @@ The project metadata now allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because 
 
 **macOS first-run notes**
 - The supported installer path is **Python 3.12** on macOS. Do not use Python 3.14 for first-time installs yet.
+- For one-click source install, use `install_silentfrog.command`. It detects `python3.12`, `/usr/local/bin/python3.12` on Intel Homebrew, `/opt/homebrew/bin/python3.12` on Apple Silicon Homebrew, and the python.org 3.12 framework path.
 - If `pip`/HTTPS certificate validation fails with the python.org installer build, run:  
   `open "/Applications/Python 3.12/Install Certificates.command"` and retry the install.
 - The packaged app path is the preferred way to avoid local Python/bootstrap issues on macOS.
@@ -372,6 +385,7 @@ silentfrog/
 ├── AGENTS.md
 ├── install_silentfrog.py
 ├── install_silentfrog.bat
+├── install_silentfrog.command
 ├── install_silentfrog.sh
 ├── pyproject.toml
 ├── README.md
