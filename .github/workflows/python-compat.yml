@@ -19,13 +19,14 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       POETRY_VIRTUALENVS_CREATE: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # SHA-pinned per prevenire supply-chain attack via Actions tag mutabili
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2de359ef6213f08223a  # v5.3.0
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: abatilo/actions-poetry@v4
-        with:
-          poetry-version: "2.1.4"
+      # Alternativa sicura: pip install diretta invece di Action di terze parti
+      - name: Install Poetry
+        run: pip install poetry==2.1.4
       - name: Install dependencies
         run: poetry install
       - name: Dependency install smoke
