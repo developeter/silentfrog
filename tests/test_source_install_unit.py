@@ -12,6 +12,8 @@ from tools.source_install import (
     render_install_bat,
     render_install_command,
     render_install_sh,
+    render_reinstall_command,
+    render_reinstall_sh,
     render_run_bat,
     render_run_sh,
     validate_python_version,
@@ -60,6 +62,8 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     install_bat = render_install_bat()
     install_sh = render_install_sh()
     install_command = render_install_command()
+    reinstall_sh = render_reinstall_sh()
+    reinstall_command = render_reinstall_command()
 
     assert ".venv\\Scripts\\silentfrog.exe" in run_bat
     assert 'QT_API=pyside6' in run_bat
@@ -74,6 +78,9 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     assert "brew install python@3.12" in install_sh
     assert "install_silentfrog.sh" in install_command
     assert "Press Return to close this window." in install_command
+    assert "--recreate-venv" in reinstall_sh
+    assert "reinstall_silentfrog.sh" in reinstall_command
+    assert "fresh local .venv" in reinstall_command
 
 
 def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> None:

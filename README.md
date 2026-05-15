@@ -118,6 +118,13 @@ For Intel Macs using Homebrew, install the supported interpreter with:
 brew install python@3.12
 ```
 
+If a previous macOS install failed, retry with a clean local environment:
+
+- double-click `reinstall_silentfrog.command`, or
+- run `./install_silentfrog.sh --recreate-venv` from Terminal.
+
+This removes only Silentfrog's local `.venv` inside the project folder and rebuilds it. It does not delete scans, exports, or macOS system Python.
+
 ---
 
 ## 4. Developer setup (Poetry)
@@ -389,6 +396,8 @@ silentfrog/
 ├── install_silentfrog.sh
 ├── pyproject.toml
 ├── README.md
+├── reinstall_silentfrog.command
+├── reinstall_silentfrog.sh
 ├── run_silentfrog.bat
 ├── run_silentfrog.sh
 ├── deploy/

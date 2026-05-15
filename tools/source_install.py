@@ -169,13 +169,48 @@ def render_install_command() -> str:
             'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
             'cd "$script_dir"',
             'echo "Installing Silentfrog..."',
-            '"$script_dir/install_silentfrog.sh"',
+            '"$script_dir/install_silentfrog.sh" "$@"',
             "status=$?",
             'echo ""',
             'if [[ "$status" -eq 0 ]]; then',
             '  echo "Silentfrog installed. You can now use the Desktop launcher or run_silentfrog.sh."',
             "else",
             '  echo "Silentfrog installation failed with exit code $status."',
+            "fi",
+            'echo "Press Return to close this window."',
+            "read -r _",
+            'exit "$status"',
+        ]
+    ) + "\n"
+
+
+def render_reinstall_sh() -> str:
+    return "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'cd "$script_dir"',
+            *_macos_python_selector_lines(),
+            'exec "$silentfrog_python" install_silentfrog.py --recreate-venv "$@"',
+        ]
+    ) + "\n"
+
+
+def render_reinstall_command() -> str:
+    return "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            'cd "$script_dir"',
+            'echo "Reinstalling Silentfrog with a fresh local .venv..."',
+            '"$script_dir/reinstall_silentfrog.sh" "$@"',
+            "status=$?",
+            'echo ""',
+            'if [[ "$status" -eq 0 ]]; then',
+            '  echo "Silentfrog reinstalled. You can now use the Desktop launcher or run_silentfrog.sh."',
+            "else",
+            '  echo "Silentfrog reinstall failed with exit code $status."',
             "fi",
             'echo "Press Return to close this window."',
             "read -r _",
@@ -224,6 +259,8 @@ def write_launchers(root: Path) -> None:
     _write_file(root / "install_silentfrog.bat", render_install_bat())
     _write_file(root / "install_silentfrog.sh", render_install_sh(), executable=True)
     _write_file(root / "install_silentfrog.command", render_install_command(), executable=True)
+    _write_file(root / "reinstall_silentfrog.sh", render_reinstall_sh(), executable=True)
+    _write_file(root / "reinstall_silentfrog.command", render_reinstall_command(), executable=True)
 
 
 def create_desktop_launcher(root: Path, system_name: str | None = None, home: Path | None = None) -> Path | None:
