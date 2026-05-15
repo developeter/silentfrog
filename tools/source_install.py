@@ -92,12 +92,12 @@ def render_run_bat() -> str:
 def render_run_sh() -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            "set -euo pipefail",
-            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            "#!/bin/sh",
+            "set -eu",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'export QT_API="${QT_API:-pyside6}"',
             'launcher="$script_dir/.venv/bin/silentfrog"',
-            'if [[ -x "$launcher" ]]; then',
+            'if [ -x "$launcher" ]; then',
             '  exec "$launcher" "$@"',
             "fi",
             'exec poetry run silentfrog "$@"',
@@ -108,8 +108,8 @@ def render_run_sh() -> str:
 def render_desktop_command_launcher(root: Path) -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            "set -euo pipefail",
+            "#!/bin/sh",
+            "set -eu",
             f'cd {json.dumps(str(root))}',
             f'exec {json.dumps(str(root / "run_silentfrog.sh"))} "$@"',
         ]
@@ -152,9 +152,9 @@ def render_install_bat() -> str:
 def render_install_sh() -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            "set -euo pipefail",
-            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            "#!/bin/sh",
+            "set -eu",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
             *_macos_python_selector_lines(),
             'exec "$silentfrog_python" install_silentfrog.py "$@"',
@@ -165,14 +165,14 @@ def render_install_sh() -> str:
 def render_install_command() -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            "#!/bin/sh",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
             'echo "Installing Silentfrog..."',
             '"$script_dir/install_silentfrog.sh" "$@"',
             "status=$?",
             'echo ""',
-            'if [[ "$status" -eq 0 ]]; then',
+            'if [ "$status" -eq 0 ]; then',
             '  echo "Silentfrog installed. You can now use the Desktop launcher or run_silentfrog.sh."',
             "else",
             '  echo "Silentfrog installation failed with exit code $status."',
@@ -187,9 +187,9 @@ def render_install_command() -> str:
 def render_reinstall_sh() -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            "set -euo pipefail",
-            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            "#!/bin/sh",
+            "set -eu",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
             *_macos_python_selector_lines(),
             'exec "$silentfrog_python" install_silentfrog.py --recreate-venv "$@"',
@@ -200,14 +200,14 @@ def render_reinstall_sh() -> str:
 def render_reinstall_command() -> str:
     return "\n".join(
         [
-            "#!/usr/bin/env bash",
-            'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            "#!/bin/sh",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
             'echo "Reinstalling Silentfrog with a fresh local .venv..."',
             '"$script_dir/reinstall_silentfrog.sh" "$@"',
             "status=$?",
             'echo ""',
-            'if [[ "$status" -eq 0 ]]; then',
+            'if [ "$status" -eq 0 ]; then',
             '  echo "Silentfrog reinstalled. You can now use the Desktop launcher or run_silentfrog.sh."',
             "else",
             '  echo "Silentfrog reinstall failed with exit code $status."',
@@ -221,23 +221,31 @@ def render_reinstall_command() -> str:
 
 def _macos_python_selector_lines() -> list[str]:
     return [
-        'if [[ "$(uname -s)" == "Darwin" ]]; then',
-        '  candidates=("${SILENTFROG_PYTHON:-}" python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3)',
-        "else",
-        '  candidates=("${SILENTFROG_PYTHON:-}" python3)',
-        "fi",
         'silentfrog_python=""',
-        'for candidate in "${candidates[@]}"; do',
-        '  [[ -n "$candidate" ]] || continue',
+        "try_silentfrog_python() {",
+        "  candidate=$1",
+        '  [ -n "$candidate" ] || return 1',
         '  if command -v "$candidate" >/dev/null 2>&1; then',
-        '    version="$("$candidate" -c \'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")\' 2>/dev/null || true)"',
-        '    if [[ "$(uname -s)" != "Darwin" || "$version" == "3.12" ]]; then',
+        '    version=$("$candidate" -c \'import sys; print("%d.%d" % sys.version_info[:2])\' 2>/dev/null || true)',
+        '    if [ "$(uname -s)" != "Darwin" ] || [ "$version" = "3.12" ]; then',
         '      silentfrog_python="$candidate"',
-        "      break",
+        "      return 0",
         "    fi",
         "  fi",
-        "done",
-        'if [[ -z "$silentfrog_python" ]]; then',
+        "  return 1",
+        "}",
+        'if [ -n "${SILENTFROG_PYTHON:-}" ]; then',
+        '  try_silentfrog_python "$SILENTFROG_PYTHON" || true',
+        "fi",
+        'if [ -z "$silentfrog_python" ] && [ "$(uname -s)" = "Darwin" ]; then',
+        "  for candidate in python3.12 /usr/local/bin/python3.12 /opt/homebrew/bin/python3.12 /Library/Frameworks/Python.framework/Versions/3.12/bin/python3; do",
+        '    try_silentfrog_python "$candidate" && break',
+        "  done",
+        "fi",
+        'if [ -z "$silentfrog_python" ] && [ "$(uname -s)" != "Darwin" ]; then',
+        '  try_silentfrog_python python3 || true',
+        "fi",
+        'if [ -z "$silentfrog_python" ]; then',
         '  echo "[install] Python 3.12 was not found."',
         '  echo "[install] On Intel Mac with Homebrew, install it with: brew install python@3.12"',
         '  echo "[install] Or install Python 3.12 from python.org, then run this installer again."',

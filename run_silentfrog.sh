@@ -1,14 +1,14 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Launch Silentfrog from the local .venv when available.
 # Falls back to Poetry for developers.
 
-set -euo pipefail
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -eu
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 cd "$script_dir"
 export QT_API="${QT_API:-pyside6}"
 
 launcher="$script_dir/.venv/bin/silentfrog"
-if [[ -x "$launcher" ]]; then
+if [ -x "$launcher" ]; then
   exec "$launcher" "$@"
 fi
 

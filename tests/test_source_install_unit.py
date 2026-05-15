@@ -83,6 +83,25 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     assert "fresh local .venv" in reinstall_command
 
 
+def test_macos_launcher_renderers_are_plain_sh_compatible() -> None:
+    rendered = "\n".join(
+        [
+            render_run_sh(),
+            render_install_sh(),
+            render_install_command(),
+            render_reinstall_sh(),
+            render_reinstall_command(),
+        ]
+    )
+
+    assert "BASH_SOURCE" not in rendered
+    assert "[[" not in rendered
+    assert "set -euo pipefail" not in rendered
+    assert "candidates=(" not in rendered
+    assert render_install_sh().startswith("#!/bin/sh")
+    assert render_reinstall_sh().startswith("#!/bin/sh")
+
+
 def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> None:
     rendered = render_desktop_command_launcher(tmp_path)
 
