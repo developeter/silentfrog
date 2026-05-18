@@ -1,6 +1,7 @@
 #!/bin/sh
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 cd "$script_dir"
+xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true
 echo "Installing Silentfrog..."
 "$script_dir/install_silentfrog.sh" "$@"
 status=$?

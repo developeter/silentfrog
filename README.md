@@ -35,27 +35,36 @@ It lets you quickly:
 
 ## 2. Packaged app path (recommended for end users)
 
-This is the intended long-term install path for normal users.
+> **For end users:** the full step-by-step guide (download, drag-to-Applications, Gatekeeper / SmartScreen first-launch dialogs, uninstall) lives in **[`docs/INSTALL.md`](docs/INSTALL.md)**. The summary below covers the same path quickly.
 
-The repository now includes:
+Releases live on [GitHub Releases](https://github.com/developeter/silentfrog/releases). Each tagged version ships:
 
-- a packaging helper based on **`pyside6-deploy`**
-- a GitHub Actions packaging workflow for **macOS** and **Windows**
-- a Python compatibility workflow for **3.12 / 3.13 / 3.14**
+- `Silentfrog-<version>-macos-arm64.dmg` (macOS Apple Silicon)
+- `Silentfrog-<version>-macos-intel.dmg` (macOS Intel)
+- `Silentfrog-<version>-windows-x64.zip` (Windows portable)
 
-If packaged release artifacts are available for your platform, use those first:
+### Install on macOS
 
-- `Silentfrog-macos-intel`
-- `Silentfrog-macos-apple-silicon`
-- `Silentfrog-windows-x64`
+1. Download the `.dmg` matching your CPU.
+2. Open it and drag **Silentfrog** to **Applications**.
+3. First launch: macOS Gatekeeper will block the app. Right-click `Silentfrog.app` in **Applications** and choose **Open**, then confirm. Subsequent launches just work.
 
-Unsigned beta macOS artifacts may still require right-click **Open** the first time. Full Apple notarization and Windows code signing are planned as a release-hardening milestone.
+### Install on Windows
 
-If you are working from source before packaged artifacts are published, use the fallback source installer in **Section 3**.
+1. Download the `.zip`.
+2. Right-click → **Properties** → **Unblock** if Windows marked it as from-the-internet.
+3. Extract to a folder of your choice (e.g. `C:\Program Files\Silentfrog\`).
+4. Double-click `Silentfrog.exe`. SmartScreen may prompt "Windows protected your PC"; click **More info → Run anyway**.
+
+Apple notarization and Windows Authenticode signing are deliberate future work — for now Silentfrog ships unsigned and the warnings above are expected at first launch.
+
+If packaged artifacts are not yet available for your platform, fall back to the source installer in **Section 3**.
 
 ---
 
 ## 3. Source install (developers / advanced users)
+
+> **For end users:** **[`docs/INSTALL.md`](docs/INSTALL.md)** documents this path as a step-by-step too, including troubleshooting for both macOS and Windows. The reference below stays in this README for developers.
 
 This path is still supported, but it is no longer the preferred end-user story.
 

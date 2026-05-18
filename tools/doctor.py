@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import importlib.resources as resources
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.source_install import installer_paths  # noqa: E402
 
 
 MIN_PYTHON = (3, 12)
-REQUIRED_IMPORTS = (
+POETRY_REQUIRED_IMPORTS = (
     "PyQt5",
     "pandas",
     "requests",
@@ -17,6 +23,29 @@ REQUIRED_IMPORTS = (
     "lxml",
     "xlsxwriter",
     "aiohttp",
+    "humanize",
+)
+# Import names provided by the runtime distributions declared in pyproject.toml.
+# Distribution name → import name only differs for these entries; keep them paired
+# with comments so a refresh after a dep change stays an easy two-line edit.
+VENV_REQUIRED_IMPORTS = (
+    "PySide6",        # pyside6
+    "qtpy",
+    "numpy",
+    "pandas",
+    "urllib3",
+    "requests",
+    "openpyxl",
+    "httpx",
+    "bs4",            # beautifulsoup4
+    "lxml",
+    "html5lib",
+    "tldextract",
+    "xlsxwriter",
+    "aiohttp",
+    "certifi",
+    "nltk",
+    "PIL",            # pillow
     "humanize",
 )
 REQUIRED_PATHS = (
@@ -42,12 +71,20 @@ QUICK_TESTS = (
 )
 
 
+@dataclass(frozen=True)
+class DoctorTarget:
+    label: str
+    python: Path
+    required_imports: tuple[str, ...]
+    run_tests: bool
+
+
 class DoctorError(RuntimeError):
     pass
 
 
 def _run(cmd: list[str], label: str, env: dict[str, str] | None = None) -> None:
-    print(f"[doctor] {label}: {' '.join(cmd)}")
+    print(f"[doctor] {label}: {' '.join(str(part) for part in cmd)}")
     completed = subprocess.run(cmd, check=False, env=env)
     if completed.returncode:
         raise DoctorError(f"{label} failed with exit code {completed.returncode}.")
@@ -57,9 +94,7 @@ def _check_python() -> None:
     if sys.version_info[:2] < MIN_PYTHON:
         min_version = ".".join(str(part) for part in MIN_PYTHON)
         current = ".".join(str(part) for part in sys.version_info[:3])
-        raise DoctorError(
-            f"Python {min_version}+ required, current interpreter is {current}."
-        )
+        raise DoctorError(f"Python {min_version}+ required, current interpreter is {current}.")
     current = ".".join(str(part) for part in sys.version_info[:3])
     print(f"[doctor] Python OK: {current}")
 
@@ -72,17 +107,17 @@ def _check_paths() -> None:
     print("[doctor] Project files OK")
 
 
-def _check_imports() -> None:
-    failures: list[str] = []
-    for module_name in REQUIRED_IMPORTS:
-        try:
-            importlib.import_module(module_name)
-        except Exception as exc:  # pragma: no cover - diagnostic path
-            failures.append(f"{module_name}: {exc!r}")
-    if failures:
-        joined = "\n - ".join(failures)
-        raise DoctorError(f"Missing or broken dependencies:\n - {joined}")
-    print("[doctor] Dependency imports OK")
+def _check_imports_via(python: Path, modules: tuple[str, ...], label: str) -> None:
+    if not python.is_file():
+        raise DoctorError(f"{label}: interpreter not found at {python}.")
+    code = "\n".join(f"import {name}" for name in modules)
+    completed = subprocess.run([str(python), "-c", code], check=False, capture_output=True, text=True)
+    if completed.returncode:
+        raise DoctorError(
+            f"{label}: missing or broken dependencies.\n"
+            f"  stderr: {completed.stderr.strip()}"
+        )
+    print(f"[doctor] Dependency imports OK ({label})")
 
 
 def _check_packaged_files() -> None:
@@ -116,6 +151,29 @@ def _run_tests(quick: bool) -> None:
     _run(pytest_cmd, "Test run")
 
 
+def doctor_targets_for_mode(mode: str, repo_root: Path) -> tuple[DoctorTarget, ...]:
+    poetry = DoctorTarget(
+        label="poetry",
+        python=Path(sys.executable),
+        required_imports=POETRY_REQUIRED_IMPORTS,
+        run_tests=True,
+    )
+    venv = DoctorTarget(
+        label="venv",
+        python=installer_paths(repo_root).python,
+        required_imports=VENV_REQUIRED_IMPORTS,
+        run_tests=False,
+    )
+    by_mode = {
+        "poetry": (poetry,),
+        "venv": (venv,),
+        "both": (poetry, venv),
+    }
+    if mode not in by_mode:
+        raise DoctorError(f"Unknown doctor mode: {mode}")
+    return by_mode[mode]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Silentfrog doctor: dependency, resource, compile and test checks."
@@ -130,19 +188,35 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run a small smoke test set instead of the full test suite.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("poetry", "venv", "both"),
+        default="poetry",
+        help="Where to look for runtime dependencies. 'venv' validates the installer-produced .venv.",
+    )
     return parser
+
+
+def _run_target_checks(target: DoctorTarget) -> None:
+    _check_imports_via(target.python, target.required_imports, label=target.label)
 
 
 def main() -> int:
     args = _build_parser().parse_args()
+    repo_root = Path(__file__).resolve().parents[1]
     try:
         _check_python()
         _check_paths()
-        _check_imports()
+        targets = doctor_targets_for_mode(args.mode, repo_root)
+        for target in targets:
+            _run_target_checks(target)
         _check_packaged_files()
         _run_code_shape_check()
         _run_compile_check()
-        if not args.skip_tests:
+        if args.skip_tests:
+            print("[doctor] OK")
+            return 0
+        if any(target.run_tests for target in targets):
             _run_tests(quick=args.quick)
     except DoctorError as exc:
         print(f"[doctor] FAIL: {exc}", file=sys.stderr)

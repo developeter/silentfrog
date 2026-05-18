@@ -36,11 +36,22 @@ jobs:
         run: pip install poetry==2.1.4
       - name: Install dependencies
         run: poetry install
-      - name: Build packaged application
+      - name: Build packaged application + distribution artifact
         run: poetry run python tools/package_app.py --mode standalone --keep-deployment-files
-      - name: Upload package artifacts
+      - name: Upload inspection artifacts (build directory)
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf8b  # v4.6.0
         with:
           name: ${{ matrix.artifact-name }}
-          path: deploy/deployment
+          path: |
+            build/package/*/Silentfrog-*.dmg
+            build/package/*/Silentfrog-*.zip
           if-no-files-found: error
+      - name: Publish to GitHub Releases on tag push
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # v2.2.1
+        with:
+          files: |
+            build/package/*/Silentfrog-*.dmg
+            build/package/*/Silentfrog-*.zip
+          fail_on_unmatched_files: true
+          draft: true

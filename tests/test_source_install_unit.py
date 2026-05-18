@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tools.source_install import (
-    RUNTIME_WHEEL_REQUIREMENTS,
+    RuntimeRequirements,
+    _normalize_pep508,
+    app_data_dir,
     create_desktop_launcher,
     desktop_dir,
+    detect_python_org_certificate_installer,
     installer_paths,
     install_plan,
+    launcher_script_paths,
+    load_runtime_requirements,
     render_desktop_command_launcher,
     render_install_bat,
     render_install_command,
@@ -17,10 +24,33 @@ from tools.source_install import (
     render_reinstall_sh,
     render_run_bat,
     render_run_sh,
+    render_uninstall_bat,
+    render_uninstall_command,
+    render_uninstall_sh,
+    strip_quarantine,
+    uninstall_targets,
     validate_python_version,
     windows_shortcut_command,
     write_launchers,
 )
+
+
+_FAKE_PYPROJECT = """
+[project]
+name = "silentfrog"
+version = "1.0.0"
+dependencies = [
+    "pyside6 (>=6.8,<7.0)",
+    "numpy (>=2.2.6,<3.0.0)",
+    "httpx[http2] (>=0.28.1,<0.29.0)",
+    "openpyxl (>=3.1)",
+]
+
+[project.optional-dependencies]
+pyqt5-backend = [
+    "pyqt5 (==5.15.11)",
+]
+"""
 
 
 def test_validate_python_version_rejects_old_versions() -> None:
@@ -51,7 +81,7 @@ def test_desktop_dir_uses_home_desktop(tmp_path: Path) -> None:
 
 
 def test_install_plan_targets_local_venv(tmp_path: Path) -> None:
-    plan = install_plan(tmp_path, "python3", "Darwin")
+    plan = install_plan(tmp_path, "python3", "Darwin", requirements=RuntimeRequirements(pip_args=("pyside6>=6.8,<7.0", "numpy>=2.2.6,<3.0.0")))
 
     assert plan[0] == ["python3", "-m", "venv", str(tmp_path / ".venv")]
     assert plan[1][:5] == [str(tmp_path / ".venv" / "bin" / "python"), "-m", "pip", "install", "--upgrade"]
@@ -59,8 +89,56 @@ def test_install_plan_targets_local_venv(tmp_path: Path) -> None:
     assert "--only-binary=:all:" in plan[2]
     assert "pyside6>=6.8,<7.0" in plan[2]
     assert "numpy>=2.2.6,<3.0.0" in plan[2]
-    assert not any("pyqt5" in requirement.lower() for requirement in RUNTIME_WHEEL_REQUIREMENTS)
+    assert not any("pyqt5" in arg.lower() for arg in plan[2])
     assert plan[3][-3:] == ["--no-deps", "--no-build-isolation", "."]
+
+
+def test_normalize_pep508_strips_pep621_parens() -> None:
+    assert _normalize_pep508("pyside6 (>=6.8,<7.0)") == "pyside6>=6.8,<7.0"
+    assert _normalize_pep508("httpx[http2] (>=0.28.1,<0.29.0)") == "httpx[http2]>=0.28.1,<0.29.0"
+    assert _normalize_pep508("openpyxl (>=3.1)") == "openpyxl>=3.1"
+
+
+def test_normalize_pep508_passes_through_plain_pep508() -> None:
+    assert _normalize_pep508("requests>=2.32") == "requests>=2.32"
+    assert _normalize_pep508("  certifi  ") == "certifi"
+
+
+def test_load_runtime_requirements_strips_pep621_parens(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    requirements = load_runtime_requirements(pyproject)
+    assert "pyside6>=6.8,<7.0" in requirements.pip_args
+    assert "httpx[http2]>=0.28.1,<0.29.0" in requirements.pip_args
+    assert "openpyxl>=3.1" in requirements.pip_args
+    assert not any("pyqt5" in spec.lower() for spec in requirements.pip_args)
+
+
+def test_install_plan_pulls_from_pyproject(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    plan = install_plan(tmp_path, "python3", "Darwin")
+    assert "pyside6>=6.8,<7.0" in plan[2]
+    assert "numpy>=2.2.6,<3.0.0" in plan[2]
+    assert not any("pyqt5" in arg.lower() for arg in plan[2])
+
+
+def test_load_runtime_requirements_rejects_missing_pyproject(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="pyproject.toml not found"):
+        load_runtime_requirements(tmp_path / "missing.toml")
+
+
+def test_load_runtime_requirements_rejects_missing_project_table(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.poetry]\nname = 'x'\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"no \[project\] table"):
+        load_runtime_requirements(pyproject)
+
+
+def test_load_runtime_requirements_rejects_missing_dependencies(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[project]\nname = 'x'\nversion = '0.1.0'\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"no \[project\].dependencies"):
+        load_runtime_requirements(pyproject)
 
 
 def test_launcher_renderers_prefer_local_venv() -> None:
@@ -145,3 +223,147 @@ def test_write_launchers_keeps_macos_scripts_lf_only(tmp_path: Path) -> None:
 
     for filename in ("install_silentfrog.sh", "reinstall_silentfrog.sh", "run_silentfrog.sh"):
         assert b"\r\n" not in (tmp_path / filename).read_bytes()
+
+
+_LAUNCHER_RENDERERS = {
+    "run_silentfrog.bat": render_run_bat,
+    "run_silentfrog.sh": render_run_sh,
+    "install_silentfrog.bat": render_install_bat,
+    "install_silentfrog.sh": render_install_sh,
+    "install_silentfrog.command": render_install_command,
+    "reinstall_silentfrog.sh": render_reinstall_sh,
+    "reinstall_silentfrog.command": render_reinstall_command,
+    "uninstall_silentfrog.bat": render_uninstall_bat,
+    "uninstall_silentfrog.sh": render_uninstall_sh,
+    "uninstall_silentfrog.command": render_uninstall_command,
+}
+
+
+@pytest.mark.parametrize("filename,renderer", sorted(_LAUNCHER_RENDERERS.items()))
+def test_committed_launchers_match_render_output(filename: str, renderer) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    committed = (repo_root / filename).read_text(encoding="utf-8")
+    assert committed == renderer(), (
+        f"{filename} on disk drifted from render_*(); re-run write_launchers() and commit"
+    )
+
+
+def test_app_data_dir_for_windows(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    result = app_data_dir(system_name="Windows", home=home, env={"LOCALAPPDATA": str(tmp_path / "AppData")})
+    assert result == tmp_path / "AppData" / "Silentfrog"
+
+
+def test_app_data_dir_for_macos(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    result = app_data_dir(system_name="Darwin", home=home, env={})
+    assert result == home / "Library" / "Application Support" / "Silentfrog"
+
+
+def test_app_data_dir_for_linux(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    result = app_data_dir(system_name="Linux", home=home, env={"XDG_DATA_HOME": str(tmp_path / "xdg")})
+    assert result == tmp_path / "xdg" / "silentfrog"
+
+
+def test_app_data_dir_respects_override(tmp_path: Path) -> None:
+    override = tmp_path / "custom"
+    result = app_data_dir(system_name="Darwin", home=tmp_path, env={"SILENTFROG_DATA_DIR": str(override)})
+    assert result == override
+
+
+def test_uninstall_targets_collects_paths(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    home = tmp_path / "home"
+    targets = uninstall_targets(root, system_name="Darwin", home=home, env={})
+    assert targets.venv_dir == root / ".venv"
+    assert targets.desktop_command == home / "Desktop" / "Silentfrog.command"
+    assert targets.desktop_lnk == home / "Desktop" / "Silentfrog.lnk"
+    assert targets.user_data_dir == home / "Library" / "Application Support" / "Silentfrog"
+    expected = set(launcher_script_paths(root))
+    assert set(targets.launcher_scripts) == expected
+
+
+def test_render_uninstall_sh_invokes_module() -> None:
+    rendered = render_uninstall_sh()
+    assert rendered.startswith("#!/bin/sh")
+    assert "tools.source_uninstall" in rendered
+    assert "python3.14" in rendered
+    assert 'exec "$silentfrog_python" -m tools.source_uninstall "$@"' in rendered
+
+
+def test_render_uninstall_command_waits_for_return() -> None:
+    rendered = render_uninstall_command()
+    assert "uninstall_silentfrog.sh" in rendered
+    assert "Press Return to close this window." in rendered
+    assert "preserved unless --purge" in rendered
+
+
+def test_render_uninstall_bat_uses_module_dispatch() -> None:
+    rendered = render_uninstall_bat()
+    assert rendered.startswith("@echo off")
+    assert "-m tools.source_uninstall" in rendered
+    assert "where py" in rendered
+
+
+def test_render_install_command_strips_quarantine() -> None:
+    rendered = render_install_command()
+    assert 'xattr -dr com.apple.quarantine "$script_dir"' in rendered
+    assert ">/dev/null 2>&1 || true" in rendered
+
+
+def test_render_reinstall_command_strips_quarantine() -> None:
+    rendered = render_reinstall_command()
+    assert 'xattr -dr com.apple.quarantine "$script_dir"' in rendered
+
+
+def test_detect_python_org_certificate_installer_for_each_minor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    for minor in ("3.12", "3.13", "3.14"):
+        python_exe = Path(f"/Library/Frameworks/Python.framework/Versions/{minor}/bin/python3")
+        result = detect_python_org_certificate_installer(python_exe)
+        assert result == Path(f"/Applications/Python {minor}/Install Certificates.command")
+
+
+def test_detect_python_org_certificate_installer_returns_none_for_brew_python() -> None:
+    result = detect_python_org_certificate_installer(Path("/opt/homebrew/bin/python3.12"))
+    assert result is None
+
+
+def test_detect_python_org_certificate_installer_returns_none_when_installer_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+    python_exe = Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3")
+    assert detect_python_org_certificate_installer(python_exe) is None
+
+
+def test_strip_quarantine_is_noop_on_non_darwin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("tools.source_install.platform.system", lambda: "Linux")
+    called = {"value": False}
+
+    def fake_run(*args, **kwargs):
+        called["value"] = True
+
+    monkeypatch.setattr("tools.source_install.subprocess.run", fake_run)
+    assert strip_quarantine(tmp_path) == 0
+    assert called["value"] is False
+
+
+def test_create_desktop_launcher_invokes_powershell_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+        return None
+
+    monkeypatch.setattr("tools.source_install.subprocess.run", fake_run)
+    root = tmp_path / "repo"
+    root.mkdir()
+    result = create_desktop_launcher(root, system_name="Windows", home=tmp_path)
+    assert result == tmp_path / "Desktop" / "Silentfrog.lnk"
+    cmd = captured["cmd"]
+    assert isinstance(cmd, list)
+    assert cmd[:4] == ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+    joined = " ".join(cmd)
+    assert "Silentfrog.lnk" in joined
+    assert "run_silentfrog.bat" in joined

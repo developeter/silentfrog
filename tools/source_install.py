@@ -2,37 +2,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
+import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
-from typing import Iterable
+from typing import Iterable, Mapping
 
 MIN_PYTHON = (3, 12)
 MAX_PYTHON = (3, 15)
 SUPPORTED_PYTHON_LABEL = "Python 3.12, 3.13, or 3.14"
-RUNTIME_WHEEL_REQUIREMENTS = (
-    "pyside6>=6.8,<7.0",
-    "qtpy>=2.4.3,<3.0.0",
-    "numpy>=2.2.6,<3.0.0",
-    "pandas>=2.2.3,<3.0.0",
-    "urllib3>=2.4.0,<3.0.0",
-    "requests>=2.32.3,<3.0.0",
-    "openpyxl>=3.1",
-    "httpx[http2]>=0.28.1,<0.29.0",
-    "beautifulsoup4>=4.13.4,<5.0.0",
-    "lxml>=6.0.2,<7.0",
-    "html5lib>=1.1,<2.0",
-    "tldextract>=5.3.0,<6.0.0",
-    "xlsxwriter>=3.2.9,<4.0.0",
-    "aiohttp>=3.12.0,<4.0.0",
-    "certifi>=2025.1.31,<2027.0.0",
-    "nltk>=3.9.1,<4.0.0",
-    "pillow>=12.2.0,<13.0.0",
-    "humanize>=4.12.3,<5.0.0",
-)
+_PEP621_PAREN_RE = re.compile(r"^([^\s(]+)\s*\(([^)]+)\)\s*$")
 MACOS_PYTHON_CANDIDATES = (
     "python3.14",
     "python3.13",
@@ -56,6 +40,35 @@ class InstallerPaths:
     venv_dir: Path
     python: Path
     launcher: Path
+
+
+@dataclass(frozen=True)
+class RuntimeRequirements:
+    pip_args: tuple[str, ...]
+
+
+def _normalize_pep508(spec: str) -> str:
+    stripped = spec.strip()
+    match = _PEP621_PAREN_RE.match(stripped)
+    if match is None:
+        return stripped
+    name, version = match.group(1), match.group(2).strip()
+    return f"{name}{version}"
+
+
+def load_runtime_requirements(pyproject: Path) -> RuntimeRequirements:
+    if not pyproject.is_file():
+        raise RuntimeError(f"pyproject.toml not found at {pyproject}")
+    with pyproject.open("rb") as fh:
+        data = tomllib.load(fh)
+    project = data.get("project")
+    if not isinstance(project, dict):
+        raise RuntimeError(f"pyproject.toml has no [project] table: {pyproject}")
+    raw_deps = project.get("dependencies")
+    if not isinstance(raw_deps, list):
+        raise RuntimeError(f"pyproject.toml has no [project].dependencies list: {pyproject}")
+    normalized = tuple(_normalize_pep508(str(spec)) for spec in raw_deps)
+    return RuntimeRequirements(pip_args=normalized)
 
 
 def is_windows(system_name: str | None = None) -> bool:
@@ -86,8 +99,118 @@ def desktop_dir(home: Path | None = None) -> Path:
     return (home or Path.home()) / "Desktop"
 
 
-def install_plan(root: Path, interpreter: str, system_name: str | None = None) -> list[list[str]]:
+_LAUNCHER_SCRIPT_NAMES = (
+    "run_silentfrog.bat",
+    "run_silentfrog.sh",
+    "install_silentfrog.bat",
+    "install_silentfrog.sh",
+    "install_silentfrog.command",
+    "reinstall_silentfrog.sh",
+    "reinstall_silentfrog.command",
+    "uninstall_silentfrog.sh",
+    "uninstall_silentfrog.command",
+    "uninstall_silentfrog.bat",
+)
+
+
+def launcher_script_paths(root: Path) -> tuple[Path, ...]:
+    return tuple(root / name for name in _LAUNCHER_SCRIPT_NAMES)
+
+
+_PYTHON_ORG_FRAMEWORK_RE = re.compile(
+    r"/Library/Frameworks/Python\.framework/Versions/(?P<minor>3\.\d+)/"
+)
+
+
+def detect_python_org_certificate_installer(python_exe: Path) -> Path | None:
+    match = _PYTHON_ORG_FRAMEWORK_RE.search(str(python_exe))
+    if match is None:
+        return None
+    candidate = Path(f"/Applications/Python {match.group('minor')}/Install Certificates.command")
+    return candidate if candidate.is_file() else None
+
+
+def run_certificate_installer(installer: Path) -> int:
+    try:
+        completed = subprocess.run(["/bin/sh", str(installer)], check=False)
+    except OSError as exc:
+        print(f"[install] Certificate installer could not be launched: {exc}")
+        return 1
+    return completed.returncode
+
+
+def strip_quarantine(target: Path) -> int:
+    if platform.system().lower() != "darwin":
+        return 0
+    try:
+        completed = subprocess.run(
+            ["xattr", "-dr", "com.apple.quarantine", str(target)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return 0
+    return completed.returncode
+
+
+def app_data_dir(
+    system_name: str | None = None,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> Path:
+    env_map = env if env is not None else os.environ
+    override = env_map.get("SILENTFROG_DATA_DIR")
+    if override:
+        return Path(override)
+    home_path = home or Path.home()
+    name = (system_name or platform.system()).lower()
+    if name.startswith("win"):
+        base = env_map.get("LOCALAPPDATA") or str(home_path / "AppData" / "Local")
+        return Path(base) / "Silentfrog"
+    if name == "darwin":
+        return home_path / "Library" / "Application Support" / "Silentfrog"
+    xdg = env_map.get("XDG_DATA_HOME") or str(home_path / ".local" / "share")
+    return Path(xdg) / "silentfrog"
+
+
+@dataclass(frozen=True)
+class UninstallTargets:
+    root: Path
+    venv_dir: Path
+    desktop_lnk: Path
+    desktop_command: Path
+    launcher_scripts: tuple[Path, ...]
+    user_data_dir: Path
+
+
+def uninstall_targets(
+    root: Path,
+    system_name: str | None = None,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> UninstallTargets:
     paths = installer_paths(root, system_name)
+    desktop = desktop_dir(home)
+    return UninstallTargets(
+        root=root,
+        venv_dir=paths.venv_dir,
+        desktop_lnk=desktop / "Silentfrog.lnk",
+        desktop_command=desktop / "Silentfrog.command",
+        launcher_scripts=launcher_script_paths(root),
+        user_data_dir=app_data_dir(system_name=system_name, home=home, env=env),
+    )
+
+
+def install_plan(
+    root: Path,
+    interpreter: str,
+    system_name: str | None = None,
+    requirements: RuntimeRequirements | None = None,
+) -> list[list[str]]:
+    paths = installer_paths(root, system_name)
+    if requirements is None:
+        requirements = load_runtime_requirements(root / "pyproject.toml")
     return [
         [interpreter, "-m", "venv", str(paths.venv_dir)],
         [str(paths.python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "poetry-core"],
@@ -98,7 +221,7 @@ def install_plan(root: Path, interpreter: str, system_name: str | None = None) -
             "install",
             "--upgrade",
             "--only-binary=:all:",
-            *RUNTIME_WHEEL_REQUIREMENTS,
+            *requirements.pip_args,
         ],
         [str(paths.python), "-m", "pip", "install", "--upgrade", "--no-deps", "--no-build-isolation", "."],
         [
@@ -218,6 +341,7 @@ def render_install_command() -> str:
             "#!/bin/sh",
             'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
+            'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
             'echo "Installing Silentfrog..."',
             '"$script_dir/install_silentfrog.sh" "$@"',
             "status=$?",
@@ -253,6 +377,7 @@ def render_reinstall_command() -> str:
             "#!/bin/sh",
             'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
             'cd "$script_dir"',
+            'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
             'echo "Reinstalling Silentfrog with a fresh local .venv..."',
             '"$script_dir/reinstall_silentfrog.sh" "$@"',
             "status=$?",
@@ -265,6 +390,58 @@ def render_reinstall_command() -> str:
             'echo "Press Return to close this window."',
             "read -r _",
             'exit "$status"',
+        ]
+    ) + "\n"
+
+
+def render_uninstall_sh() -> str:
+    return "\n".join(
+        [
+            "#!/bin/sh",
+            "set -eu",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+            'cd "$script_dir"',
+            *_macos_python_selector_lines(),
+            'exec "$silentfrog_python" -m tools.source_uninstall "$@"',
+        ]
+    ) + "\n"
+
+
+def render_uninstall_command() -> str:
+    return "\n".join(
+        [
+            "#!/bin/sh",
+            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+            'cd "$script_dir"',
+            'echo "Uninstalling Silentfrog..."',
+            '"$script_dir/uninstall_silentfrog.sh" "$@"',
+            "status=$?",
+            'echo ""',
+            'if [ "$status" -eq 0 ]; then',
+            '  echo "Silentfrog uninstalled. Local crawl history was preserved unless --purge was used."',
+            "else",
+            '  echo "Silentfrog uninstall failed with exit code $status."',
+            "fi",
+            'echo "Press Return to close this window."',
+            "read -r _",
+            'exit "$status"',
+        ]
+    ) + "\n"
+
+
+def render_uninstall_bat() -> str:
+    return "\n".join(
+        [
+            "@echo off",
+            "setlocal",
+            "pushd %~dp0",
+            "where py >nul 2>nul",
+            "if %errorlevel%==0 (",
+            "  py -3 -m tools.source_uninstall %*",
+            ") else (",
+            "  python -m tools.source_uninstall %*",
+            ")",
+            "popd",
         ]
     ) + "\n"
 
@@ -326,6 +503,9 @@ def write_launchers(root: Path) -> None:
     _write_file(root / "install_silentfrog.command", render_install_command(), executable=True)
     _write_file(root / "reinstall_silentfrog.sh", render_reinstall_sh(), executable=True)
     _write_file(root / "reinstall_silentfrog.command", render_reinstall_command(), executable=True)
+    _write_file(root / "uninstall_silentfrog.sh", render_uninstall_sh(), executable=True)
+    _write_file(root / "uninstall_silentfrog.command", render_uninstall_command(), executable=True)
+    _write_file(root / "uninstall_silentfrog.bat", render_uninstall_bat())
 
 
 def create_desktop_launcher(root: Path, system_name: str | None = None, home: Path | None = None) -> Path | None:
@@ -377,6 +557,12 @@ def main(argv: list[str] | None = None) -> int:
         print("[install] pyproject.toml not found. Run this script from the project root copy.")
         return 1
 
+    try:
+        requirements = load_runtime_requirements(root / "pyproject.toml")
+    except RuntimeError as exc:
+        print(f"[install] {exc}")
+        return 1
+
     paths = installer_paths(root)
     if args.recreate_venv and paths.venv_dir.exists():
         import shutil
@@ -385,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(paths.venv_dir)
 
     try:
-        for command in install_plan(root, sys.executable):
+        for command in install_plan(root, sys.executable, requirements=requirements):
             try:
                 _run(command, root)
             except subprocess.CalledProcessError:
@@ -402,12 +588,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[install] Command failed with exit code {exc.returncode}.")
         return exc.returncode or 1
 
+    _post_install_macos_helpers(root, paths.python)
     run_hint = "run_silentfrog.bat" if is_windows() else "./run_silentfrog.sh"
     print("[install] Silentfrog installed successfully.")
     print(f"[install] Start the app with: {run_hint}")
     if launcher_path is not None:
         print(f"[install] Desktop launcher created: {launcher_path}")
     return 0
+
+
+def _post_install_macos_helpers(root: Path, venv_python: Path) -> None:
+    if platform.system().lower() != "darwin":
+        return
+    strip_quarantine(root)
+    installer = detect_python_org_certificate_installer(venv_python)
+    if installer is None:
+        return
+    print(f"[install] Running macOS certificate helper: {installer}")
+    status = run_certificate_installer(installer)
+    if status:
+        print(f"[install] Certificate helper exited with code {status}. If HTTPS fetches fail later, run it manually.")
 
 
 if __name__ == "__main__":
