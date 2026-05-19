@@ -64,6 +64,22 @@ class RemoteRevision:
     message: str
 
 
+def find_repo_root() -> Path:
+    """Locate the install root (the directory containing ``pyproject.toml``).
+
+    Walks up from this module's resolved path. Works for both dev
+    clones (file lives under ``<repo>/src/silentfrog/``) and user-mode
+    installs created by ``install_silentfrog.py`` (file lives under
+    ``<repo>/.venv/Lib/site-packages/silentfrog/``, so walking up still
+    reaches ``<repo>``).
+    """
+    here = Path(__file__).resolve()
+    for directory in (here.parent, *here.parents):
+        if (directory / "pyproject.toml").is_file():
+            return directory
+    return here.parent
+
+
 def read_local_revision(repo_root: Path) -> LocalRevision:
     """Resolve the current install's revision and how it was installed.
 

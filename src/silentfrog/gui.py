@@ -35,6 +35,8 @@ class HomeWindow(QMainWindow):
         self.setWindowTitle("Silentfrog")
         self.setMinimumSize(400, 200)
 
+        self._build_help_menu()
+
         self.main_layout = QtWidgets.QVBoxLayout()
         self.main_layout.setSpacing(20)
 
@@ -98,6 +100,26 @@ class HomeWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self)
+        dlg.exec()
+
+    def _build_help_menu(self) -> None:
+        menu_bar = self.menuBar()
+        help_menu = menu_bar.addMenu("&Help")
+        check_action = help_menu.addAction("Check for &Updates…")
+        check_action.triggered.connect(self._open_update_dialog)
+        about_action = help_menu.addAction("&About Silentfrog")
+        about_action.triggered.connect(self._open_about_dialog)
+
+    def _open_update_dialog(self) -> None:
+        from .update_gui import UpdateDialog
+
+        dlg = UpdateDialog(self)
+        dlg.exec()
+
+    def _open_about_dialog(self) -> None:
+        from .update_gui import AboutDialog
+
+        dlg = AboutDialog(self)
         dlg.exec()
 
 
