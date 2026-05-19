@@ -33,32 +33,53 @@ It lets you quickly:
 
 ---
 
-## 2. Packaged app path (recommended for end users)
+## 2. Quick install (one-click bootstrap, recommended for end users)
 
-> **For end users:** the full step-by-step guide (download, drag-to-Applications, Gatekeeper / SmartScreen first-launch dialogs, uninstall) lives in **[`docs/INSTALL.md`](docs/INSTALL.md)**. The summary below covers the same path quickly.
+Each GitHub Release ships three small bootstrap scripts that handle
+everything end-to-end: they install Python 3.12 if it's missing,
+download the latest source, set up a local `.venv`, and create a
+Desktop launcher. After install, updates are one click from inside the
+app via **Help → Check for Updates…**.
 
-Releases live on [GitHub Releases](https://github.com/developeter/silentfrog/releases). Each tagged version ships:
-
-- `Silentfrog-<version>-macos-arm64.dmg` (macOS Apple Silicon)
-- `Silentfrog-<version>-macos-intel.dmg` (macOS Intel)
-- `Silentfrog-<version>-windows-x64.zip` (Windows portable)
-
-### Install on macOS
-
-1. Download the `.dmg` matching your CPU.
-2. Open it and drag **Silentfrog** to **Applications**.
-3. First launch: macOS Gatekeeper will block the app. Right-click `Silentfrog.app` in **Applications** and choose **Open**, then confirm. Subsequent launches just work.
+Releases live on [GitHub Releases](https://github.com/developeter/silentfrog/releases).
 
 ### Install on Windows
 
-1. Download the `.zip`.
-2. Right-click → **Properties** → **Unblock** if Windows marked it as from-the-internet.
-3. Extract to a folder of your choice (e.g. `C:\Program Files\Silentfrog\`).
-4. Double-click `Silentfrog.exe`. SmartScreen may prompt "Windows protected your PC"; click **More info → Run anyway**.
+1. Download both `Get-Silentfrog.bat` and `Get-Silentfrog.ps1` from the
+   latest release into the same folder.
+2. Double-click `Get-Silentfrog.bat`.
+3. If Python isn't already installed, accept the UAC prompt from the
+   silent Python installer (one click).
+4. After ~1 minute, a Silentfrog shortcut appears on your Desktop.
 
-Apple notarization and Windows Authenticode signing are deliberate future work — for now Silentfrog ships unsigned and the warnings above are expected at first launch.
+Logs land at `%LOCALAPPDATA%\Silentfrog\bootstrap.log`.
 
-If packaged artifacts are not yet available for your platform, fall back to the source installer in **Section 3**.
+### Install on macOS (Intel or Apple Silicon)
+
+1. Download `Get-Silentfrog.command` from the latest release.
+2. Right-click the file in Finder and choose **Open** (only the first
+   time — Gatekeeper blocks unsigned `.command` files on double-click).
+3. If Python isn't already installed, enter your password when prompted
+   for the silent Python installer.
+4. After ~1 minute, a Silentfrog launcher appears on your Desktop.
+
+Logs land at `~/Library/Logs/Silentfrog-bootstrap.log`.
+
+### Updating
+
+Open Silentfrog and go to **Help → Check for Updates…**. If a new
+commit is available on `dev`, you'll see "Update available" with an
+**Apply and restart** button. The whole update takes 10–30 seconds —
+no recompile, no download of new dependencies unless `pyproject.toml`
+itself changed.
+
+Developer clones (machines with a `.git` directory) see a "Use
+`git pull` instead" message in that dialog — the in-app updater never
+touches a working tree under git control.
+
+For maintainers: see `bootstrap/README.md` for the bootstrap design and
+`tools/update_silentfrog.py` for the executor that the Apply button
+drives.
 
 ---
 
@@ -429,8 +450,8 @@ silentfrog/
 │   └── pre-push           # Runs full doctor automatically
 ├── .github/
 │   └── workflows/
-│       ├── python-compat.yml # Windows/macOS compatibility matrix
-│       └── package-app.yml   # Packaged app workflow
+│       ├── python-compat.yml      # Windows/macOS compatibility matrix
+│       └── release-bootstrap.yml  # Attaches bootstrap files to GitHub Releases
 ├── docs/
 │   ├── site_crawl_feature_spec.md
 │   ├── site_crawl_roadmap.md
@@ -498,19 +519,23 @@ silentfrog/
 
 ---
 
-## 6. Packaging binaries (preferred release path)
+## 6. Releasing
 
-| OS      | Command                                    | Output                |
-| ------- | ------------------------------------------ | --------------------- |
-| Windows / macOS | `poetry run python tools/package_app.py --mode standalone` | Packaged desktop artifact |
+| Step | Command / action |
+| --- | --- |
+| Tag the release | `git tag v<version> && git push --tags` |
+| Bootstrap files attached to Release | `.github/workflows/release-bootstrap.yml` runs on tag push and attaches `Get-Silentfrog.{ps1,bat,command}` as draft assets. |
+| End-user gets updates after install | **Help → Check for Updates…** inside Silentfrog. |
 
---- 
+The Nuitka packaging path has been retired; see `experimental/packaging/README.md` for the rationale.
+
+---
 
 ## 7. Troubleshooting
 
 | Symptom / log snippet                                                        | Root cause                    | Fix                                                                                                   |
 | ---------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Source installer says `Dependency wheel preflight failed`                    | A dependency wheel is unavailable for that Python/OS/CPU combination | Use the packaged app, or try another supported Python version: 3.12, 3.13, or 3.14 |
+| Source installer says `Dependency wheel preflight failed`                    | A dependency wheel is unavailable for that Python/OS/CPU combination | Try another supported Python version: 3.12, 3.13, or 3.14 |
 | `pip` tries to compile Pillow/lxml/aiohttp from source                       | Dependency wheel was not selected | Use the source installer instead of manual `pip install`, because it enforces binary wheels |
 | GUI crashes when clicking **Analyze** and log shows `TypeError: list found` | Mixed schema row formats      | Upgrade to Silentfrog ≥ 0.1.3 (fix merged 2025-06-04)                                                 |
 | `"Cannot load Qt platform plugin 'xcb'"` on Ubuntu                           | Missing Qt runtime libs       | `sudo apt install libxcb-xinerama0`                                                                   |

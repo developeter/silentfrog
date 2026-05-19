@@ -1,6 +1,6 @@
 # Silentfrog Handoff
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
 
 ## Working Rules
 
@@ -63,97 +63,77 @@ Not yet implemented:
 - Real AI provider calls and UI controls.
 - Real Google Drive OAuth/sync UI.
 
-## Install / package overhaul (uncommitted, 2026-05-18)
+## Install / update story (current)
 
-A series of small mergeable changes hardens the install/uninstall and packaging story across Windows + macOS Intel + macOS Apple Silicon + Python 3.12 / 3.13 / 3.14. Unsigned for now; code signing is a future milestone. See `CHANGELOG.md` under "Unreleased" for the user-facing summary. Highlights:
+End-user installs go through the bootstrap scripts in `bootstrap/`,
+which detect / install Python and run the source installer. Updates
+happen from inside the app via **Help → Check for Updates…**, which
+downloads the latest commit on `dev` and swaps source files in place.
+The Nuitka-based packaged path has been archived under
+`experimental/packaging/`; see that directory's `README.md` for why.
 
-- Single source of truth for runtime deps: `tools/source_install.py` reads `pyproject.toml` via `tomllib`. No more `RUNTIME_WHEEL_REQUIREMENTS`. Drift impossible by construction.
-- Cross-platform uninstaller in `tools/source_uninstall.py` plus `uninstall_silentfrog.{sh,bat,command}` launchers. `--purge` opt-in for local crawl history; never touches `~/nltk_data`.
-- `tools/doctor.py` gained `--mode poetry|venv|both`. Workflow `python-compat.yml` runs the new venv mode after each source install.
-- macOS first-run: `xattr -dr com.apple.quarantine` silently inside the `.command` scripts; `install_silentfrog.py` auto-runs `Install Certificates.command` when python.org Python is detected.
-- Parametric drift test asserts every committed `run_*`, `install_*`, `reinstall_*`, `uninstall_*` launcher equals the corresponding `render_*()` output.
-- `pysidedeploy.spec` committed at repo root. `tools/package_app.py` materializes a platform-specific copy inside `build/package/<os>/pysidedeploy.spec` (Nuitka flags include `--nofollow-import-to=pyRdfa,pyMicrodata,rdflib` to work around a 2.7.11 assertion via `extruct`'s RDFa parsers).
-- Bundle data files: `--include-data-dir` for `src/silentfrog/assets` and `src/silentfrog/resources`. Without those, the gear/settings icon and stopwords are missing from the `.app`.
-- `icon.icns` committed alongside `icon.png` / `icon.ico` to keep the build independent of `sips` / `iconutil`. `tools/package_app.py::ensure_macos_icns` still regenerates it locally if `icon.png` is newer.
-- BOM stripped from 9 files under `src/silentfrog/` (e.g. `crawler_utils.py`, `seo_gui.py`, the `models/*.py`) — pyside6-deploy's `dependency_util.py` has a `tree` unbound-local bug that triggers on any `SyntaxError` (BOM counts as one).
-- DMG (macOS) via pure `hdiutil` with drag-to-Applications layout; portable ZIP on Windows. Workflow `package-app.yml` publishes a draft GitHub Release on `v*` tag pushes.
-- Maintainer-side `docs/packaging_preview.md` documents the local rehearsal flow.
+Three install / update layers, by audience:
 
-### Cross-platform validation status (2026-05-18)
+1. **Bootstrap (colleagues, fresh machines)**
+   - `bootstrap/Get-Silentfrog.{ps1,bat,command}` — published as draft
+     Release assets by `.github/workflows/release-bootstrap.yml` on
+     every `v*` tag push.
+   - Detect Python 3.12/3.13/3.14 → silent-install python.org 3.12.7
+     if missing → fetch latest commit on `dev` → extract to
+     `%LOCALAPPDATA%\Silentfrog\app` (Win) or `~/Silentfrog/app`
+     (macOS) → run `install_silentfrog.py --revision <sha>`.
+   - Logs to platform-appropriate location, see `bootstrap/README.md`.
 
-Verified physically on **macOS Apple Silicon** (the maintainer's machine):
+2. **In-app updater (everyone after install)**
+   - `Help → Check for Updates…` (added by `src/silentfrog/gui.py`).
+   - Dialog defined in `src/silentfrog/update_gui.py`.
+   - Domain logic in `src/silentfrog/updater.py` (typed dataclasses,
+     `aiohttp` for the GitHub commits API, no Qt imports).
+   - Apply button launches `tools/update_silentfrog.py --revision <sha>`
+     via `QProcess`, then restarts the app via
+     `QProcess.startDetached(sys.executable, sys.argv)`.
+   - Dev clones (`.git` directory present) are detected and routed to
+     a "use `git pull` instead" message — the in-app updater never
+     touches a working tree under git control.
 
-- `poetry run python tools/doctor.py` → 291 passed
-- `python install_silentfrog.py` end-user source flow (not re-run after every PR, but the underlying `tests/test_source_install_unit.py` and `tests/test_source_uninstall_unit.py` are green)
-- `poetry run python tools/package_app.py --mode standalone` → `build/package/darwin/Silentfrog.app` (~287 MB) + `Silentfrog-1.0.0-macos-arm64.dmg` (~113 MB)
-- `hdiutil verify` on the dmg → checksum valid
-- `open Silentfrog.app` (after `xattr -dr com.apple.quarantine`) → window launches, `icon.png` and `settings.png` (gear) render from the bundled `silentfrog/assets/`, stopwords resolve from the bundled `silentfrog/resources/`
+3. **Source installer (developers + bootstrap callee)**
+   - `install_silentfrog.py` → `tools/source_install.py::main()`.
+   - New `--revision <sha>` flag persists `.silentfrog_revision` so
+     the in-app updater knows what's installed.
+   - Behavior unchanged for dev clones that omit the flag.
 
-NOT yet executed physically — to be validated by CI (or by a maintainer with that box):
+### Smoke-test the bootstrap path
 
-- Build Nuitka on **Windows** (`Silentfrog.exe`)
-- Build Nuitka on **macOS Intel** (`Silentfrog.app` for Intel)
-- DMG generation on macOS Intel (path `Silentfrog-<v>-macos-intel.dmg`)
-- ZIP generation on Windows (`Silentfrog-<v>-windows-x64.zip`)
-- `install_silentfrog.bat` → `.venv\Scripts\silentfrog.exe` real run
-- `Silentfrog.lnk` PowerShell-created shortcut on Windows Desktop
+Bootstrap scripts are not unit-tested. When you change them, smoke-test
+on a clean target:
 
-The unit tests cover the platform-branching logic (`_arch_label`, `artifact_plan`, `select_icon_for_os`, `installer_paths`, `app_data_dir`, `windows_shortcut_command`, drift across `.bat` launchers, etc.) — they assert the code chooses the right path per OS but do not execute Nuitka or hdiutil on Windows/Intel from a macOS Apple Silicon developer machine.
+- **Windows VM with no Python installed**: download both
+  `Get-Silentfrog.bat` and `Get-Silentfrog.ps1` into `Downloads`,
+  double-click the `.bat`. Expect a UAC for the Python silent install,
+  then a Desktop shortcut after ~1 minute. Check
+  `%LOCALAPPDATA%\Silentfrog\bootstrap.log`.
+- **macOS account with no Python installed** (Intel and/or Silicon):
+  download `Get-Silentfrog.command`, right-click → Open. Expect a
+  password prompt for `sudo installer`, then a Desktop launcher.
+  Check `~/Library/Logs/Silentfrog-bootstrap.log`.
+- **macOS / Windows with Python already installed**: same flow but no
+  install prompt; the bootstrap goes straight to the source download.
 
-### Continuation guide — validating on Windows from a fresh chat
+### Smoke-test the in-app updater
 
-When you open a new Claude conversation on the Windows machine, after a `git pull` on `dev`, brief the new instance with the following bullet list. It is self-contained.
+On a user-mode install (no `.git`):
 
-1. The Silentfrog repo at `<wherever you cloned it>` has an in-progress install/package overhaul on branch `dev`. It was developed and validated on macOS Apple Silicon. Goal of this session: validate that the source installer and the packaging pipeline also work on Windows.
+1. Edit `.silentfrog_revision` to an older sha known to exist on `dev`.
+2. Launch Silentfrog → **Help → Check for Updates…** → expect
+   "Update available". Click Apply and restart → expect the app to
+   relaunch with the newer revision.
+3. Re-open the dialog → expect "You're on the latest version".
 
-2. First sanity:
-   ```cmd
-   poetry install
-   poetry run python tools\doctor.py --quick
-   poetry run python tools\package_app.py --mode standalone --dry-run
-   ```
-   The dry-run should print a Nuitka command containing both `--nofollow-import-to=pyRdfa` and `--include-data-dir=...src\silentfrog\assets=silentfrog/assets`.
+On a dev clone:
 
-3. End-user source install path:
-   ```cmd
-   py install_silentfrog.py
-   run_silentfrog.bat
-   ```
-   The installer should create `.venv\`, write a `Silentfrog.lnk` on the Desktop, and `run_silentfrog.bat` should open the Silentfrog window. Verify the home-screen icon and the gear icon in the Crawl settings dialog both render.
-
-4. `tools/doctor.py --mode venv --skip-tests` after the install should confirm the `.venv` is intact.
-
-5. Uninstall round-trip:
-   ```cmd
-   uninstall_silentfrog.bat
-   ```
-   `%LOCALAPPDATA%\Silentfrog\` must remain (local crawl history). Re-run with `--purge` to also wipe it.
-
-6. Packaging:
-   ```cmd
-   poetry run python tools\package_app.py --mode standalone --keep-deployment-files
-   ```
-   Expected output:
-   - `build\package\windows\Silentfrog\Silentfrog.exe` (the packaged binary)
-   - `build\package\windows\Silentfrog-1.0.0-windows-x64.zip`
-   Open `Silentfrog.exe` and verify the same icons render.
-
-7. Known sharp edges to watch for on Windows:
-   - SmartScreen will warn ("Windows protected your PC") on first launch of the unsigned `Silentfrog.exe`. Click **More info → Run anyway**.
-   - If `pyside6-deploy` complains about a missing config file even when one exists in `build\package\windows\pysidedeploy.spec`, the `cwd` of the subprocess may have moved — check `tools/package_app.py::main()` and confirm `cwd=paths.build_dir` (the working dir feeds pyside6-deploy's spec lookup).
-   - Nuitka may emit cache prompts on the first run; allow them.
-
-8. If any step fails, gather:
-   - the full stderr of the failing command
-   - `git rev-parse HEAD` (which commit is being tested)
-   - the output of `poetry run python tools\doctor.py --mode both`
-   and report back. Then either fix in place (small change), or capture the bug and open a separate task.
-
-Out of scope, do not attempt in this validation session: code signing, notarization, Homebrew tap, winget manifest, Linux artifact uploads.
-
-### Recently merged install/package work
-
-See `CHANGELOG.md` (Unreleased section) for the user-facing list of changes.
+1. Launch via `poetry run silentfrog` → **Help → Check for Updates…**
+   → expect "Developer install. Use `git pull` instead."
+2. There is no Apply path; verify the working tree is untouched.
 
 ## Important Modules
 
@@ -186,14 +166,22 @@ See `CHANGELOG.md` (Unreleased section) for the user-facing list of changes.
   - Single-source-of-truth runtime requirements via `tomllib`, launcher renderers, macOS cert/quarantine helpers, app-data-dir resolver.
 - `tools/source_uninstall.py`
   - Cross-platform uninstaller. `--purge` flag for local crawl history.
-- `tools/package_app.py`
-  - `pyside6-deploy` orchestration, icon staging (`ensure_macos_icns`), spec materialization, DMG via `hdiutil`, ZIP via `shutil.make_archive`.
+- `src/silentfrog/updater.py`
+  - Update-check domain logic: typed dataclasses, dev-vs-user mode detection, GitHub commits API client. Qt-free, fully unit-testable.
+- `src/silentfrog/update_gui.py`
+  - `AboutDialog` and `UpdateDialog` opened from the Help menu in `HomeWindow`. `UpdateDialog` runs the check on a `QThread`, renders one of five states, and drives the Apply-and-restart subprocess.
+- `tools/update_silentfrog.py`
+  - CLI executor invoked by the GUI Apply button. Downloads the target sha, swaps source files (preserving `.venv`, `.git`, `.env*`, `secrets.local.json`), refreshes pip when `pyproject.toml` changed, updates `.silentfrog_revision`.
+- `tools/source_update.py`
+  - Pure-Python file-level helpers used by `update_silentfrog.py`. Separated so the orchestration script reads as prose and the copy/extract logic can be unit-tested without subprocesses.
+- `bootstrap/Get-Silentfrog.{ps1,bat,command}`
+  - One-click installers for end users. Detect/install Python, download the latest source, run `install_silentfrog.py --revision <sha>`.
 - `tools/doctor.py`
   - `--mode poetry|venv|both` runtime checks across the dev env and the installer-produced `.venv`.
-- `pysidedeploy.spec`
-  - Template consumed by `tools/package_app.py`; per-platform copy materialized into `build/package/<os>/` at build time.
+- `experimental/packaging/`
+  - Archived Nuitka/pyside6-deploy path. Not on any supported install route — kept for historical reference. See its `README.md`.
 - `docs/INSTALL.md`
-  - End-user install / uninstall guide for the packaged path (DMG / ZIP) and the source-installer path on macOS and Windows. Linked from `README.md` sections 2 and 3.
+  - End-user install / uninstall guide for the bootstrap path and the source-installer fallback. Linked from `README.md` section 2.
 - `docs/packaging_preview.md`
   - Maintainer-side rehearsal flow for local builds before each release.
 
@@ -278,8 +266,7 @@ Recent successful verification after the local history browser:
    - `tools/source_uninstall.py` + `tests/test_source_uninstall_unit.py` + `uninstall_silentfrog.*` (PR 3)
    - `tools/doctor.py` + `tests/test_doctor_unit.py` + workflow venv-mode step (PR 4)
    - BOM cleanup under `src/silentfrog/` (separate, easy to review)
-   - `pysidedeploy.spec` + `tools/package_app.py` + `icon.icns` + `tests/test_package_app_unit.py` (PR 6-7)
-   - `docs/packaging_preview.md` + `README.md` Section 2 + `.gitignore` (PR 8)
+   - (Nuitka packaging work has been archived under `experimental/packaging/`; not part of any active PR.)
 
 2. If continuing roadmap work, the next major product milestone is likely M5:
 

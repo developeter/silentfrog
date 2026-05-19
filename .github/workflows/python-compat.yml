@@ -70,5 +70,3 @@ jobs:
         run: poetry run python tools/source_install_smoke.py
       - name: Doctor (venv mode)
         run: poetry run python tools/doctor.py --mode venv --skip-tests
-      - name: Packaging dry-run smoke
-        run: poetry run python tools/package_app.py --dry-run

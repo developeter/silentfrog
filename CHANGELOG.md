@@ -2,22 +2,63 @@
 
 ## Unreleased
 
-### Install / package
-- Source installer reads runtime dependencies directly from `pyproject.toml` via `tomllib`; the duplicated `RUNTIME_WHEEL_REQUIREMENTS` constant is gone, so adding a dep no longer requires editing two files.
-- Cross-platform uninstaller: `python -m tools.source_uninstall` plus generated `uninstall_silentfrog.{sh,bat,command}` launchers. Removes `.venv`, Desktop launcher, and repo-root launcher scripts; user crawl history is preserved by default and only purged with `--purge`. Never touches `~/nltk_data`.
-- `tools/doctor.py` gained `--mode poetry|venv|both`; `python-compat.yml` workflow now also validates the installer-produced `.venv` after each platform run.
-- macOS first-run hardening: `install_silentfrog.command` / `reinstall_silentfrog.command` strip `com.apple.quarantine` silently; on python.org Python builds, `install_silentfrog.py` also runs `Install Certificates.command` automatically so the first HTTPS fetch does not fail with an SSL error.
-- New drift-detection test parametric over every committed launcher (`run_*`, `install_*`, `reinstall_*`, `uninstall_*`): catches accidental divergence between the render functions and the on-disk files; eliminates `git status` noise after a fresh install.
+### Install / update story
 
-### Packaging / distribution
-- `pysidedeploy.spec` committed at repo root; `tools/package_app.py` materializes it into `build/package/<os>/pysidedeploy.spec` with platform-specific icon and absolute paths, then invokes `pyside6-deploy` from there.
-- macOS app icon (`icon.icns`) generated from `icon.png` via `sips` + `iconutil` and committed alongside `icon.png` / `icon.ico`.
-- Nuitka 2.7.11 assertion on `pyRdfa` (from `extruct`'s transitive RDFa parsers) worked around with `--nofollow-import-to=pyRdfa,pyMicrodata,rdflib`.
-- UTF-8 BOM stripped from 9 files under `src/silentfrog/` that triggered a `cannot access local variable 'tree'` parser crash in pyside6-deploy's `dependency_util.py`.
-- Bundle now ships the non-Python data trees explicitly: `--include-data-dir` for `src/silentfrog/assets` (icons, including the gear in the settings dialog) and `src/silentfrog/resources` (stopwords).
-- Build pipeline now produces a `.dmg` on macOS (drag-to-Applications layout via `hdiutil`) and a portable `.zip` on Windows, named `Silentfrog-<version>-{macos-arm64,macos-intel,windows-x64}.<ext>`.
-- `.github/workflows/package-app.yml` publishes a draft GitHub Release with those artifacts on `v*` tag pushes (still unsigned: macOS Gatekeeper and Windows SmartScreen show the standard first-launch warning).
-- New maintainer doc `docs/packaging_preview.md` documents the build / inspect / Gatekeeper-bypass flow for local rehearsals before each release.
+The user-facing install path has shifted from a frozen Nuitka binary
+to a small bootstrap script that installs Python on demand and runs
+the source installer. Updates happen from inside the running app via
+the new "Check for Updates" menu item, which downloads the latest
+commit and swaps source files in place. Developer clones (`.git`
+directory present) keep working unchanged.
+
+#### New
+- `bootstrap/Get-Silentfrog.{ps1,bat,command}` — one-click installers
+  for Windows and macOS (Intel + Apple Silicon). Detect Python
+  3.12/3.13/3.14, silent-install python.org 3.12.7 if missing, fetch
+  the latest source from GitHub, run `install_silentfrog.py` with the
+  recorded revision. Published per `v*` tag by the new
+  `.github/workflows/release-bootstrap.yml`.
+- **In-app updates**: `Help → Check for Updates…` and
+  `Help → About Silentfrog`. Dialogs in
+  `src/silentfrog/update_gui.py`; domain logic in
+  `src/silentfrog/updater.py` (typed dataclasses, `aiohttp` for the
+  GitHub commits API, fully unit-testable). Apply-and-restart drives
+  `tools/update_silentfrog.py`, which downloads the target archive,
+  swaps source files (preserving `.venv`, `.git`, `.env*`,
+  `secrets.local.json`), refreshes pip when `pyproject.toml` changed,
+  and updates `.silentfrog_revision`.
+- `install_silentfrog.py --revision <sha>` records the active revision
+  for the in-app updater. Dev clones omit the flag and the updater
+  falls back to `git rev-parse HEAD`.
+- `silentfrog.__version__` read once via `importlib.metadata` so the
+  About dialog and any future telemetry share a single source.
+
+#### Earlier source-installer hardening (carried over)
+- Source installer reads runtime dependencies directly from
+  `pyproject.toml` via `tomllib`; the duplicated
+  `RUNTIME_WHEEL_REQUIREMENTS` constant is gone.
+- Cross-platform uninstaller: `python -m tools.source_uninstall` plus
+  generated `uninstall_silentfrog.{sh,bat,command}` launchers. Local
+  crawl history is preserved by default; opt-in `--purge` wipes it.
+- `tools/doctor.py` gained `--mode poetry|venv|both`;
+  `python-compat.yml` validates the installer-produced `.venv` after
+  each platform run.
+- macOS first-run hardening: `install_silentfrog.command` strips
+  `com.apple.quarantine`; python.org Python builds auto-run
+  `Install Certificates.command`.
+- Parametric drift test across all `run_*`, `install_*`, `reinstall_*`,
+  `uninstall_*` launchers.
+
+#### Removed / archived
+- The Nuitka + pyside6-deploy packaged path is no longer supported
+  and has been moved to `experimental/packaging/` for reference. The
+  build was slow (60–90 min per platform), unsigned (so still showed
+  Gatekeeper / SmartScreen warnings on first launch), and broke the
+  "git pull → see updates" loop the team relies on. See
+  `experimental/packaging/README.md` for the full rationale.
+- `.github/workflows/package-app.yml` deleted.
+- `tests/test_package_app_unit.py` excluded from default `pytest`
+  discovery via a new `testpaths = ["tests"]` setting.
 
 ## 1.0.0
 

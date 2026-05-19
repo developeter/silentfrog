@@ -1,55 +1,72 @@
 # Installing Silentfrog
 
-Silentfrog is a desktop SEO crawler. There are two ways to install it: a **packaged app** (no Python required) or a **source installer** (needs Python on your machine). The packaged path is the recommended one for end users.
+Silentfrog is a desktop SEO crawler. There are two ways to install it:
+a **one-click bootstrap** (recommended — installs Python for you if
+needed) or a **manual source installer** (you bring your own Python).
 
-This document is end-user oriented. If you are a developer working on the codebase, see the project [`README.md`](../README.md) section 4 (Poetry) instead.
+This document is end-user oriented. If you are a developer working on
+the codebase, see the project [`README.md`](../README.md) section 4
+(Poetry) instead.
 
 ---
 
-## A. Packaged app (recommended)
+## A. One-click bootstrap (recommended)
 
-Each tagged release on [GitHub Releases](https://github.com/developeter/silentfrog/releases) ships three artifacts:
+Each tagged release on [GitHub Releases](https://github.com/developeter/silentfrog/releases) ships three bootstrap files:
 
 | File | Target |
 | --- | --- |
-| `Silentfrog-<version>-macos-arm64.dmg` | macOS Apple Silicon (M1, M2, M3, ...) |
-| `Silentfrog-<version>-macos-intel.dmg` | macOS Intel |
-| `Silentfrog-<version>-windows-x64.zip` | Windows 10 / 11 (64-bit) |
+| `Get-Silentfrog.bat` + `Get-Silentfrog.ps1` | Windows 10 / 11 (64-bit) |
+| `Get-Silentfrog.command` | macOS (Intel and Apple Silicon) |
 
-The bundles are currently **unsigned**, so macOS and Windows show a security warning the first time you launch the app. The workarounds below are standard and only required at first launch.
+Each script does the same thing end-to-end: detects whether a supported
+Python is already installed, downloads it silently from python.org if
+not, fetches the latest Silentfrog source, sets up a local `.venv`,
+and drops a Desktop launcher.
+
+After the first install, updates happen from inside the app via
+**Help → Check for Updates…** — no need to download bootstrap files
+again.
 
 ### macOS (Apple Silicon or Intel)
 
-1. From the Releases page, download the `.dmg` matching your chip.
-   - To check your chip: Apple menu → **About This Mac** → look at the line after "Chip" (Apple M1/M2/M3/... = Apple Silicon; Intel Core = Intel).
-2. Double-click the `.dmg`. A window opens with `Silentfrog.app` and a shortcut to `Applications`.
-3. Drag `Silentfrog.app` onto the `Applications` shortcut.
-4. Eject the disk image (right-click → Eject) and delete the `.dmg`.
-5. Open `Applications` in Finder.
-6. **Right-click** `Silentfrog.app` → **Open**. A dialog says "Apple cannot check it for malicious software" → click **Open** again.
-7. From now on you can launch Silentfrog like any other Mac app (Spotlight, Launchpad, dock).
+1. From the Releases page, download `Get-Silentfrog.command`.
+2. Open Finder, navigate to your Downloads folder, and **right-click**
+   `Get-Silentfrog.command` → **Open**. macOS shows a dialog
+   ("Apple cannot check it for malicious software") — click **Open**.
+   You only need to do this the first time.
+3. A Terminal window appears with progress output.
+4. If Python isn't installed yet, macOS prompts for your password to
+   run the silent Python installer (one prompt, ~30 seconds).
+5. After ~1 minute total, a `Silentfrog` launcher appears on your
+   Desktop. Double-click it to start the app.
 
-If macOS refuses to open the app even after right-click → Open, run this in Terminal (one line):
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Silentfrog.app
-```
-
-Then double-click the app again.
+Logs land at `~/Library/Logs/Silentfrog-bootstrap.log`.
 
 ### Windows 10 / 11
 
-1. From the Releases page, download `Silentfrog-<version>-windows-x64.zip`.
-2. Open the file's properties (right-click the ZIP → **Properties**) and tick **Unblock** if you see the "This file came from another computer" warning, then **Apply**.
-3. Right-click the ZIP → **Extract All...** → pick a destination (e.g. `C:\Users\<you>\AppData\Local\Silentfrog`). Avoid `C:\Program Files\` unless you are an administrator.
-4. Open the extracted `Silentfrog\` folder. Double-click `Silentfrog.exe`.
-5. SmartScreen may say "Windows protected your PC". Click **More info** → **Run anyway**.
-6. The app opens. Optionally right-click `Silentfrog.exe` → **Pin to Start** or **Create shortcut**.
+1. From the Releases page, download **both** `Get-Silentfrog.bat` and
+   `Get-Silentfrog.ps1` into the same folder (Downloads is fine).
+2. Double-click `Get-Silentfrog.bat`.
+3. A console window appears with progress output.
+4. If Python isn't installed yet, accept the UAC prompt from the
+   silent Python installer (one click, ~30 seconds).
+5. After ~1 minute total, a Silentfrog shortcut appears on your
+   Desktop. Double-click it to start the app.
 
-### Uninstalling the packaged app
+Logs land at `%LOCALAPPDATA%\Silentfrog\bootstrap.log`.
 
-- **macOS**: drag `Silentfrog.app` from `Applications` to the Trash. Local crawl history (in `~/Library/Application Support/Silentfrog`) is left behind on purpose — delete that folder too if you want a full reset.
-- **Windows**: delete the folder you extracted the ZIP into. Local crawl history (in `%LOCALAPPDATA%\Silentfrog`) is left behind — delete that folder too if you want a full reset.
+### Uninstalling
+
+The repo ships a cross-platform uninstaller. Run it from the install
+directory:
+
+- **macOS**: `~/Silentfrog/app/uninstall_silentfrog.sh` (or
+  double-click `~/Silentfrog/app/uninstall_silentfrog.command`)
+- **Windows**: `%LOCALAPPDATA%\Silentfrog\app\uninstall_silentfrog.bat`
+
+By default the uninstaller preserves your local crawl history. Pass
+`--purge` to wipe everything including history.
 
 ---
 
