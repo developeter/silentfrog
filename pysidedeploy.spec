@@ -28,6 +28,9 @@ macos_create_app_bundle = True
 # extra_args is appended to nuitka. Exclusions here work around a Nuitka 2.7.11
 # assertion ("Must not attempt to locate <ModuleName 'pyRdfa'>") triggered by the
 # RDFa parsers pulled in transitively through extruct.
-extra_args = --quiet --noinclude-qt-translations --nofollow-import-to=pyRdfa --nofollow-import-to=pyMicrodata --nofollow-import-to=rdflib
+# --assume-yes-for-downloads: required for headless builds on Windows because
+# Nuitka prompts to download MinGW64 gcc and aborts fatally if it cannot read
+# stdin (no console, CI, or background process).
+extra_args = --quiet --noinclude-qt-translations --assume-yes-for-downloads --nofollow-import-to=pyRdfa --nofollow-import-to=pyMicrodata --nofollow-import-to=rdflib
 
 [buildozer]

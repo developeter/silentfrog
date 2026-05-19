@@ -18,6 +18,7 @@ from tools.package_app import (
     artifact_plan,
     build_zip,
     deployment_output_dir,
+    finalize_windows_output,
     hdiutil_command,
     icon_assets,
     load_project_version,
@@ -113,6 +114,34 @@ def test_materialize_spec_rewrites_project_dir_and_input_file(tmp_path: Path) ->
     text = dest.read_text(encoding="utf-8")
     assert f"project_dir = {project_dir}" in text
     assert f"input_file = {input_file}" in text
+
+
+@pytest.mark.parametrize(
+    "path_text",
+    [
+        r"C:\Users\dev\repo\icon.ico",
+        r"D:\nightly\build\main.py",
+        r"E:\path\g_with_\group_ref_like_chars",
+    ],
+)
+def test_materialize_spec_accepts_windows_style_paths(
+    tmp_path: Path, path_text: str
+) -> None:
+    """Regression: re.sub replacement strings must not interpret backslash escapes
+    (e.g. ``\\U`` from ``C:\\Users\\...``, or ``\\g`` which is a regex group ref)
+    as regex backreferences.
+    """
+    template = tmp_path / "pysidedeploy.spec"
+    template.write_text(
+        "[app]\nicon = orig.png\ninput_file = deploy/main.py\n",
+        encoding="utf-8",
+    )
+    dest = tmp_path / "build" / "pysidedeploy.spec"
+    win_like = Path(path_text)
+    materialize_spec(template, dest, icon=win_like, input_file=win_like)
+    text = dest.read_text(encoding="utf-8")
+    assert f"icon = {win_like}" in text
+    assert f"input_file = {win_like}" in text
 
 
 def test_stage_entrypoint_copies_main_into_build_dir(tmp_path: Path) -> None:
@@ -263,6 +292,47 @@ def test_hdiutil_command_uses_udzo_format(tmp_path: Path) -> None:
     assert cmd[-1] == str(plan.output)
 
 
+def test_finalize_windows_output_renames_dist_to_final(tmp_path: Path) -> None:
+    paths = package_paths(tmp_path, "Windows")
+    paths.build_dir.mkdir(parents=True, exist_ok=True)
+    dist = paths.build_dir / "Silentfrog.dist"
+    dist.mkdir()
+    (dist / "Silentfrog.exe").write_bytes(b"MZ\x90\x00")
+    finalize_windows_output(paths, "Windows")
+    final = paths.build_dir / "Silentfrog"
+    assert final.is_dir()
+    assert (final / "Silentfrog.exe").is_file()
+    assert not dist.exists()
+
+
+def test_finalize_windows_output_raises_when_no_output_produced(tmp_path: Path) -> None:
+    paths = package_paths(tmp_path, "Windows")
+    paths.build_dir.mkdir(parents=True, exist_ok=True)
+    # Empty .dist as pyside6-deploy leaves it when Nuitka silently failed.
+    (paths.build_dir / "Silentfrog.dist").mkdir()
+    with pytest.raises(RuntimeError, match="did not produce a non-empty"):
+        finalize_windows_output(paths, "Windows")
+
+
+def test_finalize_windows_output_is_noop_on_non_windows(tmp_path: Path) -> None:
+    paths = package_paths(tmp_path, "Darwin")
+    # No artifacts created; non-Windows should not raise.
+    finalize_windows_output(paths, "Darwin")
+    finalize_windows_output(paths, "Linux")
+
+
+def test_finalize_windows_output_is_idempotent_when_final_already_exists(
+    tmp_path: Path,
+) -> None:
+    paths = package_paths(tmp_path, "Windows")
+    paths.build_dir.mkdir(parents=True, exist_ok=True)
+    final = paths.build_dir / "Silentfrog"
+    final.mkdir()
+    (final / "Silentfrog.exe").write_bytes(b"MZ\x90\x00")
+    finalize_windows_output(paths, "Windows")
+    assert (final / "Silentfrog.exe").is_file()
+
+
 def test_build_zip_creates_archive(tmp_path: Path) -> None:
     source = tmp_path / "Silentfrog"
     source.mkdir()
@@ -284,8 +354,35 @@ def test_nuitka_data_dir_args_includes_assets_and_resources(tmp_path: Path) -> N
     (tmp_path / "src" / "silentfrog" / "resources").mkdir(parents=True)
     args = nuitka_data_dir_args(tmp_path)
     joined = " ".join(args)
-    assert f"--include-data-dir={(tmp_path / 'src' / 'silentfrog' / 'assets').resolve()}=silentfrog/assets" in joined
-    assert f"--include-data-dir={(tmp_path / 'src' / 'silentfrog' / 'resources').resolve()}=silentfrog/resources" in joined
+    assets_src = (tmp_path / "src" / "silentfrog" / "assets").resolve().as_posix()
+    resources_src = (tmp_path / "src" / "silentfrog" / "resources").resolve().as_posix()
+    # pyside6-deploy shlex-splits extra_args (POSIX mode), so:
+    #  (a) emitted paths must not contain backslashes even on Windows, and
+    #  (b) round-tripping through shlex.split must reconstruct the original args.
+    assert "\\" not in joined
+    import shlex as _shlex
+
+    parsed = _shlex.split(joined)
+    assert f"--include-data-dir={assets_src}=silentfrog/assets" in parsed
+    assert f"--include-data-dir={resources_src}=silentfrog/resources" in parsed
+
+
+def test_nuitka_data_dir_args_survives_space_in_project_path(tmp_path: Path) -> None:
+    """A repo path like ``C:\\Users\\dev\\silentfrog 2`` must survive
+    pyside6-deploy's POSIX shlex.split of extra_args.
+    """
+    project = tmp_path / "silentfrog 2"
+    (project / "src" / "silentfrog" / "assets").mkdir(parents=True)
+    (project / "src" / "silentfrog" / "resources").mkdir(parents=True)
+    args = nuitka_data_dir_args(project)
+    joined = " ".join(args)
+    import shlex as _shlex
+
+    parsed = _shlex.split(joined)
+    assets_src = (project / "src" / "silentfrog" / "assets").resolve().as_posix()
+    resources_src = (project / "src" / "silentfrog" / "resources").resolve().as_posix()
+    assert f"--include-data-dir={assets_src}=silentfrog/assets" in parsed
+    assert f"--include-data-dir={resources_src}=silentfrog/resources" in parsed
 
 
 def test_materialize_spec_appends_data_dir_args(tmp_path: Path) -> None:

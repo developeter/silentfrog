@@ -4,6 +4,7 @@ import argparse
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import tomllib
@@ -303,8 +304,14 @@ def _resolve_icon(root: Path, dry_run: bool, skip_icon_build: bool) -> Path | No
 
 
 def nuitka_data_dir_args(project_dir: Path) -> tuple[str, ...]:
+    # pyside6-deploy runs ``shlex.split`` (POSIX mode) on extra_args, which
+    # (a) eats backslashes and (b) splits on whitespace. Emit forward-slash
+    # paths and shell-quote each arg so a Windows source tree like
+    # ``C:\Users\dev\silentfrog 2`` survives the round-trip.
     return tuple(
-        f"--include-data-dir={(project_dir / src).resolve()}={dest}"
+        shlex.quote(
+            f"--include-data-dir={(project_dir / src).resolve().as_posix()}={dest}"
+        )
         for src, dest in _BUNDLED_DATA_DIRS
     )
 
@@ -318,9 +325,14 @@ def materialize_spec(
 ) -> Path:
     text = template.read_text(encoding="utf-8")
     if icon is not None:
-        text = re.sub(r"(?m)^icon\s*=.*$", f"icon = {icon}", text, count=1)
+        text = re.sub(r"(?m)^icon\s*=.*$", lambda _m: f"icon = {icon}", text, count=1)
     if project_dir is not None:
-        text = re.sub(r"(?m)^project_dir\s*=.*$", f"project_dir = {project_dir}", text, count=1)
+        text = re.sub(
+            r"(?m)^project_dir\s*=.*$",
+            lambda _m: f"project_dir = {project_dir}",
+            text,
+            count=1,
+        )
         data_args = " ".join(nuitka_data_dir_args(project_dir))
         text = re.sub(
             r"(?m)^(extra_args\s*=.*)$",
@@ -329,7 +341,12 @@ def materialize_spec(
             count=1,
         )
     if input_file is not None:
-        text = re.sub(r"(?m)^input_file\s*=.*$", f"input_file = {input_file}", text, count=1)
+        text = re.sub(
+            r"(?m)^input_file\s*=.*$",
+            lambda _m: f"input_file = {input_file}",
+            text,
+            count=1,
+        )
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8", newline="\n")
     return dest
@@ -364,6 +381,36 @@ def _run_pyside_deploy(root: Path, paths: PackagePaths, args: argparse.Namespace
         config_file=spec,
     )
     subprocess.run(command, cwd=paths.build_dir, env=env, check=True)
+    if not args.dry_run:
+        finalize_windows_output(paths, platform.system())
+
+
+def finalize_windows_output(paths: PackagePaths, system_name: str) -> None:
+    """On Windows standalone, ``pyside6-deploy`` produces ``Silentfrog.dist`` but
+    the rest of the pipeline (and end-user ZIP layout) expects ``Silentfrog``.
+    Rename to match. Also guards against the silent-fail case where Nuitka
+    crashed mid-build (e.g. headless MinGW64 download prompt) but
+    ``pyside6-deploy`` still exited 0 — in that case the produced folder is
+    empty and we should fail loudly with a pointer to the crash report
+    rather than emit an empty ZIP downstream.
+    """
+    if not system_name.lower().startswith("win"):
+        return
+    final = paths.build_dir / _WINDOWS_DIST_NAME
+    dist = paths.build_dir / f"{_WINDOWS_DIST_NAME}.dist"
+    if final.is_dir() and any(final.iterdir()):
+        return
+    if dist.is_dir() and any(dist.iterdir()):
+        if final.exists():
+            shutil.rmtree(final)
+        dist.rename(final)
+        return
+    crash_hint = paths.build_dir / "nuitka-crash-report.xml"
+    raise RuntimeError(
+        f"pyside6-deploy did not produce a non-empty Windows standalone "
+        f"output at {dist} or {final}. Nuitka likely failed silently "
+        f"(see {crash_hint} if it exists)."
+    )
 
 
 def _run_artifact_build(root: Path, paths: PackagePaths, dry_run: bool) -> Path:
