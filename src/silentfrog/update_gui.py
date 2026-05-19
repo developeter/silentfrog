@@ -21,14 +21,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, cast
 
-from qtpy import QtCore, QtWidgets
-from qtpy.QtCore import Qt, QProcess
+from qtpy import QtCore
+from qtpy.QtCore import QProcess
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QLabel,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -126,6 +125,7 @@ class UpdateDialog(QDialog):
         layout.addWidget(self._details_label)
         layout.addWidget(self._buttons)
         self._worker: _UpdateCheckWorker | None = None
+        self._process: QProcess | None = None
         self._pending_apply_sha: str = ""
 
     # ------------------------------------------------------------ lifecycle
@@ -234,17 +234,40 @@ class UpdateDialog(QDialog):
         self._start_check()
 
     def _on_apply_clicked(self) -> None:
-        # PR-3 wires this to ``tools.update_silentfrog`` and then
-        # restart_app(). Until then we show a clear placeholder so the
-        # user knows the UI is wired but the executor is not.
-        QMessageBox.information(
-            self,
-            "Update not yet wired up",
-            (
-                "The update mechanism is not enabled in this build. "
-                f"The pending target revision is {_short_sha(self._pending_apply_sha)}."
-            ),
+        if not self._pending_apply_sha:
+            return
+        self._status_label.setText("Applying update…")
+        self._details_label.setText(
+            f"Fetching {_short_sha(self._pending_apply_sha)} and refreshing the venv."
         )
+        self._buttons.clear()
+        process = QProcess(self)
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.finished.connect(self._on_apply_finished)
+        process.readyReadStandardOutput.connect(
+            lambda: self._append_log(bytes(process.readAllStandardOutput()))
+        )
+        program, args = _updater_subprocess_command(self._pending_apply_sha)
+        process.start(program, args)
+        self._process = process
+
+    def _on_apply_finished(self, exit_code: int, _exit_status: object) -> None:
+        if exit_code == 0:
+            restart_app()
+            return
+        self._status_label.setText("Update failed.")
+        self._details_label.setText(
+            f"`tools.update_silentfrog` exited with code {exit_code}. "
+            "Try again later or check the log for details."
+        )
+        self._set_buttons({"Close": self._close_ok})
+
+    def _append_log(self, chunk: bytes) -> None:
+        text = chunk.decode("utf-8", errors="replace").rstrip()
+        if not text:
+            return
+        existing = self._details_label.text()
+        self._details_label.setText(f"{existing}\n{text}" if existing else text)
 
 
 def restart_app() -> None:
@@ -256,6 +279,14 @@ def restart_app() -> None:
     app = cast(QApplication | None, QApplication.instance())
     if app is not None:
         app.quit()
+
+
+def _updater_subprocess_command(revision: str) -> tuple[str, list[str]]:
+    """Build the ``(program, args)`` pair for the update subprocess.
+
+    Extracted so tests can assert it without running QProcess.
+    """
+    return sys.executable, ["-m", "tools.update_silentfrog", "--revision", revision]
 
 
 def _short_sha(sha: str) -> str:

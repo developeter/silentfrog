@@ -10,6 +10,7 @@ from silentfrog.update_gui import (  # type: ignore[reportMissingImports]
     AboutDialog,
     UpdateCheckResult,
     UpdateDialog,
+    _updater_subprocess_command,
 )
 from silentfrog.updater import (  # type: ignore[reportMissingImports]
     InstallMode,
@@ -157,3 +158,69 @@ def test_button_sets_per_simple_state(qtbot, status, expected_buttons) -> None:
     dlg = _new_dialog(qtbot)
     dlg._apply_state(UpdateCheckResult(status, _make_local(), None))
     assert _button_labels(dlg) == expected_buttons
+
+
+def test_updater_subprocess_command_pins_revision_argument() -> None:
+    program, args = _updater_subprocess_command("abc1234")
+    assert "python" in program.lower() or program.endswith("python.exe")
+    assert args == ["-m", "tools.update_silentfrog", "--revision", "abc1234"]
+
+
+def test_apply_click_transitions_to_applying_state_without_subprocess(
+    qtbot, monkeypatch
+) -> None:
+    started: dict[str, tuple[str, list[str]]] = {}
+
+    class FakeProcess:
+        MergedChannels = object()
+
+        def __init__(self, _parent) -> None:
+            pass
+
+        def setProcessChannelMode(self, _mode) -> None:
+            pass
+
+        @property
+        def finished(self):
+            class _Sig:
+                def connect(self, _fn) -> None:
+                    pass
+
+            return _Sig()
+
+        @property
+        def readyReadStandardOutput(self):
+            class _Sig:
+                def connect(self, _fn) -> None:
+                    pass
+
+            return _Sig()
+
+        def start(self, program: str, args: list[str]) -> None:
+            started["call"] = (program, args)
+
+    monkeypatch.setattr("silentfrog.update_gui.QProcess", FakeProcess)
+    dlg = _new_dialog(qtbot)
+    dlg._apply_state(
+        UpdateCheckResult(
+            UpdateStatus.UPDATE_AVAILABLE,
+            _make_local(),
+            _make_remote(sha="cafebabe" + "0" * 32),
+        )
+    )
+    apply_button = next(b for b in dlg._buttons.buttons() if "Apply" in b.text())
+    apply_button.click()
+    assert "Applying update" in dlg._status_label.text()
+    assert started["call"][1] == [
+        "-m",
+        "tools.update_silentfrog",
+        "--revision",
+        "cafebabe" + "0" * 32,
+    ]
+
+
+def test_apply_failure_shows_failure_label(qtbot) -> None:
+    dlg = _new_dialog(qtbot)
+    dlg._on_apply_finished(7, None)
+    assert "Update failed" in dlg._status_label.text()
+    assert _button_labels(dlg) == ["Close"]
