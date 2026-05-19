@@ -1,0 +1,69 @@
+# Get Silentfrog — one-click bootstrap installers
+
+This directory contains the bootstrap scripts attached to each GitHub
+Release. They are the recommended way for a teammate (or your own
+second machine) to install Silentfrog without manually setting up
+Python, virtual environments, or git.
+
+## What the scripts do
+
+Both scripts perform the same five steps:
+
+1. Detect whether a supported Python (3.12 / 3.13 / 3.14) is already on
+   the user's machine.
+2. If not, download the official installer from python.org and run it
+   silently (Windows: per-user, no admin; macOS: `sudo installer`, one
+   password prompt).
+3. Query the GitHub API for the latest commit on `dev` and download the
+   matching source archive.
+4. Extract it into the platform-appropriate install location
+   (Windows: `%LOCALAPPDATA%\Silentfrog\app`, macOS: `~/Silentfrog/app`).
+5. Run `install_silentfrog.py --revision <sha>`, which creates the
+   `.venv`, drops a Desktop launcher, and records the revision so the
+   in-app "Check for Updates" feature works.
+
+A previous install is upgraded in place: the `.venv` is preserved when
+possible, so a repeat run is fast.
+
+## How to run
+
+### Windows
+
+Download both `Get-Silentfrog.bat` and `Get-Silentfrog.ps1` into the
+same folder, then double-click `Get-Silentfrog.bat`. The `.bat` is a
+thin wrapper that launches PowerShell with `-ExecutionPolicy Bypass`
+just for the current process — your system policy is not changed.
+
+Logs land in `%LOCALAPPDATA%\Silentfrog\bootstrap.log`.
+
+### macOS (Intel and Apple Silicon)
+
+Download `Get-Silentfrog.command` and double-click it in Finder. The
+first time you run a downloaded `.command` file, macOS Gatekeeper may
+warn that the developer is unverified: right-click the file once and
+choose **Open** to bypass that warning.
+
+Logs land in `~/Library/Logs/Silentfrog-bootstrap.log`.
+
+## After the install
+
+- A "Silentfrog" launcher is added to the Desktop. Double-click it to
+  start the app.
+- Updates are one click from inside the app: **Help → Check for
+  Updates…**.
+
+## Troubleshooting
+
+If the script reports an error and stops, open the log file mentioned
+above and look at the last few lines. The most common causes are:
+
+- **No internet connection** during the Python or source download.
+- **Corporate group policy** blocking the silent Python installer on
+  Windows. In that case install Python manually from
+  [python.org](https://www.python.org/downloads/) and rerun the
+  bootstrap.
+- **Disk full** — the install needs roughly 200 MB free.
+
+For anything else, file an issue on the
+[Silentfrog repo](https://github.com/developeter/silentfrog/issues)
+and include the log file.
