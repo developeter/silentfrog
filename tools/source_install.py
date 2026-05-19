@@ -541,6 +541,14 @@ def _print_dependency_wheel_failure() -> None:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Install Silentfrog from source into a local .venv")
     parser.add_argument("--recreate-venv", action="store_true", help="Delete and recreate the local .venv before installing")
+    parser.add_argument(
+        "--revision",
+        default=None,
+        help=(
+            "Commit sha to record in .silentfrog_revision for the in-app "
+            "updater. Set by the bootstrap script; omit for dev clones."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -589,12 +597,26 @@ def main(argv: list[str] | None = None) -> int:
         return exc.returncode or 1
 
     _post_install_macos_helpers(root, paths.python)
+    if args.revision:
+        _persist_revision(root, args.revision)
     run_hint = "run_silentfrog.bat" if is_windows() else "./run_silentfrog.sh"
     print("[install] Silentfrog installed successfully.")
     print(f"[install] Start the app with: {run_hint}")
     if launcher_path is not None:
         print(f"[install] Desktop launcher created: {launcher_path}")
     return 0
+
+
+REVISION_FILE_NAME = ".silentfrog_revision"
+
+
+def _persist_revision(root: Path, revision: str) -> None:
+    # The installer runs under the user's host Python before .venv is
+    # populated, so we cannot import silentfrog itself. Write the file
+    # directly; src/silentfrog/updater.py knows the same filename.
+    path = root / REVISION_FILE_NAME
+    path.write_text(revision.strip() + os.linesep, encoding="utf-8")
+    print(f"[install] Recorded revision {revision[:7]} in {path.name}")
 
 
 def _post_install_macos_helpers(root: Path, venv_python: Path) -> None:
