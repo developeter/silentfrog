@@ -43,6 +43,9 @@ first time you run a downloaded `.command` file, macOS Gatekeeper may
 warn that the developer is unverified: right-click the file once and
 choose **Open** to bypass that warning.
 
+If Finder opens the file in Visual Studio Code (or any other text
+editor) instead of running it, see *Troubleshooting* below.
+
 Logs land in `~/Library/Logs/Silentfrog-bootstrap.log`.
 
 ## After the install
@@ -57,6 +60,21 @@ Logs land in `~/Library/Logs/Silentfrog-bootstrap.log`.
 If the script reports an error and stops, open the log file mentioned
 above and look at the last few lines. The most common causes are:
 
+- **macOS: double-clicking `Get-Silentfrog.command` opens it in Visual
+  Studio Code (or another text editor) instead of running it.** This
+  happens on developer machines where VS Code has grabbed the default
+  file association for `.command`. Three ways to fix it:
+    1. *One-time override*: right-click the file → **Open With** →
+       **Terminal.app**. If Terminal is not in the submenu, choose
+       **Other...** → set the popup to **All Applications** → pick
+       `/System/Applications/Utilities/Terminal.app`.
+    2. *Permanent fix*: right-click → **Get Info**. Under
+       *Open with* pick **Terminal.app**, then click
+       **Change All...** and confirm. Every future `.command`
+       double-click on this Mac will open in Terminal.
+    3. *Run from a shell*: `bash ~/Downloads/Get-Silentfrog.command`
+       (typed command; defeats the one-click promise but unblocks
+       you immediately).
 - **No internet connection** during the Python or source download.
 - **Corporate group policy** blocking the silent Python installer on
   Windows. In that case install Python manually from
