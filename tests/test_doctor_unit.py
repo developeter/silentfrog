@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import platform
 import sys
 from pathlib import Path
 
 import pytest
+
+
+def _expected_venv_python(repo_root: Path) -> Path:
+    if platform.system().lower().startswith("win"):
+        return repo_root / ".venv" / "Scripts" / "python.exe"
+    return repo_root / ".venv" / "bin" / "python"
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
@@ -32,7 +39,7 @@ def test_doctor_targets_for_mode_venv(tmp_path: Path) -> None:
     targets = doctor_targets_for_mode("venv", tmp_path)
     assert len(targets) == 1
     assert targets[0].label == "venv"
-    assert targets[0].python == tmp_path / ".venv" / "bin" / "python"
+    assert targets[0].python == _expected_venv_python(tmp_path)
     assert targets[0].required_imports == VENV_REQUIRED_IMPORTS
     assert targets[0].run_tests is False
 

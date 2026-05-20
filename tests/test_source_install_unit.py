@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 import json
+import platform
 from pathlib import Path
 
 import pytest
+
+
+# detect_python_org_certificate_installer's regex matches the POSIX
+# `/Library/Frameworks/...` macOS framework layout. On Windows, Path()
+# normalises that input to backslashes so the regex never fires and the
+# function always returns None; the test that exercises the happy path
+# is therefore macOS-only by design.
+_macos_only = pytest.mark.skipif(
+    platform.system().lower() != "darwin",
+    reason="detect_python_org_certificate_installer is macOS-only",
+)
 
 from tools.source_install import (
     RuntimeRequirements,
@@ -318,6 +330,7 @@ def test_render_reinstall_command_strips_quarantine() -> None:
     assert 'xattr -dr com.apple.quarantine "$script_dir"' in rendered
 
 
+@_macos_only
 def test_detect_python_org_certificate_installer_for_each_minor(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     for minor in ("3.12", "3.13", "3.14"):
