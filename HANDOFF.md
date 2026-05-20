@@ -105,28 +105,75 @@ Three install / update layers, by audience:
 ### Smoke-test the bootstrap path
 
 Bootstrap scripts are not unit-tested. When you change them, smoke-test
-on a clean target:
+on a clean target.
 
-- **Windows VM with no Python installed**: download both
-  `Get-Silentfrog.bat` and `Get-Silentfrog.ps1` into `Downloads`,
-  double-click the `.bat`. Expect a UAC for the Python silent install,
-  then a Desktop shortcut after ~1 minute. Check
-  `%LOCALAPPDATA%\Silentfrog\bootstrap.log`.
-- **macOS account with no Python installed** (Intel and/or Silicon):
-  download `Get-Silentfrog.command`, right-click → Open. Expect a
-  password prompt for `sudo installer`, then a Desktop launcher.
-  Check `~/Library/Logs/Silentfrog-bootstrap.log`.
-- **macOS / Windows with Python already installed**: same flow but no
-  install prompt; the bootstrap goes straight to the source download.
+#### Windows (validated 2026-05-19 on the maintainer's machine)
+
+1. On a Windows machine **without** Python installed, download
+   `Get-Silentfrog.bat` and `Get-Silentfrog.ps1` from the latest
+   GitHub Release into the same folder (Downloads is fine).
+2. Double-click `Get-Silentfrog.bat`. A console window opens.
+3. Expect a single UAC prompt for the silent Python install.
+4. After ~1 minute total, expect a Silentfrog shortcut on the Desktop
+   and the app to be installed at `%LOCALAPPDATA%\Silentfrog\app\`.
+5. Open `%LOCALAPPDATA%\Silentfrog\bootstrap.log` — should show
+   `[update] Recorded <sha> in .silentfrog_revision` near the end and
+   no `ERROR` lines.
+6. Double-click the Desktop shortcut → app launches.
+7. **Help → Check for Updates…** → "You're on the latest version
+   (<sha>)" (because the bootstrap just pinned the latest sha).
+8. **Help → About Silentfrog** → version, sha, "User install", repo
+   link.
+
+#### macOS Apple Silicon
+
+1. On an Apple Silicon Mac (M1/M2/M3/...) **without** Python
+   3.12/3.13/3.14 installed, download `Get-Silentfrog.command`.
+2. Right-click → **Open** the first time (Gatekeeper blocks a
+   double-click on unsigned `.command` files).
+3. Terminal opens with progress lines.
+4. Expect a password prompt for `sudo installer` (the python.org pkg
+   is universal2, so the same `.pkg` covers Apple Silicon and Intel).
+5. After ~1 minute, expect `~/Silentfrog/Silentfrog.command` (the
+   Desktop launcher created by `install_silentfrog.py`).
+6. Open `~/Library/Logs/Silentfrog-bootstrap.log` — same checks as
+   above.
+7. Same Help-menu checks as on Windows.
+
+#### macOS Intel
+
+Identical to Apple Silicon. The python.org `python-3.12.7-macos11.pkg`
+is universal2 (one binary for both architectures), so the script
+detects `uname -m` only for logging — the same `.pkg` URL is used in
+both branches and `sudo installer` produces a Python that runs natively
+on Intel. The Silentfrog source is pure Python plus PySide6 wheels, and
+PySide6 has dedicated Intel and Apple Silicon wheels on PyPI; pip
+selects the right one from the running Python's architecture.
+
+If the Intel test reveals an issue not present on Apple Silicon, the
+likely culprits are: (a) a runtime dependency wheel that lacks an
+`x86_64` mac build (the source installer's wheel-only preflight will
+say so), or (b) macOS version compatibility (PySide6 6.11 requires
+macOS 11+).
+
+#### macOS / Windows with Python already installed
+
+Same flow on either OS: the bootstrap detects an existing Python via
+`py --list` (Windows) or `python3.NN --version` (macOS), skips the
+silent installer entirely, and goes straight to the source download.
+Expect the install to complete in 15-30 seconds total.
 
 ### Smoke-test the in-app updater
 
 On a user-mode install (no `.git`):
 
-1. Edit `.silentfrog_revision` to an older sha known to exist on `dev`.
+1. Edit `.silentfrog_revision` in the install root
+   (`%LOCALAPPDATA%\Silentfrog\app\` on Windows,
+   `~/Silentfrog/app/` on macOS) to an older sha known to exist on
+   `dev` — `git log origin/dev --oneline` gives a list.
 2. Launch Silentfrog → **Help → Check for Updates…** → expect
-   "Update available". Click Apply and restart → expect the app to
-   relaunch with the newer revision.
+   "Update available". Click **Apply and restart** → expect the app
+   to relaunch with the newer revision.
 3. Re-open the dialog → expect "You're on the latest version".
 
 On a dev clone:
@@ -134,6 +181,31 @@ On a dev clone:
 1. Launch via `poetry run silentfrog` → **Help → Check for Updates…**
    → expect "Developer install. Use `git pull` instead."
 2. There is no Apply path; verify the working tree is untouched.
+
+### Upgrading from an old dev clone to the new install/update story
+
+Specific scenario: a colleague (or your second machine) already has
+a `git clone` of Silentfrog from before this overhaul. How do they get
+the new in-app updater?
+
+- **Option A — stay on the dev clone (recommended for developers)**:
+  `git pull` on the existing clone. The new code is on `dev`. The
+  `Help → Check for Updates…` menu now exists; in dev mode it shows
+  the "use `git pull` instead" message, and that's the end of the
+  loop. Future updates: just `git pull` from the terminal as before.
+- **Option B — switch to the bootstrap install (for colleagues who
+  no longer want to deal with git)**: in a fresh location, run
+  `Get-Silentfrog.command` (macOS) or `Get-Silentfrog.bat` (Windows).
+  The bootstrap lands in `~/Silentfrog/app` or
+  `%LOCALAPPDATA%\Silentfrog\app`, which is separate from the old git
+  clone, so both coexist. After this install, **Help → Check for
+  Updates → Apply and restart** works as designed, and the old git
+  clone can be deleted at the user's convenience (`rm -rf
+  ~/old-silentfrog-clone`).
+
+There is no "convert a git clone into a user install in place"
+shortcut, by design — the in-app updater never modifies a working
+tree under git control, even on the maintainer's machines.
 
 ## Important Modules
 
