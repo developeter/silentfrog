@@ -59,6 +59,28 @@ def test_site_crawl_window_defaults(qtbot) -> None:
     assert win.lbl_history.text() == "History: no completed crawl yet."
 
 
+def test_site_crawl_setup_form_grows_fields_to_row_width(qtbot) -> None:
+    """Regression: macOS Qt 6.11 defaults a QFormLayout to
+    `FieldsStayAtSizeHint`, so the LineEdits ended up small and
+    centred in the window. We pin the policy on every platform.
+    """
+    from qtpy import QtWidgets
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    forms = win.setup_page.findChildren(QtWidgets.QFormLayout)
+    assert forms, "setup page must own at least one QFormLayout"
+    form = forms[0]
+    assert (
+        form.fieldGrowthPolicy()
+        == QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+    )
+    assert (
+        form.rowWrapPolicy()
+        == QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows
+    )
+
+
 def test_site_crawl_window_opens_history_browser(monkeypatch, qtbot, tmp_path: Path) -> None:
     opened: dict[str, object] = {}
 

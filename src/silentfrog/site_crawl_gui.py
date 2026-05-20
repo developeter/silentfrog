@@ -259,6 +259,14 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _build_source_form(self) -> QtWidgets.QFormLayout:
         form = QtWidgets.QFormLayout()
+        # macOS Qt 6.11 defaults a QFormLayout's FieldGrowthPolicy to
+        # `FieldsStayAtSizeHint`, which renders our QLineEdit / QPlainTextEdit
+        # rows at their preferred (small) width centred in the window. Force
+        # the fields to fill the available row width across all platforms.
+        form.setFieldGrowthPolicy(
+            QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows)
         self.base_url = QtWidgets.QLineEdit()
         self.base_url.setPlaceholderText("https://www.example.com")
         self.sitemap_url = QtWidgets.QLineEdit()

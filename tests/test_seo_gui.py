@@ -642,6 +642,22 @@ def test_seo_window_configures_scrollable_tabs(qtbot) -> None:
     assert "min-width: 0px" in win.tabs.styleSheet()
     assert win.body_stack.currentWidget() is win._intro_panel
 
+
+def test_seo_window_url_combo_does_not_overflow_screen(qtbot) -> None:
+    """Regression: url_edit was sizing to ~1880px because no
+    SizeAdjustPolicy was set, pushing the window past the screen
+    width on smaller displays.
+    """
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+
+    assert (
+        win.url_edit.sizeAdjustPolicy()
+        == QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    assert win.url_edit.minimumContentsLength() == 40
+    assert win.url_edit.sizeHint().width() < 800
+
 def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
     _configure_settings(tmp_path)
     win = WebpageSeoWindow()

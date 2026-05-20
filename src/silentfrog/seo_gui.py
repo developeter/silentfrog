@@ -197,6 +197,19 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.url_edit.setMaxVisibleItems(10)
         self.url_edit.setToolTip("Recent URLs")
         self.url_edit.setMinimumHeight(30)
+        # Cap the combo's preferred width to ~40 chars so a single long
+        # recent URL (or an oversized custom view) cannot blow the window
+        # past the screen width. The widget still grows with the layout
+        # via setSizePolicy below, and the dropdown popup always shows
+        # full items.
+        self.url_edit.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.url_edit.setMinimumContentsLength(40)
+        self.url_edit.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
         font = self.url_edit.font()
         font.setPointSize(font.pointSize() + 1)
         self.url_edit.setFont(font)
