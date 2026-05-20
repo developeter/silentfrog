@@ -60,6 +60,19 @@ Logs land in `~/Library/Logs/Silentfrog-bootstrap.log`.
 If the script reports an error and stops, open the log file mentioned
 above and look at the last few lines. The most common causes are:
 
+- **macOS: "permission denied" or "you don't have permission to open"
+  when running the script.** Safari and Chrome sometimes strip the
+  execute bit on download, and Gatekeeper may also attach a
+  `com.apple.quarantine` extended attribute that blocks execution. Run
+  the following one-liner in Terminal against the actual download
+  path, then double-click again:
+
+  ```
+  chmod +x ~/Downloads/Get-Silentfrog.command && xattr -dr com.apple.quarantine ~/Downloads/Get-Silentfrog.command
+  ```
+
+  Replace `~/Downloads/` with the real folder if you moved the file.
+
 - **macOS: double-clicking `Get-Silentfrog.command` opens it in Visual
   Studio Code (or another text editor) instead of running it.** This
   happens on developer machines where VS Code has grabbed the default
