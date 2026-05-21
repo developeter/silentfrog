@@ -60,18 +60,62 @@ Logs land in `~/Library/Logs/Silentfrog-bootstrap.log`.
 If the script reports an error and stops, open the log file mentioned
 above and look at the last few lines. The most common causes are:
 
-- **macOS: "permission denied" or "you don't have permission to open"
-  when running the script.** Safari and Chrome sometimes strip the
-  execute bit on download, and Gatekeeper may also attach a
-  `com.apple.quarantine` extended attribute that blocks execution. Run
-  the following one-liner in Terminal against the actual download
-  path, then double-click again:
+- **macOS Sequoia (15.x): "<file> non è stato aperto" with only
+  *Sposta nel cestino* / *Move to Trash* and *Fine* / *Done* buttons.**
+  Apple removed the right-click → Open bypass in Sequoia. The new
+  flow is:
+
+  1. Close the dialog (*Fine* / *Done*).
+  2. Open **System Settings → Privacy & Security**.
+  3. Scroll down to the **Security** section near the bottom.
+  4. Find the line *"Get-Silentfrog.command è stato bloccato perché
+     non proviene da uno sviluppatore identificato"* (or English
+     equivalent) and click **Apri comunque** / **Open Anyway**.
+  5. Authenticate with your password or Touch ID.
+  6. A new dialog appears with an **Apri** / **Open** button — click
+     it. Terminal opens and the bootstrap runs.
+
+  After this one-time approval, double-clicking the same file works
+  without further prompts.
+
+- **macOS (any version): "permission denied" or you'd rather skip
+  Gatekeeper entirely.** Safari and Chrome sometimes strip the execute
+  bit on download, and even when they don't, the quarantine attribute
+  triggers Gatekeeper. Strip both at once. Open Terminal, type the
+  first part of the command **with the trailing space**, then drag
+  the `Get-Silentfrog.command` file from Finder onto the Terminal
+  window (it pastes the full path), then press Return:
+
+  ```
+  chmod +x <drag file here>
+  ```
+
+  Then repeat for the quarantine attribute:
+
+  ```
+  xattr -dr com.apple.quarantine <drag file here>
+  ```
+
+  Or, if you know the full path (e.g. it's in `~/Downloads/`), paste
+  this single line and hit Return:
 
   ```
   chmod +x ~/Downloads/Get-Silentfrog.command && xattr -dr com.apple.quarantine ~/Downloads/Get-Silentfrog.command
   ```
 
   Replace `~/Downloads/` with the real folder if you moved the file.
+
+- **macOS: "fully bypass for testing".** A maintainer smoke-testing
+  the bootstrap from a dev clone (not a real download) can launch the
+  script directly without the Gatekeeper dance:
+
+  ```
+  bash <path to Get-Silentfrog.command>
+  ```
+
+  This loses the colleague-realistic Gatekeeper experience, so for
+  a final test before sharing the script use one of the Open Anyway
+  paths above.
 
 - **macOS: double-clicking `Get-Silentfrog.command` opens it in Visual
   Studio Code (or another text editor) instead of running it.** This

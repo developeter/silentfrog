@@ -1,6 +1,6 @@
 # Silentfrog Handoff
 
-Last updated: 2026-05-19
+Last updated: 2026-05-21
 
 ## Working Rules
 
@@ -23,9 +23,9 @@ Last updated: 2026-05-19
 ## Current Git Context
 
 - Main working branch in recent work: `dev`.
-- Latest pushed commit at handoff time:
-  - `f6681a1 Support Python 3.14 installers and packages`
-- The dev branch carries an in-progress install/package hardening series (not yet committed) — see "Install / package overhaul" below.
+- Latest pushed commit at handoff time: `7351838 Fix three small GUI regressions on theme + tabs + logo` (plus the bootstrap-README Sequoia note in the same series).
+- Working tree on the maintainer's Windows machine is clean.
+- The bootstrap publish workflow (`.github/workflows/release-bootstrap.yml`) is wired up but has not yet been triggered — no `v*` tag exists yet, so no GitHub Release has the bootstrap files attached.
 
 ## Product Direction
 
@@ -206,6 +206,148 @@ the new in-app updater?
 There is no "convert a git clone into a user install in place"
 shortcut, by design — the in-app updater never modifies a working
 tree under git control, even on the maintainer's machines.
+
+### Continuation guide — Mac smoke test from a fresh chat (2026-05-21)
+
+When you open a new Claude conversation on the Mac (Intel or Apple
+Silicon), after a `git pull` on `dev`, brief the new instance with the
+following so it has the context.
+
+**Quick context to paste at the top of the new session:**
+
+> Repo: `silentfrog` on branch `dev`, latest commit `7351838` (or
+> later — `git log --oneline -1` for current). We're testing the
+> macOS side of the install/update overhaul that landed in commits
+> `2ef77b1..7351838`. The Windows machine already validated commits
+> end-to-end and pushed; this Mac session smoke-tests the bootstrap
+> script and the in-app updater. Reply in English; respect
+> `AGENTS.md` rules.
+
+**Step-by-step smoke test on Mac:**
+
+1. **Confirm the dev clone is on the latest dev**:
+   ```
+   cd ~/path/to/silentfrog-clone
+   git status      # expect clean working tree
+   git pull origin dev
+   poetry install  # picks up any test deps
+   poetry run python tools/doctor.py --quick   # expect OK
+   ```
+
+2. **Visually verify the GUI fixes** (commits `83f4fae` + `7351838`):
+   ```
+   poetry run silentfrog
+   ```
+   - Home window opens, frog logo visible.
+   - **Help** menu lives in the system menu bar at the top of the
+     screen (Apple convention — not in the window). It contains
+     **Check for Updates…** and **About Silentfrog**.
+   - Help → About → version, revision (your local sha), install
+     mode "Developer (git clone)", repo link.
+   - Help → Check for Updates → after ~1s shows
+     *"You're on a developer install (git clone). Use `git pull` to
+     update."* This is the correct dev-mode terminal state.
+   - Click the gear icon on the home window → Settings dialog opens.
+     The selected theme radio button should have a clearly visible
+     filled green circle. Switch themes and click OK → the frog
+     logo on the home window stays intact (no clipping).
+   - Click **Single Page SEO Check** → the window must fit your
+     screen width (used to overflow to 1989px; now caps at ~950).
+     The tab labels along the top must sit flush left, not centered.
+   - Click **Site Crawl** → on the setup page, the form fields
+     (Base URL, Sitemap URL, Include prefixes, etc.) must fill the
+     row width. Used to render small and centered on macOS.
+   - Close the app.
+
+3. **Smoke-test the bootstrap script**. The bootstrap is meant for
+   non-dev colleagues, so the test must simulate what they see —
+   downloading the file fresh and hitting the macOS Sequoia
+   Gatekeeper dialog. Three paths, depending on what you want to
+   validate:
+
+   **3a. Full end-to-end (publish a Release first).** From the
+   Windows machine or any GitHub UI, push a `v1.0.1` tag — the
+   `release-bootstrap.yml` workflow will create a draft Release with
+   `Get-Silentfrog.command`, `Get-Silentfrog.bat`, and
+   `Get-Silentfrog.ps1` attached. Publish the draft from the GitHub
+   web UI. On the Mac, open the Release page in Safari, download
+   `Get-Silentfrog.command` (Safari attaches the quarantine xattr,
+   reproducing the colleague experience), then double-click it. See
+   `bootstrap/README.md` for the Sequoia Gatekeeper bypass via
+   System Settings → Privacy & Security → Open Anyway. After
+   bypass, expect the bootstrap to install to `~/Silentfrog/app`
+   and create a Desktop launcher.
+
+   **3b. Simulated download (faster, no Release needed).** Copy the
+   committed file to a fresh location and manually attach the
+   quarantine xattr to reproduce the Gatekeeper experience:
+   ```
+   cp ~/path/to/silentfrog-clone/bootstrap/Get-Silentfrog.command ~/Desktop/
+   xattr -w com.apple.quarantine "0083;00000000;Safari;|local-test" ~/Desktop/Get-Silentfrog.command
+   chmod -x ~/Desktop/Get-Silentfrog.command
+   ```
+   Then double-click in Finder and walk through the same Sequoia
+   bypass flow.
+
+   **3c. Bypass Gatekeeper entirely (just validate the script
+   logic).** From Terminal:
+   ```
+   bash ~/path/to/silentfrog-clone/bootstrap/Get-Silentfrog.command
+   ```
+   Doesn't reproduce the Gatekeeper UX but verifies the install
+   path otherwise.
+
+4. **After a successful bootstrap install (3a or 3b)**, the user-mode
+   install lives at `~/Silentfrog/app`. Test the in-app updater
+   end-to-end on it:
+   - Double-click the Desktop **Silentfrog** launcher → app opens.
+   - Help → Check for Updates → expect *"You're on the latest
+     version (<sha>)."* — install mode "User install" (not
+     Developer) because there's no `.git` directory in
+     `~/Silentfrog/app`.
+   - Force the update path: edit `~/Silentfrog/app/.silentfrog_revision`
+     to an older sha known to exist on dev. Restart the app.
+     Help → Check for Updates → expect *"Update available"* with an
+     **Apply and restart** button. Click it. Expect Terminal-style
+     log lines streaming in the dialog while `tools/update_silentfrog.py`
+     runs, then the app relaunches at the latest sha.
+   - Re-check → back to "latest version".
+
+5. **Tear-down (optional):** if you want to clean the bootstrap
+   install after smoke-testing:
+   ```
+   rm -rf ~/Silentfrog
+   rm ~/Desktop/Silentfrog.command   # the launcher created by install_silentfrog.py
+   rm ~/Library/Logs/Silentfrog-bootstrap.log   # bootstrap log
+   ```
+   Your dev clone is untouched.
+
+**Known gotchas on macOS Sequoia (15.x)**
+
+- Right-click → Open *no longer bypasses Gatekeeper* (Apple removed
+  it). System Settings → Privacy & Security → Open Anyway is the only
+  GUI bypass.
+- The first Gatekeeper dialog has only "Sposta nel cestino" / "Fine"
+  buttons (no Open). The second one (after Open Anyway in System
+  Settings) is the one with the **Open** button.
+- `bootstrap/README.md` documents all three Sequoia bypass paths.
+
+**Files NOT to touch in this session**
+
+- `experimental/packaging/*` — archived Nuitka path, kept only for
+  history. Don't try to run `package_app.py` or `pysidedeploy.spec`.
+- `.github/workflows/package-app.yml` — already deleted in commit
+  `00b127f`. Replaced by `release-bootstrap.yml`.
+
+**If something fails**, gather:
+- The output of `git rev-parse HEAD` (which commit is being tested)
+- `poetry run python tools/doctor.py --mode both` (or `--mode poetry`
+  on a dev clone)
+- `~/Library/Logs/Silentfrog-bootstrap.log` for bootstrap failures
+- `~/Silentfrog/app/.silentfrog_revision` content if testing the updater
+
+Report back here and we either fix in place (small change) or capture
+as a separate task.
 
 ## Important Modules
 
