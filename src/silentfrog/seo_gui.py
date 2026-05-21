@@ -34,6 +34,7 @@ from .tabs import (
     SchemaTab,
     SerpTab,
 )
+from .theme import left_align_tab_bar
 from .workers import run_crawl, run_image_analysis
 
 import webbrowser
@@ -248,6 +249,10 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.setElideMode(QtCore.Qt.TextElideMode.ElideRight)
         self.tabs.tabBar().setExpanding(False)
         self.tabs.setStyleSheet("QTabBar::tab { min-width: 0px; }")
+        # macOS centres the tab bar by default; force a consistent
+        # left-aligned layout on every OS so the tab order reads the
+        # same as on Windows / Linux.
+        left_align_tab_bar(self.tabs)
 
     def _apply_initial_window_size(self) -> None:
         screen = self.screen() or QtWidgets.QApplication.primaryScreen()

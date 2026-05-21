@@ -658,6 +658,18 @@ def test_seo_window_url_combo_does_not_overflow_screen(qtbot) -> None:
     assert win.url_edit.minimumContentsLength() == 40
     assert win.url_edit.sizeHint().width() < 800
 
+
+def test_seo_window_tab_bar_is_left_aligned(qtbot) -> None:
+    """Regression: macOS centres tab bars by default, while Windows
+    and Linux left-align them. `left_align_tab_bar` anchors the bar
+    flush left via a stylesheet rule so the experience is consistent.
+    """
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    sheet = win.tabs.styleSheet()
+    assert "QTabWidget::tab-bar { left: 0px; alignment: left; }" in sheet
+    assert win.tabs.tabBar().expanding() is False
+
 def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
     _configure_settings(tmp_path)
     win = WebpageSeoWindow()

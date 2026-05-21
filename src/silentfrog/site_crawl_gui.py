@@ -44,7 +44,7 @@ from .tabs import (
     SerpTab,
     SocialTab,
 )
-from .theme import current_theme, status_brushes
+from .theme import current_theme, left_align_tab_bar, status_brushes
 from .workers import run_image_analysis, run_site_crawl
 
 _SETUP_PAGE = 0
@@ -648,6 +648,7 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(self._build_actions())
         self.tabs = QtWidgets.QTabWidget()
+        left_align_tab_bar(self.tabs)
         layout.addWidget(self.tabs)
         self._populate_tabs(payload)
         self.imageSig.connect(self._handle_image_update)

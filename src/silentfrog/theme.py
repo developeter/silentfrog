@@ -4,7 +4,24 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from qtpy import QtGui, QtWidgets
+from qtpy import QtCore, QtGui, QtWidgets
+
+
+# `QTabWidget::tab-bar { left: 0px }` anchors the QTabBar to the left
+# edge of the QTabWidget's top area, neutralising macOS's default of
+# centring the bar within the available width. Combined with
+# `QTabBar::setExpanding(False)` the tabs sit flush left on every OS.
+_LEFT_ALIGN_TAB_STYLESHEET = "QTabWidget::tab-bar { left: 0px; alignment: left; }"
+
+
+def left_align_tab_bar(tab_widget: QtWidgets.QTabWidget) -> None:
+    """Anchor the tab bar of ``tab_widget`` to the left on every OS."""
+    existing = tab_widget.styleSheet()
+    if _LEFT_ALIGN_TAB_STYLESHEET in existing:
+        return
+    combined = f"{existing} {_LEFT_ALIGN_TAB_STYLESHEET}".strip()
+    tab_widget.setStyleSheet(combined)
+    tab_widget.tabBar().setExpanding(False)
 
 DARK_STYLESHEET = """
 QWidget            { background: #1e1e1e; color: #f0f0f0; }
@@ -21,6 +38,11 @@ QTableView QHeaderView::section {
     padding: 4px;
     border: 1px solid #555555;
 }
+QRadioButton                       { spacing: 8px; padding: 4px; }
+QRadioButton::indicator            { width: 16px; height: 16px; border-radius: 8px; }
+QRadioButton::indicator:unchecked  { background: #1e1e1e; border: 1px solid #888; }
+QRadioButton::indicator:checked    { background: #2ecc71; border: 2px solid #2ecc71; }
+QRadioButton::indicator:checked:hover { background: #45e08a; }
 """
 
 LIGHT_STYLESHEET = """
@@ -38,6 +60,11 @@ QTableView QHeaderView::section {
     padding: 4px;
     border: 1px solid #555555;
 }
+QRadioButton                       { spacing: 8px; padding: 4px; }
+QRadioButton::indicator            { width: 16px; height: 16px; border-radius: 8px; }
+QRadioButton::indicator:unchecked  { background: #ffffff; border: 1px solid #777; }
+QRadioButton::indicator:checked    { background: #0f9d58; border: 2px solid #0f9d58; }
+QRadioButton::indicator:checked:hover { background: #18b367; }
 """
 
 
@@ -112,4 +139,12 @@ def status_brushes(dark: bool | None = None) -> StatusBrushPalette:
     )
 
 
-__all__ = ["StatusBrushPalette", "status_brushes", "apply_theme", "current_theme", "DARK_STYLESHEET", "LIGHT_STYLESHEET"]
+__all__ = [
+    "StatusBrushPalette",
+    "status_brushes",
+    "apply_theme",
+    "current_theme",
+    "left_align_tab_bar",
+    "DARK_STYLESHEET",
+    "LIGHT_STYLESHEET",
+]

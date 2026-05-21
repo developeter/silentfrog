@@ -50,6 +50,14 @@ class HomeWindow(QMainWindow):
             .scaledToWidth(120, Qt.SmoothTransformation)  # type: ignore[reportAttributeAccessIssue]
         )
         logo.setPixmap(logo_pix)
+        # Pin the label to fit the pixmap so a stylesheet re-polish on
+        # theme change cannot shrink it and clip the frog (the macOS
+        # repro: open Settings, switch theme, OK -> logo half hidden).
+        logo.setMinimumSize(logo_pix.size())
+        logo.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
         self.main_layout.addWidget(logo)
 
         actions = (
