@@ -45,9 +45,26 @@ function Write-Log {
 }
 
 function Find-PythonVersion {
+    # In Windows PowerShell 5.1, `2>&1` on a native command wraps each
+    # stderr line as a NativeCommandError, which combined with
+    # `$ErrorActionPreference = "Stop"` aborts on the first
+    # missing-version probe. Use `py --list` once instead and parse
+    # the (stdout-only) listing.
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+        return $null
+    }
+    $listing = ""
+    try {
+        $listing = (& py --list) -join "`n"
+    } catch {
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
     foreach ($v in @("3.14", "3.13", "3.12")) {
-        $null = & py "-$v" --version 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        $pattern = "-V:" + [regex]::Escape($v) + "\b"
+        if ($listing -match $pattern) {
             return $v
         }
     }
