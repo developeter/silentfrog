@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -93,40 +94,76 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _refresh_install(repo_root: Path, deps_changed: bool) -> int:
-    """Bring ``.venv`` in sync with the freshly written sources.
+    """Bring the installed package in sync with the freshly written sources.
 
     When ``deps_changed`` is True we re-run the full ``install_silentfrog.py``
-    so pip can resolve any new runtime requirements. When it's False we
-    only refresh the ``silentfrog`` package itself, which is much faster.
+    so pip can resolve any new runtime requirements. On Windows, that
+    regenerates ``.venv/Scripts/silentfrog.exe`` which conflicts with a
+    still-running GUI process; the caller (the in-app updater) is
+    expected to restart the GUI after this returns.
+
+    When ``deps_changed`` is False we sync the source files directly
+    into the venv's ``site-packages/silentfrog/`` directory, bypassing
+    pip entirely. This is safer than ``pip install . --no-deps`` for
+    two reasons:
+
+    * pip uninstalls the existing package before installing the new
+      wheel; a Windows file-lock on a child binary then leaves the
+      install broken (no silentfrog package at all in site-packages).
+      ``shutil.copy2`` is non-destructive — partial failure means some
+      files are old, but the package still imports.
+    * pip would regenerate the ``silentfrog.exe`` console-script
+      wrapper in ``.venv/Scripts/``, which Windows cannot overwrite
+      while the GUI is still using it. Direct file copy never touches
+      ``Scripts/``.
     """
     if deps_changed:
         return _run([sys.executable, "install_silentfrog.py"], cwd=repo_root)
-    venv_python = _venv_python(repo_root)
-    return _run(
-        [
-            str(venv_python),
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "--no-deps",
-            "--no-build-isolation",
-            ".",
-        ],
-        cwd=repo_root,
-    )
+    return _sync_site_packages(repo_root)
+
+
+def _sync_site_packages(repo_root: Path) -> int:
+    """Copy ``src/silentfrog/`` into the venv's installed package dir.
+
+    Skips ``__pycache__`` (Python regenerates it on next import).
+    """
+    source_pkg = repo_root / "src" / "silentfrog"
+    target_pkg = _venv_site_packages(repo_root) / "silentfrog"
+    if not source_pkg.is_dir():
+        print(f"[update] source package missing: {source_pkg}")
+        return 1
+    if not target_pkg.is_dir():
+        print(f"[update] installed package missing: {target_pkg}")
+        return 1
+    copied = 0
+    for src_file in source_pkg.rglob("*"):
+        if not src_file.is_file():
+            continue
+        relative = src_file.relative_to(source_pkg)
+        if relative.parts and relative.parts[0] == "__pycache__":
+            continue
+        dest = target_pkg / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_file, dest)
+        copied += 1
+    print(f"[update] Synced {copied} files into {target_pkg}")
+    return 0
+
+
+def _venv_site_packages(repo_root: Path) -> Path:
+    if os.name == "nt":
+        return repo_root / ".venv" / "Lib" / "site-packages"
+    libs = sorted((repo_root / ".venv" / "lib").glob("python3.*"))
+    if not libs:
+        # Fallback to the tested baseline if no python3.* dir exists yet.
+        return repo_root / ".venv" / "lib" / "python3.12" / "site-packages"
+    return libs[0] / "site-packages"
 
 
 def _run(command: list[str], cwd: Path) -> int:
     print(f"[update] {' '.join(command)}")
     result = subprocess.run(command, cwd=cwd, check=False)
     return result.returncode
-
-
-def _venv_python(repo_root: Path) -> Path:
-    if os.name == "nt":
-        return repo_root / ".venv" / "Scripts" / "python.exe"
-    return repo_root / ".venv" / "bin" / "python"
 
 
 if __name__ == "__main__":
