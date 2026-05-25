@@ -35,6 +35,12 @@ class HomeWindow(QMainWindow):
         self.setWindowTitle("Silentfrog")
         self.setMinimumSize(400, 200)
 
+        # Each click on a primary action opens a new top-level QWidget.
+        # We must hold a Python reference to every one of them or
+        # PySide6 will free the C++ side as soon as a previous click's
+        # local variable goes out of scope, crashing the running window.
+        self._child_windows: list[QtWidgets.QWidget] = []
+
         self._build_help_menu()
 
         self.main_layout = QtWidgets.QVBoxLayout()
@@ -91,20 +97,35 @@ class HomeWindow(QMainWindow):
         self.setCentralWidget(container)
 
     def open_redirect(self) -> None:
-        self.redir = RedirectWindow()
-        self.redir.show()
+        self._spawn_child(RedirectWindow())
 
     def open_seo(self) -> None:
         from .seo_gui import WebpageSeoWindow
 
-        self.seo_win = WebpageSeoWindow()
-        self.seo_win.show()
+        self._spawn_child(WebpageSeoWindow())
 
     def open_site_crawl(self) -> None:
         from .site_crawl_gui import SiteCrawlWindow
 
-        self.site_crawl_win = SiteCrawlWindow()
-        self.site_crawl_win.show()
+        self._spawn_child(SiteCrawlWindow())
+
+    def _spawn_child(self, window: QtWidgets.QWidget) -> None:
+        """Show ``window`` and retain a strong reference to it.
+
+        Each click on a primary action opens an independent top-level
+        window. Callers that store the window on ``self`` end up
+        overwriting the previous one — losing its Python ref while it
+        is still visible, which segfaults PySide6.
+        """
+        self._child_windows.append(window)
+        window.destroyed.connect(lambda *_: self._forget_child(window))
+        window.show()
+
+    def _forget_child(self, window: QtWidgets.QWidget) -> None:
+        try:
+            self._child_windows.remove(window)
+        except ValueError:
+            pass
 
     def _open_settings(self) -> None:
         dlg = _SettingsDialog(self)

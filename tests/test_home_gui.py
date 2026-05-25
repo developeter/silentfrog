@@ -16,6 +16,27 @@ def test_home_window_exposes_three_primary_actions(qtbot) -> None:
     assert "Site Crawl" in labels
 
 
+def test_home_window_can_open_multiple_seo_windows_without_dropping_refs(
+    qtbot,
+) -> None:
+    """Regression: clicking 'Single Page SEO Check' twice used to drop
+    the Python reference to the first window (overwritten by the
+    second), which segfaults PySide6 while the first window is still
+    visible. Both windows must now be retained.
+    """
+    win = HomeWindow()
+    qtbot.addWidget(win)
+    win.open_seo()
+    win.open_seo()
+    win.open_site_crawl()
+    win.open_redirect()
+    assert len(win._child_windows) == 4
+    # Every retained child must still be a live QWidget instance.
+    for child in win._child_windows:
+        assert isinstance(child, QtWidgets.QWidget)
+        assert child.isVisible() or not child.isHidden()  # show() was called
+
+
 def test_home_window_logo_label_holds_pixmap_size(qtbot) -> None:
     """Regression: when the user toggled the theme via the gear dialog,
     a stylesheet repolish was shrinking the QLabel below its pixmap
