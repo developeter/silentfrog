@@ -29,7 +29,10 @@ trap 'rm -rf "$STAGING"' EXIT
 mkdir -p "$INSTALL_ROOT" "$LOG_DIR"
 
 log() {
-    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" | tee -a "$LOG_FILE"
+    # Send progress lines to stderr so command substitutions like
+    # `sha="$(get_latest_sha ...)"` capture only the function's real return
+    # value, not the log noise.
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*" | tee -a "$LOG_FILE" >&2
 }
 
 fail() {
