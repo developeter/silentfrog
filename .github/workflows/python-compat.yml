@@ -19,9 +19,12 @@ jobs:
           - os: windows-latest
             label: windows-x64
             python-version: "3.13"
-          - os: windows-latest
-            label: windows-x64
-            python-version: "3.14"
+          # Python 3.14 + Windows is intentionally skipped: numpy 2.2.x
+          # (our floor in pyproject.toml) does not ship a working cp314
+          # Windows wheel and crashes with "Windows fatal exception:
+          # access violation" on import. Restore once numpy 2.3+ is the
+          # supported floor and we re-validate on 3.14. Tracked alongside
+          # the in-app update story.
           - os: macos-15-intel
             label: macos-intel
             python-version: "3.12"
