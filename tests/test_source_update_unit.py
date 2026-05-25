@@ -13,10 +13,41 @@ if str(_REPO_ROOT) not in sys.path:
 from tools.source_update import (  # noqa: E402
     build_update_plan,
     copy_source_files,
+    download_archive,
     extract_archive,
     pyproject_changed,
     validate_archive,
 )
+
+
+def test_download_archive_passes_certifi_ssl_context(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, *args, **kwargs):
+            return b""
+
+    def fake_urlopen(req, timeout, context):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return _FakeResponse()
+
+    monkeypatch.setattr("tools.source_update.urlopen", fake_urlopen)
+    plan = build_update_plan("abc1234", "developeter", "silentfrog")
+    download_archive(plan, tmp_path / "archive.zip")
+    import ssl
+
+    assert isinstance(captured["context"], ssl.SSLContext)
+    assert captured["context"].cert_store_stats()["x509_ca"] > 0
+    assert captured["url"].endswith("/abc1234.zip")
+    assert captured["timeout"] == 60
 
 
 def _make_archive(zip_path: Path, files: dict[str, str], top_dir: str) -> Path:

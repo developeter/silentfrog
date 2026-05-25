@@ -10,11 +10,22 @@ from __future__ import annotations
 import hashlib
 import io
 import shutil
+import ssl
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 from urllib.request import Request, urlopen
+
+import certifi
+
+
+# python.org Framework Python on macOS ships with an empty SSL trust
+# store unless ``Install Certificates.command`` was run. urllib then
+# refuses HTTPS to github.com with CERTIFICATE_VERIFY_FAILED. certifi
+# is already a runtime dependency, so the updater stays self-contained
+# on every supported Python install.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 # File and directory names at the install root that ``copy_source_files``
@@ -54,7 +65,7 @@ def download_archive(
     log(f"[update] downloading {plan.archive_url}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     request = Request(plan.archive_url, headers={"Accept": "application/octet-stream"})
-    with urlopen(request, timeout=60) as response, destination.open("wb") as out:
+    with urlopen(request, timeout=60, context=_SSL_CONTEXT) as response, destination.open("wb") as out:
         shutil.copyfileobj(response, out)
     return destination
 
