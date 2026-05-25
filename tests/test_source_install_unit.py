@@ -224,10 +224,27 @@ def test_create_desktop_launcher_writes_command_file_on_unix(tmp_path: Path) -> 
     root.mkdir()
     launcher = create_desktop_launcher(root, system_name="Darwin", home=tmp_path)
 
+    # The Desktop entry is now a symlink to the real launcher inside the
+    # install dir; the resolved target carries the renderer output.
     assert launcher == tmp_path / "Desktop" / "Silentfrog.command"
-    assert launcher.is_file()
-    content = launcher.read_text(encoding="utf-8")
+    assert launcher.is_symlink()
+    real_launcher = root / "Silentfrog.command"
+    assert launcher.resolve() == real_launcher.resolve()
+    assert real_launcher.is_file()
+    content = real_launcher.read_text(encoding="utf-8")
     assert json.dumps(str(root / "run_silentfrog.sh")) in content
+
+
+def test_create_desktop_launcher_replaces_existing_target_on_unix(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    stale = desktop / "Silentfrog.command"
+    stale.write_text("stale content", encoding="utf-8")
+    launcher = create_desktop_launcher(root, system_name="Darwin", home=tmp_path)
+    assert launcher.is_symlink()
+    assert launcher.resolve() == (root / "Silentfrog.command").resolve()
 
 
 def test_write_launchers_keeps_macos_scripts_lf_only(tmp_path: Path) -> None:

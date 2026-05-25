@@ -516,9 +516,17 @@ def create_desktop_launcher(root: Path, system_name: str | None = None, home: Pa
         subprocess.run(windows_shortcut_command(root, shortcut), check=True)
         return shortcut
 
-    command_path = desktop / "Silentfrog.command"
-    _write_file(command_path, render_desktop_command_launcher(root), executable=True)
-    return command_path
+    # macOS: keep the real launcher inside the install dir and drop a
+    # symlink on the Desktop. Finder shows the symlink with an arrow
+    # badge, double-click still opens the .command in Terminal because
+    # the resolved target's extension drives the file-type association.
+    real_launcher = root / "Silentfrog.command"
+    _write_file(real_launcher, render_desktop_command_launcher(root), executable=True)
+    desktop_link = desktop / "Silentfrog.command"
+    if desktop_link.is_symlink() or desktop_link.exists():
+        desktop_link.unlink()
+    desktop_link.symlink_to(real_launcher)
+    return desktop_link
 
 
 def _run(command: Iterable[str], cwd: Path) -> None:
