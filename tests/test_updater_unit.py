@@ -17,10 +17,21 @@ from silentfrog.updater import (  # type: ignore[reportMissingImports]
     UpdateStatus,
     commit_api_url,
     compare,
+    default_ssl_context,
     fetch_remote_revision,
     read_local_revision,
     write_revision_file,
 )
+
+
+def test_default_ssl_context_uses_certifi_bundle() -> None:
+    import certifi
+    # certifi must ship a non-empty CA file; the SSL context must inherit
+    # those CAs so HTTPS to api.github.com works on python.org Framework
+    # Python that ships without system CAs.
+    assert Path(certifi.where()).is_file()
+    ctx = default_ssl_context()
+    assert ctx.cert_store_stats()["x509_ca"] > 0
 
 
 def test_read_local_revision_dev_mode_reads_git_head(monkeypatch, tmp_path: Path) -> None:

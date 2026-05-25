@@ -8,7 +8,9 @@ async entry point so the rest of the app (and the GUI in
 from __future__ import annotations
 
 import json
+import logging
 import os
+import ssl
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,7 +19,11 @@ from pathlib import Path
 from typing import Optional
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+import certifi
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 GITHUB_OWNER = "developeter"
@@ -34,6 +40,19 @@ _GITHUB_HEADERS = {
 
 def commit_api_url(branch: str = UPDATE_BRANCH) -> str:
     return f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/{branch}"
+
+
+def default_ssl_context() -> ssl.SSLContext:
+    """SSL context using certifi's CA bundle.
+
+    python.org Framework Python on macOS ships without a populated CA
+    store unless ``Install Certificates.command`` was run, which trips
+    aiohttp's HTTPS verification with
+    ``SSL: CERTIFICATE_VERIFY_FAILED``. certifi ships an up-to-date
+    Mozilla bundle and is already a runtime dependency, so the in-app
+    updater stays self-contained on every supported Python install.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 class InstallMode(str, Enum):
@@ -112,6 +131,11 @@ def _read_git_head(repo_root: Path) -> str:
     return result.stdout.strip()
 
 
+def _new_session() -> aiohttp.ClientSession:
+    connector = aiohttp.TCPConnector(ssl=default_ssl_context())
+    return aiohttp.ClientSession(headers=_GITHUB_HEADERS, connector=connector)
+
+
 async def fetch_remote_revision(
     branch: str = UPDATE_BRANCH,
     timeout_seconds: int = 8,
@@ -125,13 +149,15 @@ async def fetch_remote_revision(
     """
     url = commit_api_url(branch)
     own_session = session is None
-    client = session or aiohttp.ClientSession(headers=_GITHUB_HEADERS)
+    client = session or _new_session()
     try:
         async with client.get(url, timeout=ClientTimeout(total=timeout_seconds)) as response:
             if response.status != 200:
+                _LOGGER.warning("GitHub commit API returned status %s for %s", response.status, url)
                 return None
             payload = await response.text()
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("GitHub commit API unreachable for %s: %s", url, exc)
         return None
     finally:
         if own_session:
