@@ -240,9 +240,14 @@ following so it has the context.
    ```
    - Home window opens, frog logo visible.
    - **Help** menu lives in the system menu bar at the top of the
-     screen (Apple convention — not in the window). It contains
-     **Check for Updates…** and **About Silentfrog**.
-   - Help → About → version, revision (your local sha), install
+     screen (Apple convention — not in the window). On macOS it
+     contains only **Check for Updates…**: the **About Silentfrog**
+     entry is auto-moved by Qt to the application menu (the bold
+     **Silentfrog** menu next to the Apple, per macOS convention,
+     because `QAction("About …")` matches `QAction::AboutRole` under
+     `TextHeuristicRole`). On Windows both items stay under Help.
+   - Silentfrog menu → About Silentfrog (macOS) **or** Help → About
+     (Windows) → shows version, revision (your local sha), install
      mode "Developer (git clone)", repo link.
    - Help → Check for Updates → after ~1s shows
      *"You're on a developer install (git clone). Use `git pull` to
