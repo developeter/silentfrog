@@ -137,6 +137,12 @@ class HomeWindow(QMainWindow):
         check_action = help_menu.addAction("Check for &Updates…")
         check_action.triggered.connect(self._open_update_dialog)
         about_action = help_menu.addAction("&About Silentfrog")
+        # Force AboutRole instead of relying on Qt's TextHeuristicRole.
+        # On macOS the action is auto-moved into the "Silentfrog"
+        # application menu next to the Apple; on other platforms it
+        # stays here under Help.
+        about_action.setMenuRole(QtGui.QAction.AboutRole)
+        check_action.setMenuRole(QtGui.QAction.ApplicationSpecificRole)
         about_action.triggered.connect(self._open_about_dialog)
 
     def _open_update_dialog(self) -> None:
@@ -191,6 +197,14 @@ class _SettingsDialog(QDialog):
 
 
 def main() -> None:
+    # Set the app name BEFORE constructing QApplication so macOS labels
+    # the application menu (the bold one next to the Apple) as
+    # "Silentfrog" instead of "Python" / "silentfrog". Without this the
+    # auto-moved "About Silentfrog" action sits under an unfamiliar
+    # menu name and users can't find it.
+    QApplication.setApplicationName("Silentfrog")
+    QApplication.setApplicationDisplayName("Silentfrog")
+    QApplication.setOrganizationName("Silentfrog")
     app = QApplication(sys.argv)
     apply_theme(app, dark=True)
 
