@@ -116,8 +116,9 @@ class UpdateDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Check for Updates")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(480)
         self._status_label = QLabel("Checking for updates…")
+        self._status_label.setWordWrap(True)
         self._details_label = QLabel("")
         self._details_label.setWordWrap(True)
         self._buttons = QDialogButtonBox()
@@ -225,6 +226,11 @@ class UpdateDialog(QDialog):
             button = QPushButton(label)
             button.clicked.connect(handler)
             self._buttons.addButton(button, QDialogButtonBox.ActionRole)
+        # The QDialog does not auto-grow when content swaps from
+        # "Checking for updates…" to a multi-line status + extra
+        # buttons (e.g. Apply / Cancel); without adjustSize() the
+        # button row gets clipped at the bottom on macOS.
+        self.adjustSize()
 
     # ------------------------------------------------------------ actions
 
