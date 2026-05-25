@@ -16,6 +16,7 @@ working tree.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,12 +274,39 @@ class UpdateDialog(QDialog):
 def restart_app() -> None:
     """Relaunch Silentfrog in a detached process and quit the current one.
 
-    Used by the update flow once new sources are in place.
+    Used by the update flow once new sources are in place. We launch the
+    venv's ``silentfrog`` console-script binary directly rather than
+    relying on ``sys.executable`` + ``sys.argv``: on Windows, pip's
+    console-script wrappers report ``sys.argv[0]`` as ``...\\silentfrog``
+    (without ``.exe``), so the naive relaunch tries
+    ``python.exe <repo>\\.venv\\Scripts\\silentfrog`` and dies with
+    "No such file or directory".
     """
-    QProcess.startDetached(sys.executable, sys.argv)
+    binary = _venv_silentfrog_binary()
+    if binary is not None and binary.is_file():
+        QProcess.startDetached(str(binary), [])
+    else:
+        # Fall back to the previous behaviour for dev clones that
+        # haven't been installed into a .venv (rare; the in-app
+        # updater only runs in user-mode installs, but defence first).
+        QProcess.startDetached(sys.executable, sys.argv)
     app = cast(QApplication | None, QApplication.instance())
     if app is not None:
         app.quit()
+
+
+def _venv_silentfrog_binary() -> Path | None:
+    """Resolve the venv's ``silentfrog`` console-script for relaunch.
+
+    Returns ``None`` when the venv layout can't be located (very early
+    in setup, or non-standard install).
+    """
+    repo_root = find_repo_root()
+    if os.name == "nt":
+        candidate = repo_root / ".venv" / "Scripts" / "silentfrog.exe"
+    else:
+        candidate = repo_root / ".venv" / "bin" / "silentfrog"
+    return candidate if candidate.exists() else None
 
 
 def _updater_subprocess_command(revision: str) -> tuple[str, list[str]]:

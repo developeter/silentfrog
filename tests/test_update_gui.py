@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -164,6 +165,28 @@ def test_updater_subprocess_command_pins_revision_argument() -> None:
     program, args = _updater_subprocess_command("abc1234")
     assert "python" in program.lower() or program.endswith("python.exe")
     assert args == ["-m", "tools.update_silentfrog", "--revision", "abc1234"]
+
+
+def test_venv_silentfrog_binary_resolves_per_platform(tmp_path, monkeypatch) -> None:
+    """Regression: restart_app used sys.executable + sys.argv to relaunch,
+    which on Windows produced ``python.exe <path>\\silentfrog`` (no .exe)
+    and bailed with "No such file or directory" right after the in-app
+    updater swapped files. Pin the relaunch to the venv's console-script
+    binary, resolved per OS.
+    """
+    import silentfrog.update_gui as ug
+
+    monkeypatch.setattr(ug, "find_repo_root", lambda: tmp_path)
+    # Empty repo root: nothing to launch.
+    assert ug._venv_silentfrog_binary() is None
+    # Lay out a Windows-style venv with the expected binary.
+    if os.name == "nt":
+        binary = tmp_path / ".venv" / "Scripts" / "silentfrog.exe"
+    else:
+        binary = tmp_path / ".venv" / "bin" / "silentfrog"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("# stub")
+    assert ug._venv_silentfrog_binary() == binary
 
 
 def test_apply_click_transitions_to_applying_state_without_subprocess(

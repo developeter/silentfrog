@@ -24,12 +24,12 @@ It lets you quickly:
 
 |            | Recommended   | Why                                                                 |
 | ---------- | ------------- | ------------------------------------------------------------------- |
-| **Python** | **3.12 / 3.13 / 3.14** | Source installer fallback only; packaged apps do not require user-installed Python |
+| **Python** | **3.12 / 3.13 / 3.14** | End users do not need to install Python manually — the one-click bootstrap (Section 2) installs Python 3.12 if missing. Developers running the source install need Python on PATH. |
 | **Poetry** | >= 1.8        | Development workflow only                                           |
-| **Git**    | any           | Clone updates                                                       |
+| **Git**    | any           | Developer workflow only — end users do not need git (the bootstrap downloads source via HTTPS) |
 
 > On **Windows** enable "Add Python to PATH" during source installs.
-> On **macOS**, packaged apps are preferred. Source installs support Python 3.12, 3.13, or 3.14 when binary wheels are available for your Mac.
+> On **macOS** (Intel and Apple Silicon), the one-click bootstrap installs Python 3.12 from python.org if no supported version is present. Both architectures are supported by the same `Get-Silentfrog.command` script.
 
 ---
 
@@ -226,7 +226,7 @@ The project metadata allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the 
 - For one-click source install, use `install_silentfrog.command`. It detects Python 3.14, 3.13, and 3.12 across Homebrew and python.org framework paths.
 - If `pip`/HTTPS certificate validation fails with the python.org installer build, run:  
   `open "/Applications/Python 3.14/Install Certificates.command"` and retry the install. Adjust the version folder if you installed Python 3.13 or 3.12.
-- The packaged app path is the preferred way to avoid local Python/bootstrap issues on macOS.
+- For end users, the one-click `Get-Silentfrog.command` (Section 2) handles Python detection, install, and certificate setup automatically — no manual steps required.
 
 ## Support & project status
 
@@ -436,15 +436,23 @@ silentfrog/
 ├── reinstall_silentfrog.sh
 ├── run_silentfrog.bat
 ├── run_silentfrog.sh
+├── bootstrap/
+│   ├── Get-Silentfrog.bat       # Windows double-click wrapper
+│   ├── Get-Silentfrog.ps1       # Windows installer logic
+│   ├── Get-Silentfrog.command   # macOS (Intel + Apple Silicon) installer
+│   └── README.md
 ├── deploy/
-│   └── main.py           # Packaging entrypoint for pyside6-deploy
+│   └── main.py           # Source-installer entrypoint
 ├── tools/
-│   ├── source_install.py  # Local .venv installer and launcher generation
-│   ├── doctor.py          # Env/dependency/resource/compile/test checks
-│   ├── code_shape_guard.py # AST-based complexity/nesting guard
+│   ├── source_install.py     # Local .venv installer and launcher generation
+│   ├── source_uninstall.py   # Cross-platform uninstaller
+│   ├── source_update.py      # File-copy helpers for the in-app updater
+│   ├── update_silentfrog.py  # In-app updater executor (driven by Help → Check for Updates)
+│   ├── doctor.py             # Env/dependency/resource/compile/test checks
+│   ├── code_shape_guard.py   # AST-based complexity/nesting guard
 │   ├── code_shape_baseline.json # Temporary allowlist for legacy exceptions (currently empty)
-│   ├── install_hooks.py   # Configures git to use .githooks/
-│   └── package_app.py     # Wrapper around pyside6-deploy
+│   └── install_hooks.py      # Configures git to use .githooks/
+├── experimental/packaging/   # Archived Nuitka path (not used; kept for history)
 ├── .githooks/
 │   ├── pre-commit         # Runs doctor --quick automatically
 │   └── pre-push           # Runs full doctor automatically
@@ -468,7 +476,9 @@ silentfrog/
 │   ├── crawl_options.py   # Typed crawl/gentle-mode settings
 │   ├── crawler_api.py     # Public crawler-facing helpers
 │   ├── crawler_utils.py   # Shared crawler utility helpers
-│   ├── gui.py             # Home launcher / theme switcher
+│   ├── gui.py             # Home launcher, theme switcher, Help menu (Check for Updates, About)
+│   ├── update_gui.py      # In-app updater + About dialogs
+│   ├── updater.py         # Update-check domain logic (no Qt)
 │   ├── image_diagnostics.py # Shared image-table schema and diagnostics helpers
 │   ├── indexability.py   # Indexability verdict helpers
 │   ├── seo_gui.py        # Single-page analysis window
@@ -502,7 +512,10 @@ silentfrog/
 ├── tests/
 │   ├── conftest.py
 │   ├── test_qt_runtime_smoke.py
-│   ├── test_package_app_unit.py
+│   ├── test_updater_unit.py
+│   ├── test_update_gui.py
+│   ├── test_update_silentfrog_unit.py
+│   ├── test_source_update_unit.py
 │   ├── test_ai_visibility_unit.py
 │   ├── test_source_install_unit.py
 │   ├── test_image_diagnostics_unit.py
