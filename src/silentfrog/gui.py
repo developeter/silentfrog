@@ -92,8 +92,20 @@ class HomeWindow(QMainWindow):
         gear_row.addWidget(gear)
         self.main_layout.addLayout(gear_row)
 
+        # Wrap the column of logo + action buttons + gear in a max-width
+        # inner widget, then centre it horizontally. Without this, full-
+        # screen on macOS stretches every button to the screen width and
+        # the home screen looks like a bad landing page.
+        inner = QWidget()
+        inner.setLayout(self.main_layout)
+        inner.setMaximumWidth(560)
+        centred = QtWidgets.QHBoxLayout()
+        centred.setContentsMargins(0, 0, 0, 0)
+        centred.addStretch()
+        centred.addWidget(inner)
+        centred.addStretch()
         container = QWidget()
-        container.setLayout(self.main_layout)
+        container.setLayout(centred)
         self.setCentralWidget(container)
 
     def open_redirect(self) -> None:

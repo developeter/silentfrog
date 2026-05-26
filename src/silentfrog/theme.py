@@ -27,6 +27,14 @@ DARK_STYLESHEET = """
 QWidget            { background: #1e1e1e; color: #f0f0f0; }
 QPushButton        { background: #333; color: #f0f0f0; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; }
 QPushButton:hover  { background: #444; }
+QMenuBar           { background: #1e1e1e; color: #f0f0f0; padding: 2px 6px; border-bottom: 1px solid #333; }
+QMenuBar::item     { background: transparent; padding: 6px 12px; border-radius: 4px; }
+QMenuBar::item:selected { background: #3a3a3a; color: #ffffff; }
+QMenuBar::item:pressed  { background: #2ecc71; color: #1e1e1e; }
+QMenu              { background: #2a2a2a; color: #f0f0f0; border: 1px solid #444; padding: 4px; }
+QMenu::item        { padding: 6px 22px; border-radius: 4px; }
+QMenu::item:selected { background: #2ecc71; color: #1e1e1e; }
+QMenu::separator   { height: 1px; background: #444; margin: 4px 6px; }
 QTabWidget::pane   { border: 1px solid #555; background: #1e1e1e; }
 QTabBar::tab       { background: #2e2e2e; color: #f0f0f0; padding: 6px; min-width: 80px; }
 QTabBar::tab:selected { background: #3a3a3a; }
@@ -49,6 +57,14 @@ LIGHT_STYLESHEET = """
 QWidget            { background: #f0f0f0; color: #1e1e1e; }
 QPushButton        { background: #f0f0f0; color: #333; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; }
 QPushButton:hover  { background: #555555; color: #f0f0f0}
+QMenuBar           { background: #f0f0f0; color: #1e1e1e; padding: 2px 6px; border-bottom: 1px solid #d4d4d4; }
+QMenuBar::item     { background: transparent; padding: 6px 12px; border-radius: 4px; }
+QMenuBar::item:selected { background: #d4d4d4; color: #1e1e1e; }
+QMenuBar::item:pressed  { background: #0f9d58; color: #ffffff; }
+QMenu              { background: #ffffff; color: #1e1e1e; border: 1px solid #d4d4d4; padding: 4px; }
+QMenu::item        { padding: 6px 22px; border-radius: 4px; }
+QMenu::item:selected { background: #0f9d58; color: #ffffff; }
+QMenu::separator   { height: 1px; background: #d4d4d4; margin: 4px 6px; }
 QTabWidget::pane   { border: 1px solid #555; background: #f0f0f0; }
 QTabBar::tab       { background: #f0f0f0; color: #2e2e2e; padding: 6px; min-width: 80px; }
 QTabBar::tab:selected { background: #666; color: #f0f0f0}
