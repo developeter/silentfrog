@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,7 @@ from silentfrog.updater import (  # noqa: E402
     read_local_revision,
     write_revision_file,
 )
+from tools.source_install import launcher_script_paths  # noqa: E402
 from tools.source_update import (  # noqa: E402
     build_update_plan,
     copy_source_files,
@@ -119,7 +121,31 @@ def _refresh_install(repo_root: Path, deps_changed: bool) -> int:
     """
     if deps_changed:
         return _run([sys.executable, "install_silentfrog.py"], cwd=repo_root)
-    return _sync_site_packages(repo_root)
+    exit_code = _sync_site_packages(repo_root)
+    if exit_code == 0:
+        _ensure_executable_launchers(repo_root)
+    return exit_code
+
+
+def _ensure_executable_launchers(repo_root: Path) -> None:
+    """Restore the +x bit on launcher shell scripts after copy_source_files.
+
+    GitHub source archives (downloaded as .zip) drop POSIX execute bits,
+    so launcher scripts arrive as `-rw-r--r--`. Without +x the Desktop
+    `.command` (which `exec`s `run_silentfrog.sh`) fails silently and
+    the user sees a Terminal window but no Silentfrog GUI.
+    """
+    executable_suffixes = (".sh", ".command")
+    bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    for path in launcher_script_paths(repo_root):
+        if path.suffix not in executable_suffixes:
+            continue
+        if not path.is_file():
+            continue
+        mode = path.stat().st_mode
+        if mode & bits == bits:
+            continue
+        path.chmod(mode | bits)
 
 
 def _sync_site_packages(repo_root: Path) -> int:

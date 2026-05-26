@@ -10,6 +10,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.update_silentfrog import (  # noqa: E402
+    _ensure_executable_launchers,
     _sync_site_packages,
     _venv_site_packages,
 )
@@ -109,3 +110,36 @@ def test_venv_site_packages_windows_path() -> None:
         pytest.skip("Windows-specific path layout")
     repo = Path("C:/users/dev/silentfrog")
     assert _venv_site_packages(repo) == repo / ".venv" / "Lib" / "site-packages"
+
+
+def test_ensure_executable_launchers_restores_x_bit(tmp_path: Path) -> None:
+    """GitHub zip archives drop POSIX +x; the post-sync hook must restore it."""
+    import os
+    import stat as _stat
+
+    if os.name == "nt":
+        pytest.skip("POSIX-only permission semantics")
+    # Drop a representative subset of launcher files at the install root
+    # with the same `-rw-r--r--` mode the Apply step leaves behind.
+    targets = {
+        "run_silentfrog.sh": "#!/bin/sh\necho run\n",
+        "install_silentfrog.command": "#!/bin/sh\necho install\n",
+        "uninstall_silentfrog.sh": "#!/bin/sh\necho uninstall\n",
+    }
+    for name, body in targets.items():
+        path = tmp_path / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o644)
+    # Files outside the executable-launchers set must be left alone.
+    bat = tmp_path / "run_silentfrog.bat"
+    bat.write_text("@echo off\n", encoding="utf-8")
+    bat.chmod(0o644)
+
+    _ensure_executable_launchers(tmp_path)
+
+    bits = _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH
+    for name in targets:
+        mode = (tmp_path / name).stat().st_mode
+        assert mode & bits == bits, name
+    # .bat is in the launcher list but its suffix is not executable on macOS.
+    assert (tmp_path / "run_silentfrog.bat").stat().st_mode & bits == 0
