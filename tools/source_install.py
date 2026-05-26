@@ -322,12 +322,23 @@ def render_macos_app_info_plist(version: str) -> str:
         '    <string>11.0</string>\n'
         '    <key>NSHighResolutionCapable</key>\n'
         '    <true/>\n'
+        '    <key>LSArchitecturePriority</key>\n'
+        '    <array>\n'
+        '        <string>arm64</string>\n'
+        '        <string>x86_64</string>\n'
+        '    </array>\n'
         '</dict>\n'
         '</plist>\n'
     )
 
 
 def render_macos_app_launcher() -> str:
+    # LaunchServices selects Rosetta (x86_64) when launching a shell-script
+    # bundle on Apple Silicon, which then can't load the arm64 wheels we
+    # installed (numpy, lxml, etc. crash with "incompatible architecture").
+    # Detect Apple Silicon hardware via sysctl — independent of the
+    # Rosetta-masked uname output — and re-exec under `arch -arm64`.
+    # Intel Macs (hw.optional.arm64 = 0) keep the native x86_64 path.
     return "\n".join(
         [
             "#!/bin/sh",
@@ -335,6 +346,9 @@ def render_macos_app_launcher() -> str:
             'DIR="$(cd "$(dirname "$0")" && pwd)"',
             'ROOT="$(cd "$DIR/../../.." && pwd)"',
             'export QT_API="${QT_API:-pyside6}"',
+            'if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then',
+            '    exec /usr/bin/arch -arm64 "$ROOT/.venv/bin/silentfrog" "$@"',
+            'fi',
             'exec "$ROOT/.venv/bin/silentfrog" "$@"',
         ]
     ) + "\n"

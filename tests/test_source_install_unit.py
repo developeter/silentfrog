@@ -238,6 +238,25 @@ def test_render_macos_app_launcher_execs_venv_silentfrog() -> None:
     assert 'set -eu' in launcher
 
 
+def test_render_macos_app_launcher_forces_arm64_on_apple_silicon() -> None:
+    launcher = render_macos_app_launcher()
+    # Bundles launched via `open` on Apple Silicon get Rosetta-mapped
+    # to x86_64, which then fails to load the arm64 wheels installed
+    # in the venv. The launcher must detect arm64 hardware and re-exec
+    # with `arch -arm64`. Intel Macs fall through to the native path.
+    assert 'hw.optional.arm64' in launcher
+    assert '/usr/bin/arch -arm64' in launcher
+
+
+def test_render_macos_app_info_plist_pins_arch_priority() -> None:
+    plist = render_macos_app_info_plist("1.0.0")
+    assert "<key>LSArchitecturePriority</key>" in plist
+    # arm64 first so LaunchServices prefers native on Apple Silicon.
+    arm_idx = plist.index("<string>arm64</string>")
+    x86_idx = plist.index("<string>x86_64</string>")
+    assert arm_idx < x86_idx
+
+
 def test_create_macos_app_bundle_has_required_layout(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
