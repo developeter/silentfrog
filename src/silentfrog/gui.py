@@ -33,14 +33,11 @@ class HomeWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog")
-        # The home is a landing card with a ceiling but no full-screen.
-        # setMaximumSize caps the upper end so resize / green-pill never
-        # produce edge-to-edge buttons or a lost gear; setMinimumSize
-        # keeps the column readable. The user can still shrink the
-        # window within those bounds.
-        self.setMinimumSize(420, 500)
-        self.setMaximumSize(640, 720)
-        self.resize(640, 720)
+        # Final shape: a compact landing card locked to 420x500. Fixed
+        # size means no resize handle, no green-pill fullscreen on
+        # macOS, no edge-cases for Qt to drift the layout. Child
+        # windows (Site Crawl, SEO, Redirect) stay resizable.
+        self.setFixedSize(420, 500)
 
         # Each click on a primary action opens a new top-level QWidget.
         # We must hold a Python reference to every one of them or
