@@ -197,11 +197,15 @@ class _SettingsDialog(QDialog):
 
 
 def main() -> None:
-    # Set the app name BEFORE constructing QApplication so macOS labels
-    # the application menu (the bold one next to the Apple) as
-    # "Silentfrog" instead of "Python" / "silentfrog". Without this the
-    # auto-moved "About Silentfrog" action sits under an unfamiliar
-    # menu name and users can't find it.
+    # Qt on macOS auto-migrates the QMainWindow menu bar into the
+    # system menu bar at the top of the screen. Because the running
+    # process is the Python interpreter (whose bundle is the framework
+    # Python.app), that system menu reads "Python" — and nothing short
+    # of py2app or a compiled Mach-O launcher inside our bundle fixes
+    # the underlying NSApplication bundle association. AA_DontUseNativeMenuBar
+    # opts out of that migration entirely so the Help menu renders inside
+    # the Silentfrog window itself, the way it does on Windows.
+    QApplication.setAttribute(Qt.AA_DontUseNativeMenuBar, True)
     QApplication.setApplicationName("Silentfrog")
     QApplication.setApplicationDisplayName("Silentfrog")
     QApplication.setOrganizationName("Silentfrog")
