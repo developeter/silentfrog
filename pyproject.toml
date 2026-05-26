@@ -31,7 +31,11 @@ dependencies = [
     "humanize (>=4.12.3,<5.0.0)"
 ]
 
-[project.scripts]
+[project.gui-scripts]
+# Use `gui-scripts` (not `scripts`) so pip's Windows wrapper is the
+# windowed launcher (`pythonw.exe`-style, PE subsystem 2). With the
+# regular `scripts` entry the launcher is a console binary and Windows
+# briefly flashes a `cmd` window on every double-click.
 silentfrog = "silentfrog.gui:main"
 
 [project.optional-dependencies]

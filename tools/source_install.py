@@ -397,7 +397,13 @@ def create_macos_app_bundle(root: Path, icon_source: Path | None = None) -> Path
 
 
 def windows_shortcut_command(root: Path, shortcut_path: Path) -> list[str]:
-    target = root / "run_silentfrog.bat"
+    # Target the venv's gui-script wrapper directly. `run_silentfrog.bat`
+    # would do the same thing semantically but it forces a `cmd` window
+    # to flash on every launch; the .exe wrapper (gui-script flavour
+    # since the `[project.gui-scripts]` move in pyproject.toml) has no
+    # console attached and double-click is silent. The .bat sticks
+    # around as a terminal-friendly debug entry point.
+    target = root / ".venv" / "Scripts" / "silentfrog.exe"
     icon = root / "src" / "silentfrog" / "assets" / "icon.ico"
     script = "\n".join(
         [

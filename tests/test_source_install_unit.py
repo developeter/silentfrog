@@ -7,14 +7,15 @@ from pathlib import Path
 import pytest
 
 
-# detect_python_org_certificate_installer's regex matches the POSIX
-# `/Library/Frameworks/...` macOS framework layout. On Windows, Path()
-# normalises that input to backslashes so the regex never fires and the
-# function always returns None; the test that exercises the happy path
-# is therefore macOS-only by design.
+# Skip tests that exercise macOS-only code paths (Framework Python
+# certificate installer detection, .app bundle layout, Desktop
+# symlinks, exec-bit permission semantics). On Windows the file-mode
+# and symlink behaviour differs in ways these assertions don't
+# anticipate; running them there produces noise without catching
+# anything we care about.
 _macos_only = pytest.mark.skipif(
     platform.system().lower() != "darwin",
-    reason="detect_python_org_certificate_installer is macOS-only",
+    reason="macOS-only path / permission / bundle semantics",
 )
 
 from tools.source_install import (
@@ -212,12 +213,18 @@ def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> N
     assert 'exec ' in rendered
 
 
-def test_windows_shortcut_command_targets_repo_launcher(tmp_path: Path) -> None:
+def test_windows_shortcut_command_targets_venv_gui_script(tmp_path: Path) -> None:
+    """Regression: targeting run_silentfrog.bat opened cmd.exe every launch.
+    The Desktop shortcut now points at the venv's gui-script .exe wrapper,
+    which has no console attached on Windows.
+    """
     command = windows_shortcut_command(tmp_path, tmp_path / "Desktop" / "Silentfrog.lnk")
     joined = " ".join(command)
 
     assert command[:4] == ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"]
-    assert "run_silentfrog.bat" in joined
+    assert "silentfrog.exe" in joined
+    assert ".venv" in joined and "Scripts" in joined
+    assert "run_silentfrog.bat" not in joined
     assert "icon.ico" in joined
     assert "Silentfrog.lnk" in joined
 
@@ -257,6 +264,7 @@ def test_render_macos_app_info_plist_pins_arch_priority() -> None:
     assert arm_idx < x86_idx
 
 
+@_macos_only
 def test_create_macos_app_bundle_has_required_layout(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -289,6 +297,7 @@ def test_create_macos_app_bundle_is_idempotent(tmp_path: Path) -> None:
     assert (bundle / "Contents" / "Info.plist").is_file()
 
 
+@_macos_only
 def test_create_desktop_launcher_writes_app_bundle_symlink_on_unix(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -308,6 +317,7 @@ def test_create_desktop_launcher_writes_app_bundle_symlink_on_unix(tmp_path: Pat
     assert not (tmp_path / "Desktop" / "Silentfrog.command").exists()
 
 
+@_macos_only
 def test_create_desktop_launcher_replaces_stale_command_symlink_on_unix(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -473,4 +483,6 @@ def test_create_desktop_launcher_invokes_powershell_on_windows(tmp_path: Path, m
     assert cmd[:4] == ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"]
     joined = " ".join(cmd)
     assert "Silentfrog.lnk" in joined
-    assert "run_silentfrog.bat" in joined
+    # Shortcut now targets the venv gui-script wrapper, not the .bat.
+    assert "silentfrog.exe" in joined
+    assert "run_silentfrog.bat" not in joined
