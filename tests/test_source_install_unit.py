@@ -22,6 +22,7 @@ from tools.source_install import (
     _normalize_pep508,
     app_data_dir,
     create_desktop_launcher,
+    create_macos_app_bundle,
     desktop_dir,
     detect_python_org_certificate_installer,
     installer_paths,
@@ -32,6 +33,8 @@ from tools.source_install import (
     render_install_bat,
     render_install_command,
     render_install_sh,
+    render_macos_app_info_plist,
+    render_macos_app_launcher,
     render_reinstall_command,
     render_reinstall_sh,
     render_run_bat,
@@ -219,32 +222,87 @@ def test_windows_shortcut_command_targets_repo_launcher(tmp_path: Path) -> None:
     assert "Silentfrog.lnk" in joined
 
 
-def test_create_desktop_launcher_writes_command_file_on_unix(tmp_path: Path) -> None:
+def test_render_macos_app_info_plist_carries_silentfrog_bundle_name() -> None:
+    plist = render_macos_app_info_plist("1.2.3")
+    assert "<key>CFBundleName</key>" in plist
+    assert "<string>Silentfrog</string>" in plist
+    assert "<key>CFBundleExecutable</key>" in plist
+    assert "<string>1.2.3</string>" in plist
+    assert plist.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+
+
+def test_render_macos_app_launcher_execs_venv_silentfrog() -> None:
+    launcher = render_macos_app_launcher()
+    assert launcher.startswith("#!/bin/sh")
+    assert '$ROOT/.venv/bin/silentfrog' in launcher
+    assert 'set -eu' in launcher
+
+
+def test_create_macos_app_bundle_has_required_layout(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    # Stub an icon source so the copy path runs.
+    assets = root / "src" / "silentfrog" / "assets"
+    assets.mkdir(parents=True)
+    icon = assets / "icon.icns"
+    icon.write_bytes(b"\x00\x00fake-icns")
+    bundle = create_macos_app_bundle(root)
+    assert bundle == root / "Silentfrog.app"
+    info = bundle / "Contents" / "Info.plist"
+    launcher = bundle / "Contents" / "MacOS" / "Silentfrog"
+    icon_dest = bundle / "Contents" / "Resources" / "icon.icns"
+    assert info.is_file() and "CFBundleName" in info.read_text(encoding="utf-8")
+    assert launcher.is_file()
+    import os as _os
+    import stat as _stat
+    mode = launcher.stat().st_mode
+    assert mode & _stat.S_IXUSR
+    assert icon_dest.is_file()
+    assert icon_dest.read_bytes() == b"\x00\x00fake-icns"
+
+
+def test_create_macos_app_bundle_is_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    create_macos_app_bundle(root)
+    # Second call must not raise (directories already exist).
+    bundle = create_macos_app_bundle(root)
+    assert (bundle / "Contents" / "Info.plist").is_file()
+
+
+def test_create_desktop_launcher_writes_app_bundle_symlink_on_unix(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
     launcher = create_desktop_launcher(root, system_name="Darwin", home=tmp_path)
 
-    # The Desktop entry is now a symlink to the real launcher inside the
-    # install dir; the resolved target carries the renderer output.
-    assert launcher == tmp_path / "Desktop" / "Silentfrog.command"
+    # Desktop entry is a symlink to the .app bundle inside the install
+    # dir (the bundle is what gives macOS its menu-bar name).
+    assert launcher == tmp_path / "Desktop" / "Silentfrog.app"
     assert launcher.is_symlink()
-    real_launcher = root / "Silentfrog.command"
-    assert launcher.resolve() == real_launcher.resolve()
-    assert real_launcher.is_file()
-    content = real_launcher.read_text(encoding="utf-8")
-    assert json.dumps(str(root / "run_silentfrog.sh")) in content
+    bundle = root / "Silentfrog.app"
+    assert launcher.resolve() == bundle.resolve()
+    assert (bundle / "Contents" / "Info.plist").is_file()
+    assert (bundle / "Contents" / "MacOS" / "Silentfrog").is_file()
+    # The .command stays as a terminal-friendly debug entry inside the
+    # install dir, but no longer on the Desktop.
+    assert (root / "Silentfrog.command").is_file()
+    assert not (tmp_path / "Desktop" / "Silentfrog.command").exists()
 
 
-def test_create_desktop_launcher_replaces_existing_target_on_unix(tmp_path: Path) -> None:
+def test_create_desktop_launcher_replaces_stale_command_symlink_on_unix(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
     desktop = tmp_path / "Desktop"
     desktop.mkdir()
-    stale = desktop / "Silentfrog.command"
-    stale.write_text("stale content", encoding="utf-8")
+    # Simulate the previous-layout artifact: a Silentfrog.command symlink
+    # on the Desktop from before the .app bundle migration.
+    stale_target = root / "Silentfrog.command"
+    stale_target.write_text("stale", encoding="utf-8")
+    stale_link = desktop / "Silentfrog.command"
+    stale_link.symlink_to(stale_target)
     launcher = create_desktop_launcher(root, system_name="Darwin", home=tmp_path)
-    assert launcher.is_symlink()
-    assert launcher.resolve() == (root / "Silentfrog.command").resolve()
+    assert launcher.name == "Silentfrog.app"
+    assert not stale_link.exists()
 
 
 def test_write_launchers_keeps_macos_scripts_lf_only(tmp_path: Path) -> None:

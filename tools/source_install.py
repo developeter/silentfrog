@@ -289,6 +289,99 @@ def render_desktop_command_launcher(root: Path) -> str:
     ) + "\n"
 
 
+# macOS .app bundle scaffolding. A native bundle is the only way to
+# get the menu bar to read "Silentfrog" instead of "Python" (macOS reads
+# the app menu name from CFBundleName in Info.plist; without a bundle it
+# falls back to the process name, which is the Python interpreter). The
+# bundle also removes the Terminal popup that a .command would open.
+
+def render_macos_app_info_plist(version: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n'
+        '<dict>\n'
+        '    <key>CFBundleName</key>\n'
+        '    <string>Silentfrog</string>\n'
+        '    <key>CFBundleDisplayName</key>\n'
+        '    <string>Silentfrog</string>\n'
+        '    <key>CFBundleIdentifier</key>\n'
+        '    <string>com.silentfrog.app</string>\n'
+        f'    <key>CFBundleVersion</key>\n'
+        f'    <string>{version}</string>\n'
+        f'    <key>CFBundleShortVersionString</key>\n'
+        f'    <string>{version}</string>\n'
+        '    <key>CFBundleExecutable</key>\n'
+        '    <string>Silentfrog</string>\n'
+        '    <key>CFBundleIconFile</key>\n'
+        '    <string>icon.icns</string>\n'
+        '    <key>CFBundlePackageType</key>\n'
+        '    <string>APPL</string>\n'
+        '    <key>LSMinimumSystemVersion</key>\n'
+        '    <string>11.0</string>\n'
+        '    <key>NSHighResolutionCapable</key>\n'
+        '    <true/>\n'
+        '</dict>\n'
+        '</plist>\n'
+    )
+
+
+def render_macos_app_launcher() -> str:
+    return "\n".join(
+        [
+            "#!/bin/sh",
+            "set -eu",
+            'DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'ROOT="$(cd "$DIR/../../.." && pwd)"',
+            'export QT_API="${QT_API:-pyside6}"',
+            'exec "$ROOT/.venv/bin/silentfrog" "$@"',
+        ]
+    ) + "\n"
+
+
+def project_version(pyproject: Path | None = None) -> str:
+    """Read [project].version from pyproject.toml; fallback to '0.0.0'.
+
+    Kept as a small helper rather than importing from tools.package_app so
+    source_install stays self-contained even on installs where the
+    packaging tooling has been pruned.
+    """
+    path = pyproject or (Path(__file__).resolve().parents[1] / "pyproject.toml")
+    try:
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return "0.0.0"
+    project = data.get("project") if isinstance(data, dict) else None
+    version = project.get("version") if isinstance(project, dict) else None
+    return version if isinstance(version, str) and version else "0.0.0"
+
+
+def create_macos_app_bundle(root: Path, icon_source: Path | None = None) -> Path:
+    """Build (or refresh) ``<root>/Silentfrog.app`` as a native macOS bundle.
+
+    Returns the path to the bundle root. Idempotent: safe to re-run.
+    """
+    bundle = root / "Silentfrog.app"
+    contents = bundle / "Contents"
+    macos_dir = contents / "MacOS"
+    resources = contents / "Resources"
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    resources.mkdir(parents=True, exist_ok=True)
+    info_plist = contents / "Info.plist"
+    info_plist.write_text(render_macos_app_info_plist(project_version()), encoding="utf-8")
+    launcher = macos_dir / "Silentfrog"
+    _write_file(launcher, render_macos_app_launcher(), executable=True)
+    icon_src = icon_source or (root / "src" / "silentfrog" / "assets" / "icon.icns")
+    icon_dest = resources / "icon.icns"
+    if icon_src.is_file():
+        import shutil
+
+        shutil.copyfile(icon_src, icon_dest)
+    return bundle
+
+
 def windows_shortcut_command(root: Path, shortcut_path: Path) -> list[str]:
     target = root / "run_silentfrog.bat"
     icon = root / "src" / "silentfrog" / "assets" / "icon.ico"
@@ -516,16 +609,29 @@ def create_desktop_launcher(root: Path, system_name: str | None = None, home: Pa
         subprocess.run(windows_shortcut_command(root, shortcut), check=True)
         return shortcut
 
-    # macOS: keep the real launcher inside the install dir and drop a
-    # symlink on the Desktop. Finder shows the symlink with an arrow
-    # badge, double-click still opens the .command in Terminal because
-    # the resolved target's extension drives the file-type association.
+    # macOS: build a native .app bundle inside the install dir so the
+    # menu bar reads "Silentfrog" (from CFBundleName) instead of the
+    # interpreter name "Python", and so double-click no longer spawns a
+    # Terminal window. Drop a Desktop symlink pointing at it. Keep
+    # Silentfrog.command around as a terminal-friendly debug entry.
     real_launcher = root / "Silentfrog.command"
     _write_file(real_launcher, render_desktop_command_launcher(root), executable=True)
-    desktop_link = desktop / "Silentfrog.command"
+    bundle = create_macos_app_bundle(root)
+    desktop_link = desktop / "Silentfrog.app"
     if desktop_link.is_symlink() or desktop_link.exists():
-        desktop_link.unlink()
-    desktop_link.symlink_to(real_launcher)
+        if desktop_link.is_symlink() or desktop_link.is_file():
+            desktop_link.unlink()
+        else:
+            import shutil
+
+            shutil.rmtree(desktop_link)
+    desktop_link.symlink_to(bundle)
+    # The pre-bundle install layout dropped a Silentfrog.command symlink
+    # on the Desktop. Tidy it up so users see exactly one Silentfrog
+    # entry on their Desktop after the upgrade.
+    stale_command = desktop / "Silentfrog.command"
+    if stale_command.is_symlink() or stale_command.is_file():
+        stale_command.unlink()
     return desktop_link
 
 
