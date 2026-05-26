@@ -35,6 +35,9 @@ QMenu              { background: #2a2a2a; color: #f0f0f0; border: 1px solid #444
 QMenu::item        { padding: 6px 22px; border-radius: 4px; }
 QMenu::item:selected { background: #2ecc71; color: #1e1e1e; }
 QMenu::separator   { height: 1px; background: #444; margin: 4px 6px; }
+QToolButton#settingsGear { background: #2a2a2a; border: 1px solid #444; border-radius: 8px; padding: 4px; }
+QToolButton#settingsGear:hover { background: #3a3a3a; border-color: #2ecc71; }
+QToolButton#settingsGear:pressed { background: #2ecc71; }
 QTabWidget::pane   { border: 1px solid #555; background: #1e1e1e; }
 QTabBar::tab       { background: #2e2e2e; color: #f0f0f0; padding: 6px; min-width: 80px; }
 QTabBar::tab:selected { background: #3a3a3a; }
@@ -65,6 +68,9 @@ QMenu              { background: #ffffff; color: #1e1e1e; border: 1px solid #d4d
 QMenu::item        { padding: 6px 22px; border-radius: 4px; }
 QMenu::item:selected { background: #0f9d58; color: #ffffff; }
 QMenu::separator   { height: 1px; background: #d4d4d4; margin: 4px 6px; }
+QToolButton#settingsGear { background: #ffffff; border: 1px solid #d4d4d4; border-radius: 8px; padding: 4px; }
+QToolButton#settingsGear:hover { background: #f0f0f0; border-color: #0f9d58; }
+QToolButton#settingsGear:pressed { background: #0f9d58; }
 QTabWidget::pane   { border: 1px solid #555; background: #f0f0f0; }
 QTabBar::tab       { background: #f0f0f0; color: #2e2e2e; padding: 6px; min-width: 80px; }
 QTabBar::tab:selected { background: #666; color: #f0f0f0}

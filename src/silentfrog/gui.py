@@ -44,7 +44,12 @@ class HomeWindow(QMainWindow):
         self._build_help_menu()
 
         self.main_layout = QtWidgets.QVBoxLayout()
-        self.main_layout.setSpacing(20)
+        self.main_layout.setSpacing(16)
+        # Keep the column packed near the top: without this, full-screen
+        # height gets distributed between the items and the buttons
+        # drift apart with huge gaps.
+        self.main_layout.setAlignment(Qt.AlignTop)
+        self.main_layout.setContentsMargins(24, 24, 24, 24)
 
         icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
         self.setWindowIcon(QIcon(str(icon_path)))
@@ -80,11 +85,20 @@ class HomeWindow(QMainWindow):
             btn.clicked.connect(callback)
             self.main_layout.addWidget(btn)
 
+        # Push the gear away from the action buttons by inserting a
+        # vertical stretch above it. Combined with setAlignment(AlignTop)
+        # on main_layout the buttons stay packed at the top while the
+        # gear floats at the bottom-right of the inner column.
+        self.main_layout.addStretch(1)
+
         gear = QToolButton()
+        gear.setObjectName("settingsGear")
         settings_icon = importlib.resources.files("silentfrog").joinpath("assets/settings.png")
         gear.setIcon(QtGui.QIcon(str(settings_icon)))
+        gear.setIconSize(QtCore.QSize(28, 28))
         gear.setToolTip("Settings")
-        gear.setFixedSize(32, 32)
+        gear.setFixedSize(44, 44)
+        gear.setCursor(Qt.PointingHandCursor)
         gear.clicked.connect(self._open_settings)
 
         gear_row = QtWidgets.QHBoxLayout()
