@@ -33,7 +33,13 @@ class HomeWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog")
-        self.setMinimumSize(400, 200)
+        # The home is a fixed-size landing card. Resize / full-screen
+        # were producing layouts the maintainer rejected (buttons
+        # stretching edge-to-edge, gear lost in the middle). Locking
+        # the size keeps the visual contract stable regardless of OS
+        # window manager whims; child windows opened from here grow
+        # freely on their own.
+        self.setFixedSize(640, 720)
 
         # Each click on a primary action opens a new top-level QWidget.
         # We must hold a Python reference to every one of them or
@@ -45,11 +51,7 @@ class HomeWindow(QMainWindow):
 
         self.main_layout = QtWidgets.QVBoxLayout()
         self.main_layout.setSpacing(16)
-        # Keep the column packed near the top: without this, full-screen
-        # height gets distributed between the items and the buttons
-        # drift apart with huge gaps.
-        self.main_layout.setAlignment(Qt.AlignTop)
-        self.main_layout.setContentsMargins(24, 24, 24, 24)
+        self.main_layout.setContentsMargins(48, 32, 48, 24)
 
         icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
         self.setWindowIcon(QIcon(str(icon_path)))
@@ -69,6 +71,11 @@ class HomeWindow(QMainWindow):
             QtWidgets.QSizePolicy.Policy.Preferred,
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
+        # Top stretch + bottom stretch around the logo/buttons cluster
+        # vertically centre it inside the fixed-size window. The gear
+        # row sits BELOW the bottom stretch so it stays pinned to the
+        # bottom-right of the window itself, not the inner column.
+        self.main_layout.addStretch(1)
         self.main_layout.addWidget(logo)
 
         actions = (
@@ -85,10 +92,6 @@ class HomeWindow(QMainWindow):
             btn.clicked.connect(callback)
             self.main_layout.addWidget(btn)
 
-        # Push the gear away from the action buttons by inserting a
-        # vertical stretch above it. Combined with setAlignment(AlignTop)
-        # on main_layout the buttons stay packed at the top while the
-        # gear floats at the bottom-right of the inner column.
         self.main_layout.addStretch(1)
 
         gear = QToolButton()
@@ -106,20 +109,8 @@ class HomeWindow(QMainWindow):
         gear_row.addWidget(gear)
         self.main_layout.addLayout(gear_row)
 
-        # Wrap the column of logo + action buttons + gear in a max-width
-        # inner widget, then centre it horizontally. Without this, full-
-        # screen on macOS stretches every button to the screen width and
-        # the home screen looks like a bad landing page.
-        inner = QWidget()
-        inner.setLayout(self.main_layout)
-        inner.setMaximumWidth(560)
-        centred = QtWidgets.QHBoxLayout()
-        centred.setContentsMargins(0, 0, 0, 0)
-        centred.addStretch()
-        centred.addWidget(inner)
-        centred.addStretch()
         container = QWidget()
-        container.setLayout(centred)
+        container.setLayout(self.main_layout)
         self.setCentralWidget(container)
 
     def open_redirect(self) -> None:
