@@ -44,7 +44,16 @@ _VERDICT_WEAK = "Weak"
 _WORD_RE = re.compile(r"[^\W\d_]+(?:['\u2019-][^\W\d_]+)*", re.UNICODE)
 _SOCIAL_TITLE_SIMILARITY = 0.6
 _ENTITY_SCHEMA_TYPES = {"organization", "localbusiness", "product", "article", "person", "service"}
-_RICH_SCHEMA_TYPES = {"organization", "localbusiness", "product", "article", "faqpage", "breadcrumblist"}
+_RICH_SCHEMA_TYPES = {
+    "organization",
+    "localbusiness",
+    "product",
+    "article",
+    "faqpage",
+    "breadcrumblist",
+    "howto",
+    "website",
+}
 _AI_VISIBILITY_SUMMARY_TOOLTIP = (
     "AI Visibility combines five signals: Access, Topic clarity, Answerability, Citation readiness, "
     "and Entity clarity.\n\n"

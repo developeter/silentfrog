@@ -16,10 +16,10 @@ from .crawler_utils import _attr, as_tag
 
 Tag = bs4.element.Tag
 
-# Safe import of extruct (fallback if lxml is broken)
+# Safe import of extruct (fallback if lxml is broken). `extruct` is now a
+# runtime dep (pyproject), so this guard only fires on a broken install.
 try:
     import extruct  # type: ignore[import]  # upstream lacks type hints
-    from w3lib.html import get_base_url  # type: ignore[import]  # upstream lacks type hints
 
     USE_EXTRUCT = True
 except Exception:
@@ -34,6 +34,9 @@ _SCHEMA_ELIGIBILITY_TYPES = [
     ("faqpage", "FAQPage"),
     ("organization", "Organization"),
     ("localbusiness", "LocalBusiness"),
+    ("person", "Person"),
+    ("howto", "HowTo"),
+    ("website", "WebSite"),
 ]
 
 
@@ -197,6 +200,42 @@ def _schema_validate_local_business(obj: Dict[str, Any]) -> List[str]:
     return [message for failed, message in checks if failed]
 
 
+def _schema_validate_person(obj: Dict[str, Any]) -> List[str]:
+    checks = [
+        (not obj.get("name"), "missing name"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
+def _schema_validate_how_to_step(idx: int, step: Any) -> List[str]:
+    if not isinstance(step, dict):
+        return [f"step[{idx}] is not an object"]
+    if step.get("text") or step.get("name") or step.get("itemListElement"):
+        return []
+    return [f"step[{idx}] missing text or name"]
+
+
+def _schema_validate_how_to(obj: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    if not obj.get("name"):
+        errors.append("missing name")
+    steps = _schema_normalize_entries(obj.get("step"))
+    if not steps:
+        errors.append("missing step")
+        return errors
+    for idx, step in enumerate(steps, start=1):
+        errors.extend(_schema_validate_how_to_step(idx, step))
+    return errors
+
+
+def _schema_validate_website(obj: Dict[str, Any]) -> List[str]:
+    checks = [
+        (not obj.get("name"), "missing name"),
+        (not obj.get("url"), "missing url"),
+    ]
+    return [message for failed, message in checks if failed]
+
+
 _SCHEMA_VALIDATORS: Dict[str, Any] = {
     "breadcrumblist": _schema_validate_breadcrumb,
     "product": _schema_validate_product,
@@ -204,6 +243,9 @@ _SCHEMA_VALIDATORS: Dict[str, Any] = {
     "faqpage": _schema_validate_faq_page,
     "organization": _schema_validate_organization,
     "localbusiness": _schema_validate_local_business,
+    "person": _schema_validate_person,
+    "howto": _schema_validate_how_to,
+    "website": _schema_validate_website,
 }
 
 

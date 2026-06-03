@@ -1,0 +1,6 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Person",
+  "url": "https://example.com/authors/anonymous",
+  "jobTitle": "Writer"
+}

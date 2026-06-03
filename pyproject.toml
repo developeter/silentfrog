@@ -28,7 +28,13 @@ dependencies = [
     "nltk (>=3.9.1,<4.0.0)",
     # Pillow 12.2.x publishes Windows/macOS wheels for Python 3.14.
     "pillow (>=12.2.0,<13.0.0)",
-    "humanize (>=4.12.3,<5.0.0)"
+    "humanize (>=4.12.3,<5.0.0)",
+    # Structured data extraction. Imported at runtime by
+    # `silentfrog.schema_extractor`; the `USE_EXTRUCT` guard hides — not
+    # removes — that requirement. w3lib is a transitive dep of extruct but
+    # we pin it directly so the runtime contract is explicit.
+    "extruct (>=0.16.0,<0.17.0)",
+    "w3lib (>=2.1.0,<3.0.0)"
 ]
 
 [project.gui-scripts]
@@ -55,8 +61,6 @@ nltk = "^3.9.1"
 pytest-asyncio = "^1.0.0"
 pytest-aiohttp = "^1.1.0"
 pytest-qt = "^4.4.0"
-extruct = "^0.16.0"
-w3lib = "^2.1.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

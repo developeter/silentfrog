@@ -1,0 +1,10 @@
+{
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  "name": "How to brew filter coffee",
+  "step": [
+    {"@type": "HowToStep", "text": "Boil water to 95 degrees Celsius."},
+    {"@type": "HowToStep", "text": "Place 18 grams of ground coffee in the filter."},
+    {"@type": "HowToStep", "text": "Pour the water in slow circular motions over two minutes."}
+  ]
+}
