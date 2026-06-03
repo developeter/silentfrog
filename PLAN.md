@@ -221,6 +221,14 @@ Implemented foundation:
 
 Real Google Drive OAuth and UI controls remain future slices.
 
+### GEO Extension
+
+The detailed GEO (Generative Engine Optimization) plan lives in
+[`docs/geo_roadmap.md`](docs/geo_roadmap.md). It extends the existing AI
+Visibility audit to cover Google's AI Optimization Guide signals, E-E-A-T,
+SSR parity, and a GEO Score 0–100, across six milestones (M0..M5). It is a
+sibling roadmap to the milestones above, not a replacement.
+
 ### M9 Future Integrations / APIs
 
 Explore additional integrations after the issue model, reporting, GSC, logs, and
