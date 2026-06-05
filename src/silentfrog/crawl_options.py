@@ -12,6 +12,7 @@ class CrawlOptions:
     respect_crawl_delay: bool
     user_agent: str
     extra_headers: dict[str, str]
+    ssr_parity_check: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -21,6 +22,7 @@ class CrawlOptions:
             respect_crawl_delay=False,
             user_agent=DEFAULT_USER_AGENT,
             extra_headers={},
+            ssr_parity_check=False,
         )
 
     @classmethod
@@ -33,6 +35,7 @@ class CrawlOptions:
         respect_crawl_delay: bool | None = None,
         header_text: str | None = None,
         cookie_text: str | None = None,
+        ssr_parity_check: bool = False,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -48,6 +51,7 @@ class CrawlOptions:
             respect_crawl_delay=delay_flag,
             user_agent=ua,
             extra_headers=extras,
+            ssr_parity_check=bool(ssr_parity_check),
         )
 
 

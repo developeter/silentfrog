@@ -8,6 +8,15 @@ from .crawl_options import CrawlOptions, parse_header_lines
 from .theme import current_theme
 
 
+def _playwright_available() -> bool:
+    """Return True when the optional silentfrog[geo-render] extra is importable."""
+    try:
+        from playwright import sync_api  # type: ignore[import]  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 class CrawlSettingsDialog(QtWidgets.QDialog):
     """Lightweight dialog that groups gentle crawl controls away from the main window."""
 
@@ -16,11 +25,32 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         theme = self._configure_dialog()
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._build_general_group())
+        layout.addWidget(self._build_geo_group())
         layout.addWidget(self._build_advanced_group(theme))
         layout.addWidget(self._build_button_box())
         self._connect_signals()
         self._applying_preset = False
         self._initialize_options(options)
+
+    def _build_geo_group(self) -> QtWidgets.QGroupBox:
+        geo_box = QtWidgets.QGroupBox("GEO checks")
+        geo_layout = QtWidgets.QFormLayout(geo_box)
+        self.chk_ssr_parity = QtWidgets.QCheckBox("Run SSR parity check (requires Playwright)")
+        self.chk_ssr_parity.setToolTip(
+            "Optional. Compares the server-rendered DOM with the post-JS DOM via headless Chromium. "
+            "Install with: pip install silentfrog[geo-render] && playwright install chromium. "
+            "When disabled or when Playwright is missing, the AI Visibility row reports 'not measured' "
+            "and the GEO Score is not affected."
+        )
+        if not _playwright_available():
+            self.chk_ssr_parity.setEnabled(False)
+            self.chk_ssr_parity.setToolTip(
+                self.chk_ssr_parity.toolTip()
+                + "\n\nPlaywright is not installed: enable by running "
+                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
+            )
+        geo_layout.addRow(self.chk_ssr_parity)
+        return geo_box
 
     def _configure_dialog(self) -> str:
         self.setWindowTitle("Crawl settings")
@@ -115,6 +145,10 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _initialize_options(self, options: CrawlOptions) -> None:
         self.chk_gentle.setChecked(options.gentle_mode)
         self.spin_parallel.setValue(options.max_concurrent_per_host or 2)
+        if self.chk_ssr_parity.isEnabled():
+            self.chk_ssr_parity.setChecked(options.ssr_parity_check)
+        else:
+            self.chk_ssr_parity.setChecked(False)
         self._load_from_options(options)
         self._sync_state()
         self.resize(self.sizeHint().expandedTo(self.minimumSize()))
@@ -190,11 +224,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def options(self) -> CrawlOptions:
         header_text = self.txt_headers.toPlainText().strip()
         cookie_text = self.edit_cookies.text().strip()
+        ssr = bool(self.chk_ssr_parity.isEnabled() and self.chk_ssr_parity.isChecked())
         return CrawlOptions.from_ui(
             gentle_mode=self.chk_gentle.isChecked(),
             max_parallel=self.spin_parallel.value(),
             header_text=header_text,
             cookie_text=cookie_text,
+            ssr_parity_check=ssr,
         )
 
     def _apply_preset(self, preset: str) -> None:

@@ -18,6 +18,7 @@ from .crawl_types import (
 from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
+from .render_diff import RenderDiff, build_render_diff_check
 from .structure_signals import StructurePayload, build_structure_checks
 
 AI_VISIBILITY_AREAS = (
@@ -214,6 +215,12 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "absent => info. Never warned. Best practice: where it fits the editorial style, open sections with "
         "a one-sentence definition."
     ),
+    "access_ssr_parity": (
+        "Checks whether the page rendered without JavaScript matches what a JS-capable engine would see.\n\n"
+        "Best practice: render critical content server-side; AI crawlers commonly fetch without executing JS. "
+        "When Playwright is not installed this check reports 'not measured' (status=info) and does not "
+        "affect the verdict. Enable in Crawl settings after installing silentfrog[geo-render]."
+    ),
 }
 
 
@@ -259,12 +266,15 @@ def build_ai_visibility_summary(
     if not items:
         return AiVisibilitySummary.empty()
 
-    counts = Counter(item.status for item in items)
+    # Normalise so "info" rows fold into "good" (§1.5 alias), keeping the
+    # tab summary, GEO Score, and verdict consistent with the tooltip text.
+    normalised = [normalize_ai_visibility_status(item.status) for item in items]
+    counts = Counter(normalised)
     critical_count = counts.get("critical", 0)
     warning_count = counts.get("warning", 0)
     good_count = counts.get("good", 0)
     access_statuses = {
-        item.status
+        normalize_ai_visibility_status(item.status)
         for item in items
         if item.area == "Access"
     }
@@ -575,6 +585,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     eeat = EeatPayload.from_raw(data.get("eeat", {}))
     structure = StructurePayload.from_raw(data.get("structure", {}))
     citation_content = CitationContentPayload.from_raw(data.get("citation_content", {}))
+    render_diff = _render_diff_from_raw(data.get("render"))
     meta_robots = str(data.get("meta_robots", "")).strip()
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
@@ -582,6 +593,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     structure_by_area = _partition_structure_checks(structure_checks)
     checks = [
         *_build_access_checks(ai_rows),
+        build_render_diff_check(render_diff),
         *build_discovery_checks(discovery),
         *_build_topic_clarity_checks(quality, title, h1),
         *structure_by_area["Topic clarity"],
@@ -593,6 +605,25 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_eeat_checks(eeat),
     ]
     return checks
+
+
+def _render_diff_from_raw(value: Any) -> RenderDiff | None:
+    if not isinstance(value, Mapping):
+        return None
+    if not value:
+        return None
+    status = str(value.get("status", "")).strip()
+    if status not in {"good", "warning", "critical", "not_measured"}:
+        return None
+    missing_headings = value.get("missing_headings") or ()
+    headings_tuple = tuple(str(item) for item in missing_headings) if isinstance(missing_headings, (list, tuple)) else ()
+    return RenderDiff(
+        status=status,  # type: ignore[arg-type]
+        missing_headings=headings_tuple,
+        missing_main_text_chars=int(value.get("missing_main_text_chars", 0) or 0),
+        missing_links=int(value.get("missing_links", 0) or 0),
+        reason=str(value.get("reason", "")),
+    )
 
 
 def _partition_structure_checks(items: list[AiVisibilityCheck]) -> dict[str, list[AiVisibilityCheck]]:

@@ -49,6 +49,14 @@ pyqt5-backend = [
     "pyqt5 (==5.15.11)",
     "pyqt5-sip (>=12.11,<13)",
 ]
+# Optional Chromium-backed SSR parity check used by the GEO Visibility
+# audit (see docs/geo_roadmap.md §M4). After `pip install
+# silentfrog[geo-render]` run `playwright install chromium` to fetch the
+# browser bundle. When the extra is missing, the parity row reports
+# "not measured" and does NOT down-weight the AI Visibility verdict.
+geo-render = [
+    "playwright (>=1.43,<2.0)",
+]
 
 [tool.poetry]
 packages = [{include = "silentfrog", from = "src"}]

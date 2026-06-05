@@ -35,6 +35,7 @@ from .ai_visibility import build_ai_visibility_payload
 from .citation_readiness_content import extract_citation_content_signals
 from .discovery_files import fetch_discovery_files
 from .eeat_signals import extract_eeat_signals
+from .render_diff import compute_render_diff, render_with_playwright
 from .structure_signals import extract_structure_signals
 from .keywords import _extract_keywords
 from .parsers_meta import (
@@ -217,6 +218,24 @@ async def _collect_analysis_sections(
     }
 
 
+async def _collect_render_diff(response: Any, crawl_options: CrawlOptions) -> dict[str, Any]:
+    if not crawl_options.ssr_parity_check:
+        return {}
+    rendered = await asyncio.to_thread(render_with_playwright, response.url)
+    if rendered is None:
+        return {"status": "not_measured", "reason": "Playwright not installed"}
+    if rendered.error:
+        return {"status": "warning", "reason": f"Render failed: {rendered.error}"}
+    diff = compute_render_diff(response.body, rendered.rendered_html)
+    return {
+        "status": diff.status,
+        "missing_headings": list(diff.missing_headings),
+        "missing_main_text_chars": diff.missing_main_text_chars,
+        "missing_links": diff.missing_links,
+        "reason": diff.reason,
+    }
+
+
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
     crawl_options = options or CrawlOptions.default()
     response, robots_snapshot = await _fetch_analysis_response(url, timeout, crawl_options)
@@ -237,6 +256,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     quality_payload = section_payload.get("content_quality", {})
     language_hint = str(quality_payload.get("language", "")) if isinstance(quality_payload, dict) else ""
     citation_content = extract_citation_content_signals(soup, language_hint)
+    render_payload = await _collect_render_diff(response, crawl_options)
     raw_payload = {
         "schema": structured_data,
         "performance": performance_metrics,
@@ -244,6 +264,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "eeat": eeat.to_dict(),
         "structure": structure.to_dict(),
         "citation_content": citation_content.to_dict(),
+        "render": render_payload,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)

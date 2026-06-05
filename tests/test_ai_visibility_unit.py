@@ -400,3 +400,24 @@ def test_ai_visibility_summary_payload_carries_score() -> None:
     )
     assert payload.summary.score == 92
     assert payload.to_dict()["summary"]["score"] == 92
+
+
+def test_ai_visibility_emits_ssr_parity_row_with_info_when_render_absent() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    ssr = next(item for item in checks if item.key == "access_ssr_parity")
+    assert ssr.area == "Access"
+    # No render payload => "not measured" => info, which the verdict logic
+    # treats as "good" via _STATUS_ALIASES — never warning or critical.
+    assert ssr.status == "info"
+    summary = build_ai_visibility_summary(checks)
+    # info row must NOT be counted as warning/critical.
+    assert summary.critical_count == 0
+    assert summary.warning_count >= 0
+
+
+def test_ai_visibility_propagates_render_diff_when_present() -> None:
+    payload = _payload_with_discovery({})
+    payload["render"] = {"status": "critical", "missing_headings": ["H1"], "missing_main_text_chars": 900, "missing_links": 8}
+    checks = build_ai_visibility_checks(payload)
+    ssr = next(item for item in checks if item.key == "access_ssr_parity")
+    assert ssr.status == "critical"
