@@ -15,6 +15,7 @@ from .crawl_types import (
     SocialPayload,
     StructuredDataPayload,
 )
+from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
 from .structure_signals import StructurePayload, build_structure_checks
@@ -195,6 +196,23 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Best practice: descriptive alt per image. Per Google's AI Optimization Guide, image SEO is part "
         "of standard hygiene. The detailed image audit lives in the Images tab; this row summarises it "
         "for GEO. Absent => info, present => good. Never warned."
+    ),
+    "citation_question_headings": (
+        "Checks whether H2/H3 headings are phrased as questions that the body answers.\n\n"
+        "Per Google's AI Optimization Guide you do NOT need to rewrite content specifically for "
+        "generative AI search; question-form headings are a positive signal where they fit the natural "
+        "editorial style. Present => good; absent => info. Never warned."
+    ),
+    "citation_stats_density": (
+        "Checks whether the page contains specific numbers, dates, and units AI engines can quote.\n\n"
+        "Best practice: include concrete data points (percentages, monetary values, dated events) when "
+        "they are accurate and supportable. Warning only when zero quantitative tokens are found."
+    ),
+    "citation_definition_patterns": (
+        "Checks whether the page defines its key terms with clear \"X is Y\" sentences.\n\n"
+        "Per Google's AI Optimization Guide this is a positive signal, never a requirement. Present => good; "
+        "absent => info. Never warned. Best practice: where it fits the editorial style, open sections with "
+        "a one-sentence definition."
     ),
 }
 
@@ -547,6 +565,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     discovery = DiscoveryPayload.from_raw(data.get("discovery", {}))
     eeat = EeatPayload.from_raw(data.get("eeat", {}))
     structure = StructurePayload.from_raw(data.get("structure", {}))
+    citation_content = CitationContentPayload.from_raw(data.get("citation_content", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
@@ -560,6 +579,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *_build_answerability_checks(quality),
         *_build_citation_checks(schema, social, canonical, redirect, meta_robots),
         *structure_by_area["Citation readiness"],
+        *build_citation_content_checks(citation_content),
         *_build_entity_checks(title, h1, schema, social),
         *build_eeat_checks(eeat),
     ]

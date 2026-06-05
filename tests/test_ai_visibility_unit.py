@@ -329,3 +329,33 @@ def test_m2_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
     tooltip = ai_visibility_check_tooltip(myth_key)
     assert "Google" in tooltip
     assert any(token in tooltip for token in ("not required", "NOT required", "AI Optimization Guide", "QUALITY"))
+
+
+def test_ai_visibility_emits_m3_citation_content_rows() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    keys = {item.key for item in checks}
+    for key in ("citation_question_headings", "citation_stats_density", "citation_definition_patterns"):
+        assert key in keys
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    ["citation_question_headings", "citation_definition_patterns"],
+)
+def test_m3_myth_keys_never_warn_when_absent(myth_key: str) -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    item = next(check for check in checks if check.key == myth_key)
+    assert item.status not in {"warning", "critical"}
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    ["citation_question_headings", "citation_definition_patterns"],
+)
+def test_m3_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
+    tooltip = ai_visibility_check_tooltip(myth_key)
+    assert "Google" in tooltip
+    assert any(
+        token in tooltip
+        for token in ("not required", "NOT required", "AI Optimization Guide", "positive signal")
+    )
