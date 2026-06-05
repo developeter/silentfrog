@@ -273,3 +273,59 @@ def test_ai_visibility_myth_tooltips_carry_google_disclaimer(myth_key: str) -> N
     tooltip = ai_visibility_check_tooltip(myth_key)
     assert "Google" in tooltip
     assert any(token in tooltip for token in ("not required", "NOT required", "Google-not-required", "AI Optimization Guide"))
+
+
+def test_ai_visibility_areas_include_eeat() -> None:
+    # M2 adds "E-E-A-T" as the sixth area.
+    assert "E-E-A-T" in AI_VISIBILITY_AREAS
+    assert AI_VISIBILITY_AREAS.index("E-E-A-T") == 5
+
+
+def test_ai_visibility_emits_eeat_and_structure_rows() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    keys = {item.key for item in checks}
+    for key in (
+        "eeat_author_byline", "eeat_publish_date", "eeat_update_freshness",
+        "eeat_author_bio", "eeat_external_citations",
+        "structure_semantic_html", "structure_internal_links", "citation_images_alt",
+    ):
+        assert key in keys, f"missing M2 check: {key}"
+
+
+def test_eeat_rows_alone_do_not_trigger_weak_verdict() -> None:
+    # E-E-A-T warnings should never push the summary to Weak — only
+    # Access criticals do that. Build a payload with only the byline
+    # missing and assert verdict stays at most "Needs work".
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    summary = build_ai_visibility_summary(checks)
+    assert summary.verdict in {"Strong", "Needs work"}
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    [
+        "structure_semantic_html",
+        "structure_internal_links",
+        "citation_images_alt",
+        "eeat_external_citations",
+    ],
+)
+def test_m2_myth_keys_never_warn_when_absent(myth_key: str) -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    item = next(check for check in checks if check.key == myth_key)
+    assert item.status not in {"warning", "critical"}
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    [
+        "structure_semantic_html",
+        "structure_internal_links",
+        "citation_images_alt",
+        "eeat_external_citations",
+    ],
+)
+def test_m2_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
+    tooltip = ai_visibility_check_tooltip(myth_key)
+    assert "Google" in tooltip
+    assert any(token in tooltip for token in ("not required", "NOT required", "AI Optimization Guide", "QUALITY"))

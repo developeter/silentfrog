@@ -33,6 +33,8 @@ from .crawl_http import (
 from .content_quality import extract_content_quality
 from .ai_visibility import build_ai_visibility_payload
 from .discovery_files import fetch_discovery_files
+from .eeat_signals import extract_eeat_signals
+from .structure_signals import extract_structure_signals
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
@@ -229,10 +231,14 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         robots_snapshot,
     )
 
+    eeat = extract_eeat_signals(soup, structured_data, response.url)
+    structure = extract_structure_signals(soup, response.url)
     raw_payload = {
         "schema": structured_data,
         "performance": performance_metrics,
         **section_payload,
+        "eeat": eeat.to_dict(),
+        "structure": structure.to_dict(),
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)

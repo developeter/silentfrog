@@ -16,6 +16,8 @@ from .crawl_types import (
     StructuredDataPayload,
 )
 from .discovery_files import DiscoveryPayload, build_discovery_checks
+from .eeat_signals import EeatPayload, build_eeat_checks
+from .structure_signals import StructurePayload, build_structure_checks
 
 AI_VISIBILITY_AREAS = (
     "Access",
@@ -23,6 +25,7 @@ AI_VISIBILITY_AREAS = (
     "Answerability",
     "Citation readiness",
     "Entity clarity",
+    "E-E-A-T",
 )
 
 _STATUS_ALIASES = {
@@ -150,6 +153,48 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Best practice: publish a sitemap and reference it in robots.txt. Per Google's AI Optimization Guide, "
         "sitemap is part of standard crawlability hygiene; not specific to AI. "
         "Absent => info, present => good. Never warned."
+    ),
+    "eeat_author_byline": (
+        "Checks whether the page exposes a visible author byline near the title.\n\n"
+        "Best practice: show the author name in the page body and link it to a stable profile."
+    ),
+    "eeat_publish_date": (
+        "Checks whether the page declares a publish date a generative engine can attribute.\n\n"
+        "Best practice: expose datePublished (or a visible publication date) so AI systems can date the claim."
+    ),
+    "eeat_update_freshness": (
+        "Checks whether the page was updated within the configured freshness window.\n\n"
+        "Best practice: maintain dateModified (or a visible last-update marker) and refresh evergreen pages "
+        "within the SILENTFROG_EEAT_FRESHNESS_DAYS threshold (default 365)."
+    ),
+    "eeat_author_bio": (
+        "Checks whether the author has a discoverable bio or sameAs link.\n\n"
+        "Best practice: link the byline to an /about page, a Person schema with sameAs, or a stable external profile."
+    ),
+    "eeat_external_citations": (
+        "Checks whether the page cites a small number of named, authoritative external sources.\n\n"
+        "Best practice: link standards bodies, peer-reviewed work, or primary docs when relevant. "
+        "Per Google's AI Optimization Guide, QUALITY matters more than quantity; manufactured or "
+        "inauthentic mentions do NOT help. Absent => info; never recommends pursuing mentions."
+    ),
+    "structure_semantic_html": (
+        "Checks whether the page uses semantic HTML containers (article, section, main, nav, header, footer) "
+        "instead of generic div soup.\n\n"
+        "Best practice: structure the page with semantic landmarks. Per Google's AI Optimization Guide, "
+        "semantic HTML aids machine understanding without any AI-specific markup. "
+        "Absent => info, present => good. Never warned."
+    ),
+    "structure_internal_links": (
+        "Checks whether the page links to related internal pages.\n\n"
+        "Best practice: a small set of contextual internal links to deeper or related content. "
+        "Per Google's AI Optimization Guide, internal architecture that helps crawlers and readers is "
+        "standard SEO hygiene. Absent => info, present => good. Never warned."
+    ),
+    "citation_images_alt": (
+        "Checks whether content images carry meaningful alt text.\n\n"
+        "Best practice: descriptive alt per image. Per Google's AI Optimization Guide, image SEO is part "
+        "of standard hygiene. The detailed image audit lives in the Images tab; this row summarises it "
+        "for GEO. Absent => info, present => good. Never warned."
     ),
 }
 
@@ -500,18 +545,33 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     canonical = CanonicalInfo.from_raw(data.get("canonical", {}))
     redirect = RedirectInfo.from_raw(data.get("redirect", {}))
     discovery = DiscoveryPayload.from_raw(data.get("discovery", {}))
+    eeat = EeatPayload.from_raw(data.get("eeat", {}))
+    structure = StructurePayload.from_raw(data.get("structure", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
+    structure_checks = build_structure_checks(structure)
+    structure_by_area = _partition_structure_checks(structure_checks)
     checks = [
         *_build_access_checks(ai_rows),
         *build_discovery_checks(discovery),
         *_build_topic_clarity_checks(quality, title, h1),
+        *structure_by_area["Topic clarity"],
         *_build_answerability_checks(quality),
         *_build_citation_checks(schema, social, canonical, redirect, meta_robots),
+        *structure_by_area["Citation readiness"],
         *_build_entity_checks(title, h1, schema, social),
+        *build_eeat_checks(eeat),
     ]
     return checks
+
+
+def _partition_structure_checks(items: list[AiVisibilityCheck]) -> dict[str, list[AiVisibilityCheck]]:
+    bins: dict[str, list[AiVisibilityCheck]] = {"Topic clarity": [], "Citation readiness": []}
+    for item in items:
+        if item.area in bins:
+            bins[item.area].append(item)
+    return bins
 
 
 def build_ai_visibility_payload(value: CrawlPayload | Mapping[str, Any]) -> AiVisibilityPayload:
