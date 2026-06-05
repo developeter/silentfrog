@@ -263,9 +263,10 @@ class UpdateDialog(QDialog):
             restart_app()
             return
         self._status_label.setText("Update failed.")
+        existing = self._details_label.text()
+        error_line = f"`tools.update_silentfrog` exited with code {exit_code}."
         self._details_label.setText(
-            f"`tools.update_silentfrog` exited with code {exit_code}. "
-            "Try again later or check the log for details."
+            f"{existing}\n\n{error_line}" if existing else error_line
         )
         self._set_buttons({"Close": self._close_ok})
 

@@ -11,6 +11,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 from tools.update_silentfrog import (  # noqa: E402
     _ensure_executable_launchers,
+    _install_runtime_deps,
+    _refresh_install,
+    _runtime_dep_specs,
     _sync_site_packages,
     _venv_site_packages,
 )
@@ -110,6 +113,116 @@ def test_venv_site_packages_windows_path() -> None:
         pytest.skip("Windows-specific path layout")
     repo = Path("C:/users/dev/silentfrog")
     assert _venv_site_packages(repo) == repo / ".venv" / "Lib" / "site-packages"
+
+
+def test_runtime_dep_specs_reads_project_dependencies(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\n'
+        'name = "x"\n'
+        'dependencies = [\n'
+        '    "extruct (>=0.16.0,<0.17.0)",\n'
+        '    "w3lib (>=2.1.0,<3.0.0)",\n'
+        ']\n',
+        encoding="utf-8",
+    )
+    assert _runtime_dep_specs(pyproject) == [
+        "extruct (>=0.16.0,<0.17.0)",
+        "w3lib (>=2.1.0,<3.0.0)",
+    ]
+
+
+def test_runtime_dep_specs_missing_file_returns_empty(tmp_path: Path) -> None:
+    assert _runtime_dep_specs(tmp_path / "missing.toml") == []
+
+
+def test_install_runtime_deps_calls_pip_with_named_specs(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Regression for exit-code-4 file-lock failure: the deps_changed
+    path must NOT run `pip install .` (which uninstalls silentfrog and
+    fails on Windows when the GUI is running). It must run direct
+    `pip install <spec>` which never touches the wrapper exe.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "x"\ndependencies = ["extruct (>=0.16.0,<0.17.0)"]\n',
+        encoding="utf-8",
+    )
+    venv_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+    monkeypatch.setattr("os.name", "nt")
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], cwd: Path) -> int:
+        captured["cmd"] = cmd
+        captured["cwd"] = str(cwd)
+        return 0
+
+    monkeypatch.setattr("tools.update_silentfrog._run", fake_run)
+
+    exit_code = _install_runtime_deps(tmp_path)
+
+    assert exit_code == 0
+    assert "pip" in captured["cmd"]
+    assert "install" in captured["cmd"]
+    assert "--upgrade" in captured["cmd"]
+    # The package install spec must be present; "." must NOT be there
+    # (that would rebuild silentfrog and trigger the file-lock failure).
+    assert "extruct (>=0.16.0,<0.17.0)" in captured["cmd"]
+    assert "." not in captured["cmd"]
+
+
+def test_refresh_install_deps_changed_uses_direct_pip_not_full_reinstall(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Both the deps-changed and deps-unchanged paths must avoid
+    `install_silentfrog.py` / `pip install .` so silentfrog.exe is never
+    overwritten while the GUI is running.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\nname = "x"\ndependencies = ["aiohttp"]\n', encoding="utf-8"
+    )
+    _make_user_install(tmp_path)
+    monkeypatch.setattr(
+        "tools.update_silentfrog._venv_site_packages",
+        lambda root: tmp_path / ".venv" / "Lib" / "site-packages",
+    )
+    monkeypatch.setattr("os.name", "nt")
+    (tmp_path / ".venv" / "Scripts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr("tools.update_silentfrog._run", lambda cmd, cwd: calls.append(cmd) or 0)
+
+    exit_code = _refresh_install(tmp_path, deps_changed=True)
+
+    assert exit_code == 0
+    # Exactly one pip invocation; it targets the named dep, not ".".
+    assert len(calls) == 1
+    assert "install_silentfrog.py" not in calls[0]
+    assert "." not in calls[0]
+    assert "aiohttp" in calls[0]
+
+
+def test_refresh_install_deps_unchanged_skips_pip_entirely(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _make_user_install(tmp_path)
+    monkeypatch.setattr(
+        "tools.update_silentfrog._venv_site_packages",
+        lambda root: tmp_path / ".venv" / "Lib" / "site-packages",
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr("tools.update_silentfrog._run", lambda cmd, cwd: calls.append(cmd) or 0)
+
+    exit_code = _refresh_install(tmp_path, deps_changed=False)
+
+    assert exit_code == 0
+    assert calls == [], "deps_changed=False must not invoke pip"
 
 
 def test_ensure_executable_launchers_restores_x_bit(tmp_path: Path) -> None:

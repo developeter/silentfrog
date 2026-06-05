@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -98,33 +99,67 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 def _refresh_install(repo_root: Path, deps_changed: bool) -> int:
     """Bring the installed package in sync with the freshly written sources.
 
-    When ``deps_changed`` is True we re-run the full ``install_silentfrog.py``
-    so pip can resolve any new runtime requirements. On Windows, that
-    regenerates ``.venv/Scripts/silentfrog.exe`` which conflicts with a
-    still-running GUI process; the caller (the in-app updater) is
-    expected to restart the GUI after this returns.
-
-    When ``deps_changed`` is False we sync the source files directly
-    into the venv's ``site-packages/silentfrog/`` directory, bypassing
-    pip entirely. This is safer than ``pip install . --no-deps`` for
-    two reasons:
-
-    * pip uninstalls the existing package before installing the new
-      wheel; a Windows file-lock on a child binary then leaves the
-      install broken (no silentfrog package at all in site-packages).
-      ``shutil.copy2`` is non-destructive — partial failure means some
-      files are old, but the package still imports.
-    * pip would regenerate the ``silentfrog.exe`` console-script
-      wrapper in ``.venv/Scripts/``, which Windows cannot overwrite
-      while the GUI is still using it. Direct file copy never touches
-      ``Scripts/``.
+    Both paths sync source files via ``shutil.copy2`` and never touch
+    ``.venv/Scripts/silentfrog.exe``, so the running GUI's console-script
+    wrapper stays available. When ``deps_changed`` is True we additionally
+    install/upgrade the runtime deps via direct ``pip install <pkg>``
+    calls — never ``pip install .``, which on Windows would uninstall
+    the silentfrog wheel first (deleting ``silentfrog.exe`` mid-process)
+    and fail with exit code 4 because the running GUI holds an exclusive
+    lock on that exe.
     """
-    if deps_changed:
-        return _run([sys.executable, "install_silentfrog.py"], cwd=repo_root)
     exit_code = _sync_site_packages(repo_root)
-    if exit_code == 0:
-        _ensure_executable_launchers(repo_root)
-    return exit_code
+    if exit_code != 0:
+        return exit_code
+    _ensure_executable_launchers(repo_root)
+    if deps_changed:
+        return _install_runtime_deps(repo_root)
+    return 0
+
+
+def _runtime_dep_specs(pyproject_path: Path) -> list[str]:
+    """Return ``[project] dependencies`` specs from pyproject.toml."""
+    if not pyproject_path.is_file():
+        return []
+    try:
+        with pyproject_path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        print(f"[update] could not parse pyproject.toml: {exc}")
+        return []
+    project = data.get("project", {})
+    deps = project.get("dependencies", []) if isinstance(project, dict) else []
+    if not isinstance(deps, list):
+        return []
+    return [str(spec) for spec in deps if isinstance(spec, str) and spec.strip()]
+
+
+def _venv_python(repo_root: Path) -> Path:
+    if os.name == "nt":
+        return repo_root / ".venv" / "Scripts" / "python.exe"
+    return repo_root / ".venv" / "bin" / "python"
+
+
+def _install_runtime_deps(repo_root: Path) -> int:
+    """Install/upgrade only the runtime deps named in pyproject.toml.
+
+    Pip writes the named packages into ``site-packages`` without
+    rebuilding or reinstalling silentfrog itself, so the running GUI's
+    ``silentfrog.exe`` wrapper is never touched.
+    """
+    specs = _runtime_dep_specs(repo_root / "pyproject.toml")
+    if not specs:
+        print("[update] pyproject.toml has no [project] dependencies; skipping pip step.")
+        return 0
+    python = _venv_python(repo_root)
+    if not python.is_file():
+        print(f"[update] venv python not found: {python}")
+        return 1
+    print(f"[update] Installing {len(specs)} runtime deps into the venv.")
+    return _run(
+        [str(python), "-m", "pip", "install", "--upgrade", "--no-input", *specs],
+        cwd=repo_root,
+    )
 
 
 def _ensure_executable_launchers(repo_root: Path) -> None:
