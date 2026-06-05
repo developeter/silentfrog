@@ -15,6 +15,7 @@ from .crawl_types import (
     SocialPayload,
     StructuredDataPayload,
 )
+from .discovery_files import DiscoveryPayload, build_discovery_checks
 
 AI_VISIBILITY_AREAS = (
     "Access",
@@ -124,6 +125,31 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Checks whether entity-supporting schema is present for the kind of page being audited.\n\n"
         "Best practice: add the most relevant entity schema type, such as Organization, LocalBusiness, "
         "Product, Article, Service, or Person."
+    ),
+    "access_llms_txt": (
+        "Checks whether the site publishes an llms.txt declaring policies and entry points "
+        "for AI crawlers.\n\n"
+        "Per Google's AI Optimization Guide this file is NOT required to appear in Google's AI surfaces; "
+        "some other AI engines (Anthropic, Perplexity, OpenAI) treat its presence as a positive signal. "
+        "Absent => info; present => good. Never warned."
+    ),
+    "access_llms_full_txt": (
+        "Checks whether the site publishes an llms-full.txt with the long-form policy and "
+        "structured content map.\n\n"
+        "Per Google's AI Optimization Guide this file is NOT required; same Google-not-required rule "
+        "as access_llms_txt: absent => info, present => good."
+    ),
+    "access_well_known_ai_json": (
+        "Checks whether the site publishes /.well-known/ai.json with a machine-readable AI access policy.\n\n"
+        "Per Google's AI Optimization Guide this file is NOT required: absent => info, present => good. "
+        "Useful only for engines that explicitly read the file."
+    ),
+    "access_sitemap": (
+        "Checks whether a sitemap.xml is discoverable via a Sitemap: directive in robots.txt "
+        "or at the site root.\n\n"
+        "Best practice: publish a sitemap and reference it in robots.txt. Per Google's AI Optimization Guide, "
+        "sitemap is part of standard crawlability hygiene; not specific to AI. "
+        "Absent => info, present => good. Never warned."
     ),
 }
 
@@ -473,11 +499,13 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     social = SocialPayload.from_raw(data.get("social", {}))
     canonical = CanonicalInfo.from_raw(data.get("canonical", {}))
     redirect = RedirectInfo.from_raw(data.get("redirect", {}))
+    discovery = DiscoveryPayload.from_raw(data.get("discovery", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
     checks = [
         *_build_access_checks(ai_rows),
+        *build_discovery_checks(discovery),
         *_build_topic_clarity_checks(quality, title, h1),
         *_build_answerability_checks(quality),
         *_build_citation_checks(schema, social, canonical, redirect, meta_robots),

@@ -265,14 +265,15 @@ def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
     directives = {row[0]: row[3] for row in rows}
     controls = {row[0]: row[4] for row in rows}
     notes = {row[0]: row[6] for row in rows}
-    assert verdicts == {
-        "GPTBot": "Allowed",
-        "OAI-SearchBot": "Blocked",
-        "Googlebot": "Limited",
-        "Google-Extended": "Blocked",
-        "ClaudeBot": "Blocked",
-        "Claude-SearchBot": "Blocked",
-    }
+    # GPTBot has an explicit Allow rule; Googlebot inherits "*" Allow but
+    # picks up Google search controls; every other agent falls under "*"
+    # whose first-match-wins resolution at /private is Disallow.
+    assert verdicts["GPTBot"] == "Allowed"
+    assert verdicts["Googlebot"] == "Limited"
+    assert verdicts["Google-Extended"] == "Blocked"
+    assert verdicts["ClaudeBot"] == "Blocked"
+    assert verdicts["Claude-SearchBot"] == "Blocked"
+    assert verdicts["OAI-SearchBot"] == "Blocked"
     assert all(value == "noai" for value in directives.values())
     assert "Blocked by robots.txt: /private" in notes["Google-Extended"]
     assert controls["Googlebot"] == "nosnippet"

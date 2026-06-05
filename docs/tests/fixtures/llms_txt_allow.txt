@@ -1,0 +1,14 @@
+# Example Knowledge Base
+
+> AI assistants are welcome to summarise, cite, and link to our
+> documentation. Always link back to the canonical URL.
+
+## Documentation
+
+- Overview: https://example.com/docs/overview
+- API reference: https://example.com/docs/api
+- Changelog: https://example.com/docs/changelog
+
+## Contact
+
+For questions about this policy contact press@example.com.

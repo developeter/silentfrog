@@ -1,0 +1,12 @@
+{
+  "version": "0.1",
+  "policy": "deny",
+  "contact": "legal@example.com",
+  "agents": {
+    "GPTBot": "deny",
+    "ClaudeBot": "deny",
+    "PerplexityBot": "deny",
+    "Google-Extended": "deny"
+  },
+  "attribution_required": false
+}

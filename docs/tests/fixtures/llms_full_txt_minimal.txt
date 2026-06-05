@@ -1,0 +1,16 @@
+# Example Knowledge Base — Full Map
+
+## About this file
+
+Long-form companion to llms.txt. Maps the site's structured content
+for AI assistants that follow the optional llms-full.txt convention.
+
+## Top-level sections
+
+- Documentation: see llms.txt for the short index
+- Tutorials: https://example.com/tutorials
+- Reference: https://example.com/reference
+
+## Update cadence
+
+This file is regenerated weekly. Last updated 2026-05-01.

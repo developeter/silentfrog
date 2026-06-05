@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from silentfrog.ai_visibility import (  # type: ignore[reportMissingImports]
     AI_VISIBILITY_AREAS,
     ai_visibility_check_tooltip,
@@ -194,3 +196,80 @@ def test_ai_visibility_analyzer_marks_blocked_access_as_weak() -> None:
     assert by_key["topic_depth"].status == "critical"
     assert by_key["citation_schema"].status == "warning"
     assert summary.verdict == "Weak"
+
+
+_MIN_PAYLOAD = {
+    "ai_crawl": [["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "-"]],
+    "meta": [["title", "Sample", "10"]],
+    "headers": [["h1", "Sample"]],
+    "meta_robots": "",
+    "content_quality": {
+        "language": "English (en-US)",
+        "word_count": 400,
+        "paragraph_count": 4,
+        "substantial_paragraph_count": 3,
+        "average_words_per_paragraph": 20.0,
+        "title_present": True,
+        "meta_description_present": True,
+        "h1_count": 1,
+        "h2_h6_count": 2,
+        "title_h1_alignment": "Aligned",
+        "intro_paragraph": "Present",
+        "thin_content_risk": "Low",
+        "heading_structure": "Good",
+        "verdict": "Strong",
+    },
+    "schema": {"summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []}, "eligibility": [], "blocks": [], "fallback_raw": []},
+    "canonical": {"target": "https://example.com/", "self": True, "multiple": False, "status": "200"},
+    "redirect": {"chain": ["https://example.com/"], "hops": 0, "final_status": "200", "loop": False},
+    "social": {"open_graph": {}, "twitter": {}},
+}
+
+
+def _payload_with_discovery(discovery: dict) -> dict:
+    return {**_MIN_PAYLOAD, "discovery": discovery}
+
+
+def test_ai_visibility_emits_four_discovery_checks_in_access_area() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    by_key = {item.key: item for item in checks}
+    for key in ("access_llms_txt", "access_llms_full_txt", "access_well_known_ai_json", "access_sitemap"):
+        assert key in by_key, f"missing check: {key}"
+        assert by_key[key].area == "Access"
+
+
+def test_ai_visibility_discovery_checks_are_good_when_files_present() -> None:
+    discovery = {
+        "llms_txt": {"url": "https://example.com/llms.txt", "status": 200, "present": True, "body_excerpt": "# x", "parsed": {"title": "x"}, "source": "fetch"},
+        "llms_full_txt": {"url": "https://example.com/llms-full.txt", "status": 200, "present": True, "body_excerpt": "# y", "parsed": {}, "source": "fetch"},
+        "well_known_ai_json": {"url": "https://example.com/.well-known/ai.json", "status": 200, "present": True, "body_excerpt": "{}", "parsed": {"policy": "allow"}, "source": "fetch"},
+        "sitemap": {"url": "https://example.com/sitemap.xml", "status": 200, "present": True, "body_excerpt": "<urlset/>", "parsed": {"robots_sitemap_count": 1}, "source": "robots-sitemap"},
+    }
+    checks = build_ai_visibility_checks(_payload_with_discovery(discovery))
+    by_key = {item.key: item for item in checks}
+    for key in ("access_llms_txt", "access_llms_full_txt", "access_well_known_ai_json", "access_sitemap"):
+        assert by_key[key].status == "good"
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    ["access_llms_txt", "access_llms_full_txt", "access_well_known_ai_json", "access_sitemap"],
+)
+def test_ai_visibility_myth_flagged_checks_never_warn_when_absent(myth_key: str) -> None:
+    # §1.5 of docs/geo_roadmap.md: absence of myth-flagged signals routes
+    # to "info" (which _STATUS_ALIASES maps to "good"), never warning or critical.
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    check = next(item for item in checks if item.key == myth_key)
+    assert check.status not in {"warning", "critical"}
+
+
+@pytest.mark.parametrize(
+    "myth_key",
+    ["access_llms_txt", "access_llms_full_txt", "access_well_known_ai_json", "access_sitemap"],
+)
+def test_ai_visibility_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
+    # §7 risk register: tooltip rewording must NOT drift away from the
+    # Google-myth disclaimer. Every myth-flagged tooltip names Google.
+    tooltip = ai_visibility_check_tooltip(myth_key)
+    assert "Google" in tooltip
+    assert any(token in tooltip for token in ("not required", "NOT required", "Google-not-required", "AI Optimization Guide"))

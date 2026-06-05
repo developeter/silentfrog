@@ -95,3 +95,36 @@ async def test_fetch_image_details_graceful_failure(monkeypatch) -> None:
     monkeypatch.setattr(parsers.aiohttp, "ClientSession", lambda: _BrokenSession())
 
     assert await parsers._fetch_image_details("https://example.com/image.png", timeout=1) == (0, 0, 0, "-", "")
+
+
+def test_ai_agents_matrix_lists_at_least_eighteen_bots() -> None:
+    # M1 of docs/geo_roadmap.md: ≥ 18 AI/search agent rows in the matrix.
+    assert len(parsers._AI_AGENTS) >= 18
+
+
+def test_ai_agents_matrix_covers_named_engines() -> None:
+    tokens = {agent.token for agent in parsers._AI_AGENTS}
+    # Anthropic family, OpenAI family, Perplexity, Google, Apple, Amazon,
+    # ByteDance, Common Crawl, Meta, DuckDuckGo, Cohere.
+    expected = {
+        "gptbot", "chatgpt-user", "oai-searchbot",
+        "claudebot", "anthropic-ai", "claude-web", "claude-user", "claude-searchbot",
+        "perplexitybot", "perplexity-user",
+        "googlebot", "google-extended",
+        "applebot-extended", "amazonbot", "bytespider", "ccbot",
+        "meta-externalagent", "duckassistbot", "cohere-ai",
+    }
+    missing = expected - tokens
+    assert missing == set(), f"missing AI agent tokens: {missing}"
+
+
+def test_only_googlebot_applies_google_search_controls() -> None:
+    google_flagged = [
+        agent for agent in parsers._AI_AGENTS if agent.applies_google_search_controls
+    ]
+    assert [agent.token for agent in google_flagged] == ["googlebot"]
+
+
+def test_ai_agent_labels_are_unique() -> None:
+    labels = [agent.label for agent in parsers._AI_AGENTS]
+    assert len(labels) == len(set(labels)), "duplicate label in _AI_AGENTS"

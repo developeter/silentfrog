@@ -32,6 +32,7 @@ from .crawl_http import (
 )
 from .content_quality import extract_content_quality
 from .ai_visibility import build_ai_visibility_payload
+from .discovery_files import fetch_discovery_files
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
@@ -186,6 +187,12 @@ async def _collect_analysis_sections(
     meta_robots = _meta_robots_value(response.headers, soup)
     robots_map = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
     serp_snippet = await _make_serp_snippet(soup, response.url)
+    discovery = await fetch_discovery_files(
+        response.url,
+        robots_map=robots_map,
+        timeout=timeout,
+        crawl_options=crawl_options,
+    )
 
     return {
         "meta": meta_rows,
@@ -203,6 +210,7 @@ async def _collect_analysis_sections(
         "keywords": _extract_keywords(soup, plain_text),
         "content_quality": extract_content_quality(soup),
         "social": await _extract_social_cards(response.url, soup, timeout=timeout),
+        "discovery": discovery.to_dict(),
     }
 
 

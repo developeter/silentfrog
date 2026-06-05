@@ -1,0 +1,13 @@
+{
+  "version": "0.1",
+  "policy": "allow",
+  "contact": "press@example.com",
+  "agents": {
+    "GPTBot": "allow",
+    "ClaudeBot": "allow",
+    "PerplexityBot": "allow",
+    "Google-Extended": "allow"
+  },
+  "attribution_required": true,
+  "rate_limit_rps": 2
+}

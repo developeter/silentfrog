@@ -629,11 +629,24 @@ class AiAuditAgent:
 
 _AI_AGENTS = (
     AiAuditAgent("GPTBot", "gptbot"),
+    AiAuditAgent("ChatGPT-User", "chatgpt-user"),
     AiAuditAgent("OAI-SearchBot", "oai-searchbot"),
+    AiAuditAgent("ClaudeBot", "claudebot"),
+    AiAuditAgent("anthropic-ai", "anthropic-ai"),
+    AiAuditAgent("Claude-Web", "claude-web"),
+    AiAuditAgent("Claude-User", "claude-user"),
+    AiAuditAgent("Claude-SearchBot", "claude-searchbot"),
+    AiAuditAgent("PerplexityBot", "perplexitybot"),
+    AiAuditAgent("Perplexity-User", "perplexity-user"),
     AiAuditAgent("Googlebot", "googlebot", applies_google_search_controls=True),
     AiAuditAgent("Google-Extended", "google-extended"),
-    AiAuditAgent("ClaudeBot", "claudebot"),
-    AiAuditAgent("Claude-SearchBot", "claude-searchbot"),
+    AiAuditAgent("Applebot-Extended", "applebot-extended"),
+    AiAuditAgent("Amazonbot", "amazonbot"),
+    AiAuditAgent("Bytespider", "bytespider"),
+    AiAuditAgent("CCBot", "ccbot"),
+    AiAuditAgent("Meta-ExternalAgent", "meta-externalagent"),
+    AiAuditAgent("DuckAssistBot", "duckassistbot"),
+    AiAuditAgent("cohere-ai", "cohere-ai"),
 )
 
 _AI_NONSTANDARD_DIRECTIVES = {"noai", "noimageai"}
