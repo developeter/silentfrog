@@ -31,3 +31,6 @@ secrets.local.json
 # living at the install root so the Desktop symlink can target a
 # bundle (and the menu bar renders "Silentfrog" instead of "Python").
 /Silentfrog.app/
+
+# Claude Code worktrees and session state.
+.claude/
