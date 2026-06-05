@@ -46,6 +46,7 @@ def _write_summary_sheets(
     _write_rows(workbook, "Meta issues", _issue_headers(), _meta_issue_rows(results), formats)
     _write_rows(workbook, "Structured data", ["URL", "Schema count", "Types", "Error count"], _structured_rows(results), formats)
     _write_rows(workbook, "Images", ["URL", "Images", "Image issues"], _image_rows(results), formats)
+    _write_rows(workbook, "GEO Score", ["URL", "Score", "Verdict", "Good", "Warning", "Critical"], _geo_score_rows(results), formats)
     _write_rows(workbook, "AI Visibility", ["URL", "Verdict", "Good", "Warning", "Critical"], _ai_rows(results), formats)
     _write_rows(workbook, "Errors", ["URL", "Status", "Error"], _error_rows(results), formats)
 
@@ -70,6 +71,7 @@ def _write_detail_sheets(
         ("Content quality detail", ["Page URL", "Check", "Value"], _content_quality_detail_rows(rows)),
         ("Keywords detail", _keyword_headers(), _keyword_detail_rows(rows)),
         ("AI crawl detail", _ai_crawl_headers(), _ai_crawl_detail_rows(rows)),
+        ("GEO Score detail", _geo_score_detail_headers(), _geo_score_detail_rows(rows)),
         ("AI Visibility detail", _ai_visibility_headers(), _ai_visibility_detail_rows(rows)),
         ("Performance detail", _performance_headers(), _performance_detail_rows(rows)),
         ("SERP detail", ["Page URL", "Section", "Field", "Value"], _serp_detail_rows(rows)),
@@ -196,6 +198,45 @@ def _ai_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
         summary = result.payload.ai_visibility.summary
         rows.append([result.url, summary.verdict or "-", summary.good_count, summary.warning_count, summary.critical_count])
     return rows or [["-", "-", 0, 0, 0]]
+
+
+def _geo_score_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
+    rows: list[list[object]] = []
+    for result in results:
+        if not result.payload:
+            continue
+        summary = result.payload.ai_visibility.summary
+        rows.append([
+            result.url,
+            summary.score,
+            summary.verdict or "-",
+            summary.good_count,
+            summary.warning_count,
+            summary.critical_count,
+        ])
+    return rows or [["-", 0, "-", 0, 0, 0]]
+
+
+def _geo_score_detail_headers() -> list[str]:
+    return ["Page URL", "Score", "Area", "Check", "Status", "Key", "Details", "Recommendation"]
+
+
+def _geo_score_detail_rows(rows: _PayloadRows) -> list[list[object]]:
+    out: list[list[object]] = []
+    for url, payload in rows:
+        score = payload.ai_visibility.summary.score
+        for check in payload.ai_visibility.checks:
+            out.append([
+                url,
+                score,
+                check.area,
+                check.check,
+                check.status.title(),
+                check.key,
+                check.details,
+                check.recommendation,
+            ])
+    return out
 
 
 def _error_rows(results: Iterable[SiteCrawlResult]) -> list[list[str]]:

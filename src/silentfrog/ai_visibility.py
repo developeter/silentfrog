@@ -244,6 +244,14 @@ def _coerce_check(value: AiVisibilityCheck | Mapping[str, Any]) -> AiVisibilityC
     raise TypeError("AI visibility checks must be AiVisibilityCheck instances or mappings")
 
 
+def _geo_score(warning_count: int, critical_count: int) -> int:
+    """GEO Score 0..100 per docs/geo_roadmap.md §Context decision 3.
+
+    Formula: ``max(0, min(100, 100 - 4 * warnings - 10 * criticals))``.
+    """
+    return max(0, min(100, 100 - 4 * warning_count - 10 * critical_count))
+
+
 def build_ai_visibility_summary(
     checks: Iterable[AiVisibilityCheck | Mapping[str, Any]],
 ) -> AiVisibilitySummary:
@@ -272,6 +280,7 @@ def build_ai_visibility_summary(
         good_count=good_count,
         warning_count=warning_count,
         critical_count=critical_count,
+        score=_geo_score(warning_count, critical_count),
     )
 
 

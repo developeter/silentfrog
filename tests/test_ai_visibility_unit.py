@@ -359,3 +359,44 @@ def test_m3_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
         token in tooltip
         for token in ("not required", "NOT required", "AI Optimization Guide", "positive signal")
     )
+
+
+def test_geo_score_is_100_when_all_checks_are_good() -> None:
+    checks = [
+        AiVisibilityCheck("Access", "x", "good", "-", "-", "k1"),
+        AiVisibilityCheck("Topic clarity", "y", "good", "-", "-", "k2"),
+    ]
+    assert build_ai_visibility_summary(checks).score == 100
+
+
+def test_geo_score_subtracts_four_per_warning() -> None:
+    checks = [
+        AiVisibilityCheck("Access", "x", "good", "-", "-", "k1"),
+        AiVisibilityCheck("Topic clarity", "y", "warning", "-", "-", "k2"),
+        AiVisibilityCheck("Topic clarity", "z", "warning", "-", "-", "k3"),
+        AiVisibilityCheck("Topic clarity", "w", "warning", "-", "-", "k4"),
+    ]
+    # 100 - 4 * 3 = 88
+    assert build_ai_visibility_summary(checks).score == 88
+
+
+def test_geo_score_subtracts_ten_per_critical() -> None:
+    checks = [
+        AiVisibilityCheck("Access", "blocked", "critical", "-", "-", "k1"),
+        AiVisibilityCheck("Access", "controls", "warning", "-", "-", "k2"),
+    ]
+    # 100 - 4 * 1 - 10 * 1 = 86
+    assert build_ai_visibility_summary(checks).score == 86
+
+
+def test_geo_score_clamps_to_zero() -> None:
+    checks = [AiVisibilityCheck("Access", f"k{i}", "critical", "-", "-", f"k{i}") for i in range(15)]
+    assert build_ai_visibility_summary(checks).score == 0
+
+
+def test_ai_visibility_summary_payload_carries_score() -> None:
+    payload = AiVisibilityPayload.from_raw(
+        {"summary": {"verdict": "Strong", "good_count": 5, "warning_count": 0, "critical_count": 0, "score": 92}, "checks": []}
+    )
+    assert payload.summary.score == 92
+    assert payload.to_dict()["summary"]["score"] == 92

@@ -430,16 +430,26 @@ class AiTab(TableTab):
         )
 
 
+_GEO_SCORE_TOOLTIP = (
+    "GEO Score 0-100, derived from the AI Visibility check list.\n\n"
+    "Formula: score = max(0, min(100, 100 - 4 x warnings - 10 x criticals)).\n"
+    "Higher is better. 100 means every check is good or info. The first warning "
+    "costs 4 points; the first critical costs 10 points."
+)
+
+
 class AiVisibilityTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
+        self._geo_score = _rich_label(_GEO_SCORE_TOOLTIP)
         self._summary = _rich_label(ai_visibility_summary_tooltip())
         self._row_resize_pending = False
         self.view.setWordWrap(True)
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
         self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         _header(self.view).sectionResized.connect(self._schedule_row_resize)
-        self._layout.insertWidget(0, self._summary)
+        self._layout.insertWidget(0, self._geo_score)
+        self._layout.insertWidget(1, self._summary)
 
     def _schedule_row_resize(self, *_args: object) -> None:
         if self._row_resize_pending:
@@ -467,6 +477,7 @@ class AiVisibilityTab(TableTab):
         payload = data if isinstance(data, AiVisibilityPayload) else AiVisibilityPayload.from_raw(data)
         summary = payload.summary
         verdict = summary.verdict or "-"
+        self._geo_score.setText(f"<b>GEO Score:</b> {summary.score} / 100")
         self._summary.setText(
             (
                 f"<b>Verdict:</b> {verdict} &nbsp; "

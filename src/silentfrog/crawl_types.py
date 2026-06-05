@@ -1101,10 +1101,11 @@ class AiVisibilitySummary:
     good_count: int
     warning_count: int
     critical_count: int
+    score: int = 0
 
     @classmethod
     def empty(cls) -> "AiVisibilitySummary":
-        return cls(verdict="", good_count=0, warning_count=0, critical_count=0)
+        return cls(verdict="", good_count=0, warning_count=0, critical_count=0, score=0)
 
     @classmethod
     def from_raw(cls, value: Any) -> "AiVisibilitySummary":
@@ -1122,6 +1123,7 @@ class AiVisibilitySummary:
             good_count=_to_int(value.get("good_count", 0)),
             warning_count=_to_int(value.get("warning_count", 0)),
             critical_count=_to_int(value.get("critical_count", 0)),
+            score=_clamp_score(value.get("score", 0)),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1130,7 +1132,16 @@ class AiVisibilitySummary:
             "good_count": self.good_count,
             "warning_count": self.warning_count,
             "critical_count": self.critical_count,
+            "score": self.score,
         }
+
+
+def _clamp_score(raw: Any) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, value))
 
 
 @dataclass(frozen=True)

@@ -286,6 +286,32 @@ def _write_ai_visibility_sheet(
     worksheet.set_column(3, 4, 68)
 
 
+_GEO_SCORE_FORMULA_NOTE = (
+    "GEO Score formula: max(0, min(100, 100 - 4 * warnings - 10 * criticals)). "
+    "Higher is better; 100 means every AI Visibility check is good or info."
+)
+
+
+def _write_geo_score_sheet(
+    workbook: xlsxwriter.Workbook,
+    formats: _Formats,
+    payload: AiVisibilityPayload,
+) -> None:
+    worksheet = _sheet(workbook, "GEO Score")
+    summary = payload.summary
+    rows: list[SummaryRow] = [
+        ("GEO Score (0-100)", str(summary.score), None),
+        ("Verdict", summary.verdict or "-", None),
+        ("Good", str(summary.good_count), None),
+        ("Warnings", str(summary.warning_count), None),
+        ("Critical", str(summary.critical_count), None),
+        ("Formula", _GEO_SCORE_FORMULA_NOTE, None),
+    ]
+    _write_summary_section(worksheet, rows)
+    worksheet.set_column(0, 0, 24)
+    worksheet.set_column(1, 1, 90)
+
+
 def _performance_summary_rows(formats: _Formats, performance: PerformanceMetrics) -> List[SummaryRow]:
     summary = performance.summary
     total_page_kb = (
@@ -1052,6 +1078,7 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
         formats = _Formats(workbook)
         write_page_action_sheets(workbook, payload)
         writers = (
+            lambda: _write_geo_score_sheet(workbook, formats, payload.ai_visibility),
             lambda: _write_performance_sheet(workbook, formats, payload.performance),
             lambda: _write_ai_visibility_sheet(workbook, formats, payload.ai_visibility),
             lambda: _write_meta_sheet(workbook, formats, payload),
