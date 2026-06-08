@@ -623,3 +623,67 @@ def test_ai_visibility_uses_perf_crux_payload_when_present() -> None:
     assert by_key["perf_crux_lcp"].status == "good"
     assert by_key["perf_crux_inp"].status == "good"
     assert by_key["perf_crux_cls"].status == "good"
+
+
+def test_ai_visibility_emits_n2_advanced_citation_rows() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    keys = {c.key for c in checks}
+    for key in (
+        "citation_quotations",
+        "citation_readability",
+        "citation_vocabulary_diversity",
+        "citation_no_keyword_stuffing",
+        "citation_authoritative_tone",
+    ):
+        assert key in keys
+
+
+def test_ai_visibility_emits_n2_seo_basics_rows() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    keys = {c.key for c in checks}
+    assert "seo_viewport_mobile" in keys
+    assert "seo_descriptive_url" in keys
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "citation_quotations",
+        "citation_readability",
+        "citation_vocabulary_diversity",
+        "citation_authoritative_tone",
+        "seo_viewport_mobile",
+        "seo_descriptive_url",
+    ],
+)
+def test_n2_myth_keys_never_warn_when_absent(key: str) -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    row = next(c for c in checks if c.key == key)
+    assert row.status not in {"warning", "critical"}
+
+
+def test_n2_tooltip_enrichments_carry_princeton_references() -> None:
+    for key, required in (
+        ("eeat_update_freshness", "Princeton"),
+        ("entity_schema", "+40%"),
+        ("citation_schema", "Lighthouse"),
+        ("access_agents", "Brave"),
+        ("citation_question_headings", "Perplexity"),
+    ):
+        tooltip = ai_visibility_check_tooltip(key)
+        assert required in tooltip, f"missing '{required}' in {key} tooltip"
+
+
+def test_ai_visibility_keyword_stuffing_warns_when_density_above_threshold() -> None:
+    payload = _payload_with_discovery({})
+    payload["citation_advanced"] = {
+        "quotations": {"count": 0, "with_attribution": 0, "sample": ""},
+        "readability": {"score": None, "language": "en", "formula": "Flesch Reading Ease"},
+        "vocab_ttr": 0.5,
+        "keyword_warning": True,
+        "authoritative_tone_ratio": 0.0,
+        "word_count": 200,
+    }
+    checks = build_ai_visibility_checks(payload)
+    by_key = {c.key: c for c in checks}
+    assert by_key["citation_no_keyword_stuffing"].status == "warning"

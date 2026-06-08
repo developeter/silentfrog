@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup, Comment
 import silentfrog.crawl_http as crawl_http
 
 from .ai_visibility import build_ai_visibility_payload
+from .citation_advanced import extract_citation_advanced_signals
 from .citation_readiness_content import extract_citation_content_signals
 from .content_quality import extract_content_quality
 from .crawl_http import (
@@ -55,6 +56,7 @@ from .parsers_meta import (
 from .perf_metrics import _collect_performance_metrics
 from .render_diff import compute_render_diff, render_with_playwright
 from .schema_extractor import _extract_schema_all
+from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
 
 # re-export host delay map for tests
@@ -270,6 +272,15 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     quality_payload = section_payload.get("content_quality", {})
     language_hint = str(quality_payload.get("language", "")) if isinstance(quality_payload, dict) else ""
     citation_content = extract_citation_content_signals(soup, language_hint)
+    plain_text = _extract_plain_text(soup)
+    top_keyword_density = _top_keyword_density(section_payload.get("keywords"))
+    citation_advanced = extract_citation_advanced_signals(
+        soup,
+        plain_text,
+        language_hint,
+        top_keyword_density=top_keyword_density,
+    )
+    seo_basics = extract_seo_basics(soup, response.url)
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options)
     crux_payload = await _collect_crux(response.url)
     raw_payload = {
@@ -279,12 +290,33 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "eeat": eeat.to_dict(),
         "structure": structure.to_dict(),
         "citation_content": citation_content.to_dict(),
+        "citation_advanced": citation_advanced.to_dict(),
+        "seo_basics": seo_basics.to_dict(),
         "render": render_payload,
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+def _top_keyword_density(keywords: Any) -> float | None:
+    """Pull the highest density from the keyword pipeline output.
+
+    The keyword extractor returns a list of dicts; each carries a
+    ``density`` field. Returns ``None`` when no keywords are present.
+    """
+    if not isinstance(keywords, list):
+        return None
+    densities: list[float] = []
+    for entry in keywords:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            densities.append(float(entry.get("density", 0)))
+        except (TypeError, ValueError):
+            continue
+    return max(densities) if densities else None
 
 
 async def _collect_crux(url: str) -> dict[str, Any]:

@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .citation_advanced import AdvancedCitationPayload, build_advanced_citation_checks
 from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .crawl_types import (
     AiVisibilityCheck,
@@ -22,6 +23,7 @@ from .eeat_signals import EeatPayload, build_eeat_checks
 from .perf_crux import CruxData
 from .perf_vitals import WebVitals, build_performance_checks
 from .render_diff import RenderDiff, build_render_diff_check
+from .seo_basics import SeoBasicsPayload, build_seo_basics_checks
 from .structure_signals import StructurePayload, build_structure_checks
 
 AI_VISIBILITY_AREAS = (
@@ -83,7 +85,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "access_agents": (
         "Checks whether the audited AI and search-facing agents can fetch the page URL.\n\n"
         "Best practice: allow the official user-agent tokens you want in robots.txt and avoid "
-        "blocking them with conflicting path rules."
+        "blocking them with conflicting path rules.\n\n"
+        "Claude note: Claude uses Brave Search's index, not Google's. Verify Brave indexing separately "
+        "if Claude citations matter (Princeton 2024 seo-geo signal)."
     ),
     "access_controls": (
         "Checks whether standard Google search controls or nonstandard AI directives may limit reuse.\n\n"
@@ -115,7 +119,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     ),
     "citation_schema": (
         "Checks whether supported structured data helps machines interpret the page and its main entity.\n\n"
-        "Best practice: provide valid Organization, Article, Product, FAQ, or Breadcrumb schema when relevant."
+        "Best practice: provide valid Organization, Article, Product, FAQ, or Breadcrumb schema when relevant.\n\n"
+        "Breadcrumb note: Lighthouse's SEO audit categorises Breadcrumb schema as a high-priority structured "
+        "data signal (Addy Osmani web-quality skill)."
     ),
     "citation_social": (
         "Checks whether social metadata is complete enough to represent the page consistently outside the body copy.\n\n"
@@ -133,7 +139,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "entity_schema": (
         "Checks whether entity-supporting schema is present for the kind of page being audited.\n\n"
         "Best practice: add the most relevant entity schema type, such as Organization, LocalBusiness, "
-        "Product, Article, Service, or Person."
+        "Product, Article, Service, or Person.\n\n"
+        "FAQPage note: Princeton 2024 GEO research measured FAQPage schema correlating with +40% AI "
+        "visibility — the largest schema-driven boost. Perplexity in particular prioritises FAQPage-shaped content."
     ),
     "access_llms_txt": (
         "Checks whether the site publishes an llms.txt declaring policies and entry points "
@@ -171,7 +179,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "eeat_update_freshness": (
         "Checks whether the page was updated within the configured freshness window.\n\n"
         "Best practice: maintain dateModified (or a visible last-update marker) and refresh evergreen pages "
-        "within the SILENTFROG_EEAT_FRESHNESS_DAYS threshold (default 365)."
+        "within the SILENTFROG_EEAT_FRESHNESS_DAYS threshold (default 365).\n\n"
+        "ChatGPT note: Princeton 2024 measured 30-day updates correlating with 3.2x more citations from ChatGPT."
     ),
     "eeat_author_bio": (
         "Checks whether the author has a discoverable bio or sameAs link.\n\n"
@@ -206,7 +215,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Checks whether H2/H3 headings are phrased as questions that the body answers.\n\n"
         "Per Google's AI Optimization Guide you do NOT need to rewrite content specifically for "
         "generative AI search; question-form headings are a positive signal where they fit the natural "
-        "editorial style. Present => good; absent => info. Never warned."
+        "editorial style. Present => good; absent => info. Never warned.\n\n"
+        "Perplexity note: Perplexity in particular prioritises FAQ-shaped content with question-form "
+        "headings for AI citation (Princeton 2024 seo-geo signal)."
     ),
     "citation_stats_density": (
         "Checks whether the page contains specific numbers, dates, and units AI engines can quote.\n\n"
@@ -270,6 +281,48 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Field CLS — CrUX P75 from real Chrome users. Same thresholds as lab CLS (0.1/0.25). Field CLS often "
         "differs from lab when the page injects layout-shifting content on user scroll or interaction.\n\n"
         "Best practice: monitor field CLS as the canonical signal; lab CLS misses scroll-triggered shifts."
+    ),
+    # v1.1 N2 — Princeton GEO method coverage.
+    "citation_quotations": (
+        "Checks whether the page contains quotations with named attribution (blockquote, q, or attribution dash).\n\n"
+        "Princeton 2024 GEO research measured +30% AI visibility from QUOTATION ADDITION (quality over quantity). "
+        "Quote experts with attribution where it fits the editorial voice. Absent => info; present => good."
+    ),
+    "citation_readability": (
+        "Checks the page's readability score against the AI-friendly band.\n\n"
+        "English uses Flesch Reading Ease (target >= 60). Italian uses Indice Gulpease (target >= 60). "
+        "Princeton 2024 measured +20% AI visibility from easier-to-understand text. "
+        "Other languages route to info — language-guard fallback."
+    ),
+    "citation_vocabulary_diversity": (
+        "Checks vocabulary diversity via type-token ratio (unique tokens / total tokens).\n\n"
+        "Princeton 2024 GEO research measured +15% AI visibility from UNIQUE WORDS — increased "
+        "vocabulary diversity and distinctive phrasing. TTR >= 0.5 is a healthy band for editorial prose. "
+        "Absent => info; present => good."
+    ),
+    "citation_no_keyword_stuffing": (
+        "Checks whether the page's top keyword density stays below the anti-stuffing threshold.\n\n"
+        "Princeton 2024 GEO research measured -10% AI visibility from KEYWORD STUFFING — actively "
+        "penalised by AI engines. Default threshold 4% (env: SILENTFROG_KEYWORD_WARN_DENSITY). "
+        "Above threshold => warning; at or below => good."
+    ),
+    "citation_authoritative_tone": (
+        "Checks first/second-person pronoun density as a proxy for authoritative editorial voice.\n\n"
+        "Princeton 2024 GEO research measured +25% AI visibility from AUTHORITATIVE TONE. "
+        "Healthy band: >=0.2% of tokens are we/you/our/your. Below threshold => info; never warned."
+    ),
+    "seo_viewport_mobile": (
+        "Checks whether the page declares a mobile-responsive viewport meta tag.\n\n"
+        'Best practice: `<meta name="viewport" content="width=device-width, initial-scale=1">` in <head>. '
+        "Per Google Search Central + Addy Osmani web-quality SEO checklist, this is a Lighthouse "
+        "high-priority SEO check. Absent => info; present => good."
+    ),
+    "seo_descriptive_url": (
+        "Checks whether the URL slug is descriptive (lowercase, no UUIDs, no 4+ consecutive digit runs, "
+        "<=80 chars).\n\n"
+        "Per Addy Osmani's web-quality SEO checklist, descriptive URLs sit in the 'high' tier of "
+        "technical SEO. Non-descriptive slugs (UUIDs, long digit IDs) make URLs less quotable. "
+        "Bad shape => info; good shape => good."
     ),
 }
 
@@ -643,6 +696,8 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     eeat = EeatPayload.from_raw(data.get("eeat", {}))
     structure = StructurePayload.from_raw(data.get("structure", {}))
     citation_content = CitationContentPayload.from_raw(data.get("citation_content", {}))
+    citation_advanced = AdvancedCitationPayload.from_raw(data.get("citation_advanced", {}))
+    seo_basics = SeoBasicsPayload.from_raw(data.get("seo_basics", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -657,10 +712,12 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_discovery_checks(discovery),
         *_build_topic_clarity_checks(quality, title, h1),
         *structure_by_area["Topic clarity"],
+        *build_seo_basics_checks(seo_basics),
         *_build_answerability_checks(quality),
         *_build_citation_checks(schema, social, canonical, redirect, meta_robots),
         *structure_by_area["Citation readiness"],
         *build_citation_content_checks(citation_content),
+        *build_advanced_citation_checks(citation_advanced),
         *_build_entity_checks(title, h1, schema, social),
         *build_eeat_checks(eeat),
         *build_performance_checks(vitals, crux),
