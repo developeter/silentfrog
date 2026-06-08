@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,7 @@ def _make_local(sha: str = "a" * 40, mode: InstallMode = InstallMode.USER) -> Lo
 def _make_remote(sha: str = "b" * 40, message: str = "Latest commit\n\nbody") -> RemoteRevision:
     return RemoteRevision(
         sha=sha,
-        committed_at=datetime(2026, 5, 19, tzinfo=timezone.utc),
+        committed_at=datetime(2026, 5, 19, tzinfo=UTC),
         message=message,
     )
 
@@ -133,12 +133,11 @@ def test_about_dialog_shows_version_and_repo_link(qtbot, monkeypatch) -> None:
 def test_home_window_help_menu_lists_check_and_about(qtbot) -> None:
     win = HomeWindow()
     qtbot.addWidget(win)
-    menu_titles = [m.title().replace("&", "") for m in win.menuBar().findChildren(
-        __import__("qtpy").QtWidgets.QMenu
-    )]
+    menu_titles = [m.title().replace("&", "") for m in win.menuBar().findChildren(__import__("qtpy").QtWidgets.QMenu)]
     assert "Help" in menu_titles
     help_menu = next(
-        m for m in win.menuBar().findChildren(__import__("qtpy").QtWidgets.QMenu)
+        m
+        for m in win.menuBar().findChildren(__import__("qtpy").QtWidgets.QMenu)
         if m.title().replace("&", "") == "Help"
     )
     action_texts = [a.text().replace("&", "") for a in help_menu.actions()]
@@ -189,9 +188,7 @@ def test_venv_silentfrog_binary_resolves_per_platform(tmp_path, monkeypatch) -> 
     assert ug._venv_silentfrog_binary() == binary
 
 
-def test_apply_click_transitions_to_applying_state_without_subprocess(
-    qtbot, monkeypatch
-) -> None:
+def test_apply_click_transitions_to_applying_state_without_subprocess(qtbot, monkeypatch) -> None:
     started: dict[str, tuple[str, list[str]]] = {}
 
     class FakeProcess:

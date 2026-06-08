@@ -37,7 +37,19 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
                     ]
                 )
             ],
-            "links": [["https://example.com/missing", "Missing", "Interno", "follow", "404", "Client error", "Body", "", "com"]],
+            "links": [
+                [
+                    "https://example.com/missing",
+                    "Missing",
+                    "Interno",
+                    "follow",
+                    "404",
+                    "Client error",
+                    "Body",
+                    "",
+                    "com",
+                ]
+            ],
             "schema": {
                 "summary": {"total": 1, "by_type": {"Product": 1}, "errors": ["missing offers"]},
                 "blocks": [],
@@ -53,13 +65,25 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
                     }
                 ],
             },
-            "canonical": {"target": "https://example.com/other", "self": False, "multiple": False, "status": "200"},
+            "canonical": {
+                "target": "https://example.com/other",
+                "self": False,
+                "multiple": False,
+                "status": "200",
+            },
             "redirect": {"chain": [url], "hops": 0, "final_status": "200", "loop": False},
             "robots": {"*": [["Allow", "/"]]},
             "meta_robots": "index, follow",
             "hreflang": [],
             "ai_crawl": [],
-            "serp": {"title": "", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp": {
+                "title": "",
+                "description": "",
+                "url": url,
+                "site_name": "",
+                "breadcrumb": "",
+                "favicon": "",
+            },
             "serp_audit": {},
             "keywords": [],
             "content_quality": {
@@ -70,7 +94,12 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
                 "verdict": "Weak",
             },
             "ai_visibility": {
-                "summary": {"verdict": "Needs work", "good_count": 0, "warning_count": 1, "critical_count": 0},
+                "summary": {
+                    "verdict": "Needs work",
+                    "good_count": 0,
+                    "warning_count": 1,
+                    "critical_count": 0,
+                },
                 "checks": [
                     {
                         "area": "Answerability",

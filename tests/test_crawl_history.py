@@ -29,11 +29,21 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
             "meta_robots": "index, follow",
             "hreflang": [],
             "ai_crawl": [],
-            "serp": {"title": "Example", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp": {
+                "title": "Example",
+                "description": "",
+                "url": url,
+                "site_name": "",
+                "breadcrumb": "",
+                "favicon": "",
+            },
             "serp_audit": {},
             "keywords": [],
             "content_quality": {},
-            "ai_visibility": {"summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0}, "checks": []},
+            "ai_visibility": {
+                "summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0},
+                "checks": [],
+            },
             "performance": {"status": 200, "summary": {"verdict": "Good"}},
             "social": {},
         }
@@ -114,15 +124,35 @@ def test_diff_runs_reports_new_fixed_recurring_worsened_and_health_trend() -> No
         "run-1",
         [
             _issue("meta.title_missing", IssueSeverity.WARNING, "https://example.com/fixed"),
-            _issue("links.bad_status", IssueSeverity.WARNING, "https://example.com/recurring", IssueCategory.LINKS),
-            _issue("indexability.noindex", IssueSeverity.WARNING, "https://example.com/worse", IssueCategory.INDEXABILITY),
+            _issue(
+                "links.bad_status",
+                IssueSeverity.WARNING,
+                "https://example.com/recurring",
+                IssueCategory.LINKS,
+            ),
+            _issue(
+                "indexability.noindex",
+                IssueSeverity.WARNING,
+                "https://example.com/worse",
+                IssueCategory.INDEXABILITY,
+            ),
         ],
     )
     current = _run(
         "run-2",
         [
-            _issue("links.bad_status", IssueSeverity.WARNING, "https://example.com/recurring", IssueCategory.LINKS),
-            _issue("indexability.noindex", IssueSeverity.CRITICAL, "https://example.com/worse", IssueCategory.INDEXABILITY),
+            _issue(
+                "links.bad_status",
+                IssueSeverity.WARNING,
+                "https://example.com/recurring",
+                IssueCategory.LINKS,
+            ),
+            _issue(
+                "indexability.noindex",
+                IssueSeverity.CRITICAL,
+                "https://example.com/worse",
+                IssueCategory.INDEXABILITY,
+            ),
             _issue("crawl.http_error", IssueSeverity.CRITICAL, "https://example.com/new", IssueCategory.CRAWL),
         ],
     )

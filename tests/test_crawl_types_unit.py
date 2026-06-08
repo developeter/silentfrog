@@ -11,7 +11,11 @@ def _raw_payload() -> dict[str, object]:
         "headers": [["h1", "Example"]],
         "images": [["https://example.com/logo.png", "Logo", "", "image/png", "", "", "", "", "", ""]],
         "links": [["https://example.com", "Example", "Internal", "follow", "200", "OK", "Body", "", "com"]],
-        "schema": {"summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []}, "blocks": [], "fallback_raw": []},
+        "schema": {
+            "summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []},
+            "blocks": [],
+            "fallback_raw": [],
+        },
         "canonical": {"target": "https://example.com", "self": True, "multiple": False, "status": "200"},
         "redirect": {"chain": ["https://example.com"], "hops": 0, "final_status": "200", "loop": False},
         "robots": {"*": [("Allow", "/")]},
@@ -38,7 +42,10 @@ def _raw_payload() -> dict[str, object]:
         },
         "keywords": [{"term": "example", "length": 1, "frequency": 2, "density": 2.5}],
         "content_quality": {"verdict": "Strong", "word_count": 120},
-        "ai_visibility": {"summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0}, "checks": []},
+        "ai_visibility": {
+            "summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0},
+            "checks": [],
+        },
         "performance": {"status": 200, "transfer_size": 1024},
         "social": {"open_graph": {"title": "OG title"}, "twitter": {"title": "TW title"}},
     }

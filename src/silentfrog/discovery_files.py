@@ -7,19 +7,21 @@ positive INFO signals into the AI Visibility check list: absent =>
 Optimization Guide, none of these are required for Google AI surfaces,
 so warnings/criticals are never emitted from this module.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
 from aiohttp import ClientTimeout
 
-from .crawl_options import CrawlOptions
 from .crawl_http import _headers_from_options
+from .crawl_options import CrawlOptions
 from .crawl_types import AiVisibilityCheck
 
 _BODY_EXCERPT_LIMIT = 400
@@ -50,7 +52,7 @@ class DiscoveryPayload:
     sitemap: DiscoveryEntry = field(default_factory=_empty_entry)
 
     @classmethod
-    def empty(cls) -> "DiscoveryPayload":
+    def empty(cls) -> DiscoveryPayload:
         return cls()
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,7 +64,7 @@ class DiscoveryPayload:
         }
 
     @classmethod
-    def from_raw(cls, value: Any) -> "DiscoveryPayload":
+    def from_raw(cls, value: Any) -> DiscoveryPayload:
         if not isinstance(value, Mapping):
             return cls.empty()
         return cls(

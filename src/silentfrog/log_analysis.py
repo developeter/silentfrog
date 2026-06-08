@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
 import re
+from collections import Counter
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import urlparse, urlunparse
 
 from .audit_issues import AuditIssue, IssueCategory, IssueEvidence, IssueSeverity, dedupe_issues
 
 _COMBINED_LOG_RE = re.compile(
-    r'^(?P<remote>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] '
+    r"^(?P<remote>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "
     r'"(?P<request>[^"]*)" (?P<status>\d{3}|-) (?P<size>\S+)'
     r'(?: "(?P<referer>[^"]*)" "(?P<agent>[^"]*)")?'
 )
@@ -214,17 +214,21 @@ def _orphan_findings(bot_entries: tuple[LogEntry, ...], config: LogAnalysisConfi
     if not known:
         return []
     orphan_paths = sorted(_bot_page_keys(bot_entries) - known)
-    return [
-        _finding(
-            "logs.orphan_crawled_urls",
-            IssueSeverity.WARNING,
-            "Googlebot crawled URLs that are not in the provided known URL set.",
-            "Check whether these URLs are orphaned, stale, parameter variants, or missing from the crawl source.",
-            [("Orphan URL count", str(len(orphan_paths))), ("Sample", _join_sample(orphan_paths))],
-            url=_absolute_url(orphan_paths[0], config),
-            count=len(orphan_paths),
-        )
-    ] if orphan_paths else []
+    return (
+        [
+            _finding(
+                "logs.orphan_crawled_urls",
+                IssueSeverity.WARNING,
+                "Googlebot crawled URLs that are not in the provided known URL set.",
+                "Check whether these URLs are orphaned, stale, parameter variants, or missing from the crawl source.",
+                [("Orphan URL count", str(len(orphan_paths))), ("Sample", _join_sample(orphan_paths))],
+                url=_absolute_url(orphan_paths[0], config),
+                count=len(orphan_paths),
+            )
+        ]
+        if orphan_paths
+        else []
+    )
 
 
 def _missing_important_findings(bot_entries: tuple[LogEntry, ...], config: LogAnalysisConfig) -> list[LogFinding]:
@@ -232,17 +236,21 @@ def _missing_important_findings(bot_entries: tuple[LogEntry, ...], config: LogAn
     if not known:
         return []
     missing = sorted(known - _bot_page_keys(bot_entries))
-    return [
-        _finding(
-            "logs.important_urls_not_hit",
-            IssueSeverity.WARNING,
-            "Important known URLs were not hit by Googlebot in the imported log sample.",
-            "Verify the log date range, internal linking, sitemap coverage, and indexability of these URLs.",
-            [("Missing URL count", str(len(missing))), ("Sample", _join_sample(missing))],
-            url=_absolute_url(missing[0], config),
-            count=len(missing),
-        )
-    ] if missing else []
+    return (
+        [
+            _finding(
+                "logs.important_urls_not_hit",
+                IssueSeverity.WARNING,
+                "Important known URLs were not hit by Googlebot in the imported log sample.",
+                "Verify the log date range, internal linking, sitemap coverage, and indexability of these URLs.",
+                [("Missing URL count", str(len(missing))), ("Sample", _join_sample(missing))],
+                url=_absolute_url(missing[0], config),
+                count=len(missing),
+            )
+        ]
+        if missing
+        else []
+    )
 
 
 def _issue_from_finding(finding: LogFinding) -> AuditIssue:
@@ -306,11 +314,7 @@ def _bot_page_keys(entries: Iterable[LogEntry]) -> set[str]:
 
 
 def _is_page_candidate(entry: LogEntry) -> bool:
-    return (
-        entry.method in {"GET", "HEAD"}
-        and 200 <= entry.status < 300
-        and not _has_waste_extension(entry.path)
-    )
+    return entry.method in {"GET", "HEAD"} and 200 <= entry.status < 300 and not _has_waste_extension(entry.path)
 
 
 def _is_crawl_waste(entry: LogEntry) -> bool:

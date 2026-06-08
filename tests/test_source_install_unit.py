@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 # Skip tests that exercise macOS-only code paths (Framework Python
 # certificate installer detection, .app bundle layout, Desktop
 # symlinks, exec-bit permission semantics). On Windows the file-mode
@@ -26,8 +25,8 @@ from tools.source_install import (
     create_macos_app_bundle,
     desktop_dir,
     detect_python_org_certificate_installer,
-    installer_paths,
     install_plan,
+    installer_paths,
     launcher_script_paths,
     load_runtime_requirements,
     render_desktop_command_launcher,
@@ -49,7 +48,6 @@ from tools.source_install import (
     windows_shortcut_command,
     write_launchers,
 )
-
 
 _FAKE_PYPROJECT = """
 [project]
@@ -97,7 +95,12 @@ def test_desktop_dir_uses_home_desktop(tmp_path: Path) -> None:
 
 
 def test_install_plan_targets_local_venv(tmp_path: Path) -> None:
-    plan = install_plan(tmp_path, "python3", "Darwin", requirements=RuntimeRequirements(pip_args=("pyside6>=6.8,<7.0", "numpy>=2.2.6,<3.0.0")))
+    plan = install_plan(
+        tmp_path,
+        "python3",
+        "Darwin",
+        requirements=RuntimeRequirements(pip_args=("pyside6>=6.8,<7.0", "numpy>=2.2.6,<3.0.0")),
+    )
 
     assert plan[0] == ["python3", "-m", "venv", str(tmp_path / ".venv")]
     assert plan[1][:5] == [str(tmp_path / ".venv" / "bin" / "python"), "-m", "pip", "install", "--upgrade"]
@@ -167,7 +170,7 @@ def test_launcher_renderers_prefer_local_venv() -> None:
     reinstall_command = render_reinstall_command()
 
     assert ".venv\\Scripts\\silentfrog.exe" in run_bat
-    assert 'QT_API=pyside6' in run_bat
+    assert "QT_API=pyside6" in run_bat
     assert "poetry run silentfrog" in run_bat
     assert ".venv/bin/silentfrog" in run_sh
     assert 'QT_API="${QT_API:-pyside6}"' in run_sh
@@ -210,7 +213,7 @@ def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> N
 
     assert json.dumps(str(tmp_path)) in rendered
     assert json.dumps(str(tmp_path / "run_silentfrog.sh")) in rendered
-    assert 'exec ' in rendered
+    assert "exec " in rendered
 
 
 def test_windows_shortcut_command_targets_venv_gui_script(tmp_path: Path) -> None:
@@ -241,8 +244,8 @@ def test_render_macos_app_info_plist_carries_silentfrog_bundle_name() -> None:
 def test_render_macos_app_launcher_execs_venv_silentfrog() -> None:
     launcher = render_macos_app_launcher()
     assert launcher.startswith("#!/bin/sh")
-    assert '$ROOT/.venv/bin/silentfrog' in launcher
-    assert 'set -eu' in launcher
+    assert "$ROOT/.venv/bin/silentfrog" in launcher
+    assert "set -eu" in launcher
 
 
 def test_render_macos_app_launcher_forces_arm64_on_apple_silicon() -> None:
@@ -251,8 +254,8 @@ def test_render_macos_app_launcher_forces_arm64_on_apple_silicon() -> None:
     # to x86_64, which then fails to load the arm64 wheels installed
     # in the venv. The launcher must detect arm64 hardware and re-exec
     # with `arch -arm64`. Intel Macs fall through to the native path.
-    assert 'hw.optional.arm64' in launcher
-    assert '/usr/bin/arch -arm64' in launcher
+    assert "hw.optional.arm64" in launcher
+    assert "/usr/bin/arch -arm64" in launcher
 
 
 def test_render_macos_app_info_plist_pins_arch_priority() -> None:
@@ -280,8 +283,8 @@ def test_create_macos_app_bundle_has_required_layout(tmp_path: Path) -> None:
     icon_dest = bundle / "Contents" / "Resources" / "icon.icns"
     assert info.is_file() and "CFBundleName" in info.read_text(encoding="utf-8")
     assert launcher.is_file()
-    import os as _os
     import stat as _stat
+
     mode = launcher.stat().st_mode
     assert mode & _stat.S_IXUSR
     assert icon_dest.is_file()
@@ -359,9 +362,7 @@ _LAUNCHER_RENDERERS = {
 def test_committed_launchers_match_render_output(filename: str, renderer) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     committed = (repo_root / filename).read_text(encoding="utf-8")
-    assert committed == renderer(), (
-        f"{filename} on disk drifted from render_*(); re-run write_launchers() and commit"
-    )
+    assert committed == renderer(), f"{filename} on disk drifted from render_*(); re-run write_launchers() and commit"
 
 
 def test_app_data_dir_for_windows(tmp_path: Path) -> None:
@@ -448,7 +449,9 @@ def test_detect_python_org_certificate_installer_returns_none_for_brew_python() 
     assert result is None
 
 
-def test_detect_python_org_certificate_installer_returns_none_when_installer_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_python_org_certificate_installer_returns_none_when_installer_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(Path, "is_file", lambda self: False)
     python_exe = Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3")
     assert detect_python_org_certificate_installer(python_exe) is None

@@ -1,7 +1,6 @@
-
 from __future__ import annotations
+
 import re
-from typing import List
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
@@ -26,8 +25,8 @@ from .base import GenericModel
 
 
 class ImagesModel(GenericModel):
-    def __init__(self, rows: List[List[str]]) -> None:
-        normalized: List[List[str]] = []
+    def __init__(self, rows: list[list[str]]) -> None:
+        normalized: list[list[str]] = []
         for row in rows:
             padded = normalize_image_row(row)
             padded[LOADING_COL] = str(padded[LOADING_COL]).strip().title()
@@ -83,13 +82,13 @@ class ImagesModel(GenericModel):
         multiplier = {
             "B": 1,
             "KB": 1024,
-            "MB": 1024 ** 2,
-            "GB": 1024 ** 3,
+            "MB": 1024**2,
+            "GB": 1024**3,
             "KIB": 1024,
-            "MIB": 1024 ** 2,
-            "GIB": 1024 ** 3,
-            "TB": 1024 ** 4,
-            "TIB": 1024 ** 4,
+            "MIB": 1024**2,
+            "GIB": 1024**3,
+            "TB": 1024**4,
+            "TIB": 1024**4,
         }.get(unit, 1)
         return int(number * multiplier)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from silentfrog.crawl_options import CrawlOptions, DEFAULT_USER_AGENT  # type: ignore[reportMissingImports]
+from silentfrog.crawl_options import DEFAULT_USER_AGENT, CrawlOptions  # type: ignore[reportMissingImports]
 
 
 def test_crawl_options_default_values() -> None:

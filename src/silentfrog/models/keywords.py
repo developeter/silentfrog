@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 from qtpy import QtCore, QtGui
 from qtpy.QtCore import Qt
 
@@ -21,12 +19,12 @@ class KeywordModel(_BaseModel):
         "1st Occurrence",
     ]
 
-    def __init__(self, keywords: List[KeywordEntry]) -> None:
+    def __init__(self, keywords: list[KeywordEntry]) -> None:
         self._keywords = list(keywords)
         super().__init__([self._to_row(entry) for entry in self._keywords])
 
     @staticmethod
-    def _to_row(entry: KeywordEntry) -> List[str]:
+    def _to_row(entry: KeywordEntry) -> list[str]:
         first = "-" if entry.first_position is None else str(entry.first_position + 1)
         density = f"{entry.density:.2f}"
         keyword_type = {1: "1-gram", 2: "2-gram", 3: "3-gram"}.get(entry.length, f"{entry.length}-gram")

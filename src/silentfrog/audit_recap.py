@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from html import escape
-from typing import Iterable
 
 from qtpy import QtCore, QtGui, QtWidgets
 
@@ -140,13 +140,7 @@ class AuditRecapWidget(QtWidgets.QFrame):
 
     def _apply_frame_style(self) -> None:
         border = "#3a3a3a" if current_theme() == "dark" else "#c8cdd2"
-        self.setStyleSheet(
-            "#auditRecap {"
-            f" border: 1px solid {border};"
-            " border-radius: 8px;"
-            " padding: 8px;"
-            "}"
-        )
+        self.setStyleSheet(f"#auditRecap {{ border: 1px solid {border}; border-radius: 8px; padding: 8px;}}")
 
 
 def _count_severity(issues: Iterable[AuditIssue], severity: IssueSeverity) -> int:
@@ -198,12 +192,7 @@ def _issue_tooltip(issue: AuditIssue) -> str:
 
 
 def _count_style(severity: IssueSeverity) -> str:
-    return (
-        "font-weight: 600;"
-        " padding: 5px 8px;"
-        " border-radius: 5px;"
-        f" color: {_severity_text_color(severity)};"
-    )
+    return f"font-weight: 600; padding: 5px 8px; border-radius: 5px; color: {_severity_text_color(severity)};"
 
 
 def _severity_text_color(severity: IssueSeverity) -> str:

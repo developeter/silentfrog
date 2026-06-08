@@ -4,7 +4,6 @@ import pytest
 
 import silentfrog.parsers_meta as parsers  # type: ignore[reportMissingImports]
 
-
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0cIDATx\x9cc``\x00"
@@ -55,7 +54,9 @@ async def test_fetch_image_details_image_payload(monkeypatch) -> None:
         lambda: _FakeSession(PNG_BYTES, {"Content-Type": "image/png"}),
     )
 
-    width, height, size_b, mime, data_uri = await parsers._fetch_image_details("https://example.com/image.png", timeout=1)
+    width, height, size_b, mime, data_uri = await parsers._fetch_image_details(
+        "https://example.com/image.png", timeout=1
+    )
 
     assert width == 1
     assert height == 1
@@ -72,7 +73,9 @@ async def test_fetch_image_details_non_image_payload(monkeypatch) -> None:
         lambda: _FakeSession(b"plain text body", {"Content-Type": "text/plain"}),
     )
 
-    width, height, size_b, mime, data_uri = await parsers._fetch_image_details("https://example.com/file.txt", timeout=1)
+    width, height, size_b, mime, data_uri = await parsers._fetch_image_details(
+        "https://example.com/file.txt", timeout=1
+    )
 
     assert (width, height) == (0, 0)
     assert size_b == len(b"plain text body")
@@ -94,7 +97,13 @@ async def test_fetch_image_details_graceful_failure(monkeypatch) -> None:
 
     monkeypatch.setattr(parsers.aiohttp, "ClientSession", lambda: _BrokenSession())
 
-    assert await parsers._fetch_image_details("https://example.com/image.png", timeout=1) == (0, 0, 0, "-", "")
+    assert await parsers._fetch_image_details("https://example.com/image.png", timeout=1) == (
+        0,
+        0,
+        0,
+        "-",
+        "",
+    )
 
 
 def test_ai_agents_matrix_lists_at_least_eighteen_bots() -> None:
@@ -107,21 +116,32 @@ def test_ai_agents_matrix_covers_named_engines() -> None:
     # Anthropic family, OpenAI family, Perplexity, Google, Apple, Amazon,
     # ByteDance, Common Crawl, Meta, DuckDuckGo, Cohere.
     expected = {
-        "gptbot", "chatgpt-user", "oai-searchbot",
-        "claudebot", "anthropic-ai", "claude-web", "claude-user", "claude-searchbot",
-        "perplexitybot", "perplexity-user",
-        "googlebot", "google-extended",
-        "applebot-extended", "amazonbot", "bytespider", "ccbot",
-        "meta-externalagent", "duckassistbot", "cohere-ai",
+        "gptbot",
+        "chatgpt-user",
+        "oai-searchbot",
+        "claudebot",
+        "anthropic-ai",
+        "claude-web",
+        "claude-user",
+        "claude-searchbot",
+        "perplexitybot",
+        "perplexity-user",
+        "googlebot",
+        "google-extended",
+        "applebot-extended",
+        "amazonbot",
+        "bytespider",
+        "ccbot",
+        "meta-externalagent",
+        "duckassistbot",
+        "cohere-ai",
     }
     missing = expected - tokens
     assert missing == set(), f"missing AI agent tokens: {missing}"
 
 
 def test_only_googlebot_applies_google_search_controls() -> None:
-    google_flagged = [
-        agent for agent in parsers._AI_AGENTS if agent.applies_google_search_controls
-    ]
+    google_flagged = [agent for agent in parsers._AI_AGENTS if agent.applies_google_search_controls]
     assert [agent.token for agent in google_flagged] == ["googlebot"]
 
 

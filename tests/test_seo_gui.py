@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Tuple, Type, cast
+from typing import Any, cast
 
 import pytest
 from qtpy import QtCore, QtGui, QtWidgets
-from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
 from silentfrog.audit_issues import IssueSeverity  # type: ignore[reportMissingImports]
-from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
+from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import (
     ACTUAL_HEIGHT_COL,
     ACTUAL_WIDTH_COL,
@@ -24,30 +23,32 @@ from silentfrog.image_diagnostics import (
     SIZE_COL,
     normalize_image_row,
 )
-from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
 from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImports]
+from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
 from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     AiTab,
     AiVisibilityTab,
     CanonicalTab,
     ContentQualityTab,
     HeadersTab,
+    HreflangTab,
     ImagesTab,
     IndexabilityTab,
-    HreflangTab,
     KeywordsTab,
-    PerformanceTab,
     LinksTab,
     MetaTab,
+    PerformanceTab,
     RedirectTab,
     RobotsTab,
     SchemaTab,
     SerpTab,
     SocialTab,
 )
+from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
 SNAPSHOT_DIR = Path(__file__).with_name("snapshots")
 SERP_SNAPSHOT = SNAPSHOT_DIR / "serp_preview.html"
+
 
 @pytest.fixture(autouse=True)
 def _restore_palette():
@@ -74,6 +75,7 @@ def _set_base(widget: QtWidgets.QWidget, value: int) -> None:
         return
     apply_theme(cast(QtWidgets.QApplication, app), value < 128)
     widget.changeEvent(QtCore.QEvent(QtCore.QEvent.Type.PaletteChange))
+
 
 def _configure_settings(tmp_path: Path) -> None:
     QtCore.QSettings.setDefaultFormat(QtCore.QSettings.IniFormat)
@@ -109,24 +111,26 @@ def _sample_payload() -> CrawlPayload:
         ],
         "headers": [["h1", "Title"]],
         "images": [
-            normalize_image_row([
-                "https://example.com/logo.png",
-                "Alt",
-                "Title",
-                "image/png",
-                "100",
-                "200",
-                "10 KB",
-                "2h",
-                "Yes",
-                "High",
-                "100",
-                "200",
-                "",
-                "",
-                "",
-                "",
-            ])
+            normalize_image_row(
+                [
+                    "https://example.com/logo.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "100",
+                    "200",
+                    "10 KB",
+                    "2h",
+                    "Yes",
+                    "High",
+                    "100",
+                    "200",
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+            )
         ],
         "links": [
             [
@@ -142,12 +146,7 @@ def _sample_payload() -> CrawlPayload:
             ]
         ],
         "schema": {
-            "summary": {
-                "total": 1,
-                "by_syntax": {"json-ld": 1},
-                "by_type": {"WebPage": 1},
-                "errors": []
-            },
+            "summary": {"total": 1, "by_syntax": {"json-ld": 1}, "by_type": {"WebPage": 1}, "errors": []},
             "eligibility": [
                 {
                     "type": "Product",
@@ -164,11 +163,11 @@ def _sample_payload() -> CrawlPayload:
                     "@type": "WebPage",
                     "name": "Example Page",
                     "url": "https://example.com/page",
-                    "_extracted_via": "json-ld"
+                    "_extracted_via": "json-ld",
                 }
             ],
             "issues": [],
-            "fallback_raw": []
+            "fallback_raw": [],
         },
         "canonical": {
             "target": "https://example.com",
@@ -185,15 +184,17 @@ def _sample_payload() -> CrawlPayload:
         "robots": {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
-        "ai_crawl": [[
-            "GPTBot",
-            "gptbot",
-            "Yes",
-            "-",
-            "-",
-            "Allowed",
-            "No explicit AI restrictions detected",
-        ]],
+        "ai_crawl": [
+            [
+                "GPTBot",
+                "gptbot",
+                "Yes",
+                "-",
+                "-",
+                "Allowed",
+                "No explicit AI restrictions detected",
+            ]
+        ],
         "content_quality": {
             "language": "Italian (it-IT)",
             "word_count": 420,
@@ -254,29 +255,10 @@ def _sample_payload() -> CrawlPayload:
             "px_len": "100",
             "char_len": "10",
         },
-        "performance": {
-            "nav_ttfb_ms": 120.0,
-            "nav_total_ms": 450.0,
-            "transfer_size": 180000,
-            "status": 200,
-            "resource_summary": {
-                "css": {"count": 4, "bytes": 42000},
-                "js": {"count": 6, "bytes": 88000},
-                "img": {"count": 10, "bytes": 220000},
-                "font": {"count": 1, "bytes": 16000},
-            },
-            "top_offenders": [
-                {"type": "js", "url": "https://example.com/app.js", "bytes": 88000, "blocking": True},
-                {"type": "img", "url": "https://example.com/photo.jpg", "bytes": 220000, "blocking": False},
-            ],
-            "scripts": {
-                "blocking": {"count": 2, "bytes": 90000},
-                "async": {"count": 4, "bytes": 118000},
-            },
-            "opportunity_details": [
-                {"message": "Enable compression for hero.jpg", "severity": "warning"},
-            ],
-        },
+        # The fuller `performance` dict that lived here was shadowed by a
+        # second identical key further down (line ~307). Ruff F601 flagged
+        # the duplicate; Python's dict literal kept the LATER (simpler)
+        # value, so this richer one was dead. Removing the dead form.
         "keywords": [
             {
                 "term": "example",
@@ -319,8 +301,8 @@ def _sample_payload() -> CrawlPayload:
     return CrawlPayload.from_raw(raw)
 
 
-TABLE_TAB_CASES: Tuple[
-    Tuple[Type[QtWidgets.QWidget], Tuple[object, ...], Dict[int, QtWidgets.QHeaderView.ResizeMode]],
+TABLE_TAB_CASES: tuple[
+    tuple[type[QtWidgets.QWidget], tuple[object, ...], dict[int, QtWidgets.QHeaderView.ResizeMode]],
     ...,
 ] = (
     (
@@ -337,24 +319,26 @@ TABLE_TAB_CASES: Tuple[
         ImagesTab,
         (
             [
-                normalize_image_row([
-                    "https://example.com/img.png",
-                    "Alt",
-                    "Title",
-                    "image/png",
-                    "640",
-                    "480",
-                    "18 KB",
-                    "2h",
-                    "Yes",
-                    "High",
-                    "640",
-                    "480",
-                    "",
-                    "",
-                    "",
-                    "",
-                ])
+                normalize_image_row(
+                    [
+                        "https://example.com/img.png",
+                        "Alt",
+                        "Title",
+                        "image/png",
+                        "640",
+                        "480",
+                        "18 KB",
+                        "2h",
+                        "Yes",
+                        "High",
+                        "640",
+                        "480",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
             ],
         ),
         {0: QtWidgets.QHeaderView.Interactive},
@@ -573,6 +557,7 @@ TABLE_TAB_CASES: Tuple[
     ),
 )
 
+
 def test_seo_window_exposes_expected_tabs(qtbot):
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
@@ -600,6 +585,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Performance",
         "SERP",
     ]
+
 
 def test_recent_urls_persisted_and_ordered(qtbot, tmp_path: Path) -> None:
     _configure_settings(tmp_path)
@@ -651,10 +637,7 @@ def test_seo_window_url_combo_does_not_overflow_screen(qtbot) -> None:
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
 
-    assert (
-        win.url_edit.sizeAdjustPolicy()
-        == QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-    )
+    assert win.url_edit.sizeAdjustPolicy() == QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
     assert win.url_edit.minimumContentsLength() == 40
     assert win.url_edit.sizeHint().width() < 800
 
@@ -669,6 +652,7 @@ def test_seo_window_tab_bar_is_left_aligned(qtbot) -> None:
     sheet = win.tabs.styleSheet()
     assert "QTabWidget::tab-bar { left: 0px; alignment: left; }" in sheet
     assert win.tabs.tabBar().expanding() is False
+
 
 def test_recent_url_remove_click(qtbot, tmp_path: Path) -> None:
     _configure_settings(tmp_path)
@@ -714,10 +698,7 @@ def test_indexability_tab_flags_noindex(qtbot) -> None:
 
     model = tab.view.model()
     assert model is not None
-    rows = {
-        model.index(row, 0).data(): model.index(row, 1).data()
-        for row in range(model.rowCount())
-    }
+    rows = {model.index(row, 0).data(): model.index(row, 1).data() for row in range(model.rowCount())}
     assert rows["Index directive"] == "Noindex"
     assert rows["Follow directive"] == "Nofollow"
     assert rows["Overall verdict"] == "Noindex"
@@ -747,17 +728,12 @@ def test_content_quality_tab_shows_strong_page(qtbot) -> None:
 
     model = tab.view.model()
     assert model is not None
-    rows = {
-        model.index(row, 0).data(): model.index(row, 1).data()
-        for row in range(model.rowCount())
-    }
+    rows = {model.index(row, 0).data(): model.index(row, 1).data() for row in range(model.rowCount())}
     assert rows["Page language"] == "Spanish (es-ES)"
     assert rows["Thin-content risk"] == "Low"
     assert rows["Overall verdict"] == "Strong"
 
-    tooltip_row = next(
-        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language"
-    )
+    tooltip_row = next(row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language")
     tooltip = model.data(model.index(tooltip_row, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
     assert isinstance(tooltip, str)
     assert "Best practice" in tooltip
@@ -770,8 +746,24 @@ def test_ai_tab_shows_access_summary(qtbot) -> None:
     tab.update(
         [
             ["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"],
-            ["Google-Extended", "google-extended", "No", "-", "-", "Blocked", "Blocked by robots.txt: /private"],
-            ["Googlebot", "googlebot", "Yes", "-", "nosnippet", "Limited", "Google search controls: nosnippet"],
+            [
+                "Google-Extended",
+                "google-extended",
+                "No",
+                "-",
+                "-",
+                "Blocked",
+                "Blocked by robots.txt: /private",
+            ],
+            [
+                "Googlebot",
+                "googlebot",
+                "Yes",
+                "-",
+                "nosnippet",
+                "Limited",
+                "Google search controls: nosnippet",
+            ],
         ]
     )
 
@@ -887,8 +879,7 @@ def test_ai_visibility_tab_renders_summary_and_rows(qtbot) -> None:
     model = tab.view.model()
     assert model is not None
     rows = [
-        [model.index(row, column).data() for column in range(model.columnCount())]
-        for row in range(model.rowCount())
+        [model.index(row, column).data() for column in range(model.columnCount())] for row in range(model.rowCount())
     ]
     assert any(row[0] == "Access" and row[2] == "Good" for row in rows)
     assert any(row[0] == "Answerability" and row[2] == "Warning" for row in rows)
@@ -898,9 +889,7 @@ def test_ai_visibility_tab_renders_summary_and_rows(qtbot) -> None:
         for column in range(model.columnCount())
     ]
     assert headers == ["Area", "Check", "Status", "Details", "Recommendation"]
-    tooltip_row = next(
-        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Access"
-    )
+    tooltip_row = next(row for row in range(model.rowCount()) if model.index(row, 0).data() == "Access")
     tooltip = model.data(model.index(tooltip_row, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
     assert isinstance(tooltip, str)
     assert "robots.txt" in tooltip
@@ -1050,9 +1039,7 @@ def test_content_quality_tab_viewport_tooltip_event(qtbot, monkeypatch) -> None:
 
     model = tab.view.model()
     assert model is not None
-    tooltip_row = next(
-        row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language"
-    )
+    tooltip_row = next(row for row in range(model.rowCount()) if model.index(row, 0).data() == "Page language")
     index = model.index(tooltip_row, 0)
     rect = tab.view.visualRect(index)
     shown: dict[str, str] = {}
@@ -1110,9 +1097,9 @@ def test_recap_issue_activation_opens_matching_detail_tab(qtbot) -> None:
 
 @pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
 def test_table_tab_update_sets_model_and_resizing(
-    tab_cls: Type[QtWidgets.QWidget],
-    args: Tuple[object, ...],
-    resize_modes: Dict[int, QtWidgets.QHeaderView.ResizeMode],
+    tab_cls: type[QtWidgets.QWidget],
+    args: tuple[object, ...],
+    resize_modes: dict[int, QtWidgets.QHeaderView.ResizeMode],
     qtbot,
 ) -> None:
     tab = tab_cls()
@@ -1204,10 +1191,32 @@ def test_images_tab_sorting_reorders_rows_and_keeps_diagnostics(qtbot) -> None:
     tab.update(
         [
             normalize_image_row(
-                ["https://example.com/light.png", "Alt", "Title", "image/png", "", "", "10 KB", "1h", "Lazy", "Low"]
+                [
+                    "https://example.com/light.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "",
+                    "",
+                    "10 KB",
+                    "1h",
+                    "Lazy",
+                    "Low",
+                ]
             ),
             normalize_image_row(
-                ["https://example.com/heavy.png", "Alt", "Title", "image/png", "", "", "250 KB", "1h", "Lazy", "Low"]
+                [
+                    "https://example.com/heavy.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "",
+                    "",
+                    "250 KB",
+                    "1h",
+                    "Lazy",
+                    "Low",
+                ]
             ),
         ]
     )
@@ -1228,10 +1237,32 @@ def test_images_tab_header_click_sorts_size_desc(qtbot) -> None:
     tab.update(
         [
             normalize_image_row(
-                ["https://example.com/light.png", "Alt", "Title", "image/png", "", "", "10 KB", "1h", "Lazy", "Low"]
+                [
+                    "https://example.com/light.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "",
+                    "",
+                    "10 KB",
+                    "1h",
+                    "Lazy",
+                    "Low",
+                ]
             ),
             normalize_image_row(
-                ["https://example.com/heavy.png", "Alt", "Title", "image/png", "", "", "250 KB", "1h", "Lazy", "Low"]
+                [
+                    "https://example.com/heavy.png",
+                    "Alt",
+                    "Title",
+                    "image/png",
+                    "",
+                    "",
+                    "250 KB",
+                    "1h",
+                    "Lazy",
+                    "Low",
+                ]
             ),
         ]
     )
@@ -1401,10 +1432,7 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     assert isinstance(header, QtWidgets.QHeaderView)
     assert header.sectionResizeMode(0) == QtWidgets.QHeaderView.Stretch
     rows = [
-        [
-            model.data(model.index(row, column))
-            for column in range(model.columnCount())
-        ]
+        [model.data(model.index(row, column)) for column in range(model.columnCount())]
         for row in range(model.rowCount())
     ]
     assert any(row[1] == "Critical" and "Blocking JavaScript" in row[0] for row in rows)
@@ -1463,19 +1491,14 @@ def test_robots_tab_appends_empty_state(qtbot):
 
     model = tab.view.model()
     assert model is not None
-    rows = [
-        (model.index(row, 0).data(), model.index(row, 1).data())
-        for row in range(model.rowCount())
-    ]
+    rows = [(model.index(row, 0).data(), model.index(row, 1).data()) for row in range(model.rowCount())]
     assert ("robots.txt", "Not fetched or empty") in rows
 
 
 def test_images_tab_merges_worker_results(qtbot):
     tab = ImagesTab()
     qtbot.addWidget(tab)
-    initial_rows = [
-        normalize_image_row(["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "No", ""])
-    ]
+    initial_rows = [normalize_image_row(["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "No", ""])]
     tab.update(initial_rows)
 
     worker_rows = [["https://example.com/img.png", 640, 480, "18 KB", "image/png", "1h"]]
@@ -1680,7 +1703,7 @@ def test_export_excel_triggers_save_dialog(qtbot, monkeypatch, tmp_path: Path):
         lambda *args, **kwargs: (str(target), ""),
     )
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     def fake_export(payload: CrawlPayload, path: Path) -> None:
         captured["payload"] = payload
@@ -1757,10 +1780,16 @@ def test_image_analysis_updates_visible_columns_in_images_tab(qtbot):
     model = win.images_tab.view.model()
     assert model is not None
 
-    assert model.headerData(ACTUAL_WIDTH_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "W"
-    assert model.headerData(ACTUAL_HEIGHT_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "H"
+    assert (
+        model.headerData(ACTUAL_WIDTH_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "W"
+    )
+    assert (
+        model.headerData(ACTUAL_HEIGHT_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "H"
+    )
     assert model.headerData(SIZE_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "Size"
-    assert model.headerData(CACHE_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "Cache TTL"
+    assert (
+        model.headerData(CACHE_COL, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole) == "Cache TTL"
+    )
 
     assert model.data(model.index(0, ACTUAL_WIDTH_COL)) == "640"
     assert model.data(model.index(0, ACTUAL_HEIGHT_COL)) == "320"
@@ -1779,8 +1808,7 @@ def test_seo_window_populates_ai_visibility_tab(qtbot):
     assert model is not None
     assert win.ai_visibility_tab._summary.text().find("Needs work") != -1
     rows = [
-        [model.index(row, column).data() for column in range(model.columnCount())]
-        for row in range(model.rowCount())
+        [model.index(row, column).data() for column in range(model.columnCount())] for row in range(model.rowCount())
     ]
     assert any(row[0] == "Access" and row[2] == "Good" for row in rows)
     assert any(row[0] == "Citation readiness" and row[2] == "Warning" for row in rows)

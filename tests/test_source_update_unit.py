@@ -74,9 +74,7 @@ def _make_fake_silentfrog_tree(root: Path, *, version: str = "1.0.0") -> None:
 def test_build_update_plan_targets_developeter_archive() -> None:
     plan = build_update_plan("abc1234", "developeter", "silentfrog")
     assert plan.revision == "abc1234"
-    assert plan.archive_url == (
-        "https://github.com/developeter/silentfrog/archive/abc1234.zip"
-    )
+    assert plan.archive_url == ("https://github.com/developeter/silentfrog/archive/abc1234.zip")
 
 
 def test_extract_archive_returns_single_inner_directory(tmp_path: Path) -> None:
@@ -101,9 +99,7 @@ def test_extract_archive_raises_if_top_level_is_not_single_dir(tmp_path: Path) -
 
 
 def test_validate_archive_accepts_silentfrog_pyproject(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "silentfrog"\n', encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "silentfrog"\n', encoding="utf-8")
     validate_archive(tmp_path)
 
 
@@ -113,9 +109,7 @@ def test_validate_archive_rejects_missing_pyproject(tmp_path: Path) -> None:
 
 
 def test_validate_archive_rejects_unknown_project(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "something-else"\n', encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "something-else"\n', encoding="utf-8")
     with pytest.raises(RuntimeError, match="not a Silentfrog"):
         validate_archive(tmp_path)
 
@@ -125,12 +119,8 @@ def test_pyproject_changed_detects_version_bump(tmp_path: Path) -> None:
     new = tmp_path / "new"
     repo.mkdir()
     new.mkdir()
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "silentfrog"\nversion = "1.0.0"\n', encoding="utf-8"
-    )
-    (new / "pyproject.toml").write_text(
-        '[project]\nname = "silentfrog"\nversion = "1.0.1"\n', encoding="utf-8"
-    )
+    (repo / "pyproject.toml").write_text('[project]\nname = "silentfrog"\nversion = "1.0.0"\n', encoding="utf-8")
+    (new / "pyproject.toml").write_text('[project]\nname = "silentfrog"\nversion = "1.0.1"\n', encoding="utf-8")
     assert pyproject_changed(repo, new) is True
 
 

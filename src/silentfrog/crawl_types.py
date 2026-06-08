@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Tuple
-from urllib.parse import urlparse
+from typing import Any
 
 from .image_diagnostics import normalize_image_rows
 
@@ -11,10 +11,10 @@ def _is_iterable_of_iterables(value: Any) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
 
 
-def _normalize_rows(value: Any, *, label: str) -> List[List[str]]:
+def _normalize_rows(value: Any, *, label: str) -> list[list[str]]:
     if not _is_iterable_of_iterables(value):
         raise ValueError(f"{label} must be an iterable of rows")
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for row in value:
         if not _is_iterable_of_iterables(row):
             raise ValueError(f"{label} rows must be iterable")
@@ -28,12 +28,12 @@ def _ensure_mapping(value: Any, label: str) -> Mapping[str, Any]:
     raise ValueError(f"{label} must be a mapping")
 
 
-def _normalize_robots(value: Any) -> Dict[str, List[Tuple[str, str]]]:
+def _normalize_robots(value: Any) -> dict[str, list[tuple[str, str]]]:
     if not isinstance(value, Mapping):
         return {}
-    normalized: Dict[str, List[Tuple[str, str]]] = {}
+    normalized: dict[str, list[tuple[str, str]]] = {}
     for agent, directives in value.items():
-        bucket: List[Tuple[str, str]] = []
+        bucket: list[tuple[str, str]] = []
         if _is_iterable_of_iterables(directives):
             for directive in directives:
                 if isinstance(directive, (tuple, list)) and len(directive) >= 2:
@@ -107,7 +107,7 @@ def _require_crawl_keys(data: Mapping[str, Any]) -> None:
         raise ValueError(f"Missing crawl keys: {', '.join(missing)}")
 
 
-def _rows_section(data: Mapping[str, Any], key: str) -> List[List[str]]:
+def _rows_section(data: Mapping[str, Any], key: str) -> list[list[str]]:
     return _normalize_rows(data[key], label=key)
 
 
@@ -122,22 +122,22 @@ def _optional_mapping_section(data: Mapping[str, Any], key: str) -> Mapping[str,
     return _ensure_mapping(raw, key)
 
 
-def _keyword_entries(raw: Any) -> List["KeywordEntry"]:
+def _keyword_entries(raw: Any) -> list[KeywordEntry]:
     if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
         return []
     return [KeywordEntry.from_raw(item) for item in raw if isinstance(item, Mapping)]
 
 
-def _mapping_items(raw: Any) -> List[Mapping[str, Any]]:
+def _mapping_items(raw: Any) -> list[Mapping[str, Any]]:
     if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
         return []
     return [item for item in raw if isinstance(item, Mapping)]
 
 
-def _string_items(raw: Any) -> List[str]:
+def _string_items(raw: Any) -> list[str]:
     if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
         return []
-    values: List[str] = []
+    values: list[str] = []
     for item in raw:
         text = str(item).strip()
         if text:
@@ -151,17 +151,19 @@ class PerformanceMetrics:
     nav_total_ms: float
     transfer_size: int
     status: int
-    resource_summary: Dict[str, Dict[str, int]]
-    resource_breakdown: List["PerformanceResourceBreakdown"]
-    summary: "PerformanceSummary"
-    issues: List["PerformanceIssue"]
-    opportunities: List[str]
-    top_offenders: List["PerformanceOffender"]
-    scripts: "PerformanceScripts"
-    opportunity_details: List["PerformanceOpportunity"]
+    resource_summary: dict[str, dict[str, int]]
+    resource_breakdown: list[PerformanceResourceBreakdown]
+    summary: PerformanceSummary
+    issues: list[PerformanceIssue]
+    opportunities: list[str]
+    top_offenders: list[PerformanceOffender]
+    scripts: PerformanceScripts
+    opportunity_details: list[PerformanceOpportunity]
 
     @staticmethod
-    def _resource_breakdown_from_summary(summary: Mapping[str, Dict[str, int]], transfer_size: int) -> List["PerformanceResourceBreakdown"]:
+    def _resource_breakdown_from_summary(
+        summary: Mapping[str, dict[str, int]], transfer_size: int
+    ) -> list[PerformanceResourceBreakdown]:
         rows = [PerformanceResourceBreakdown(resource_type="html", count=1, bytes=max(transfer_size, 0))]
         for name in ("css", "js", "img", "font", "other"):
             item = summary.get(name, {})
@@ -176,11 +178,11 @@ class PerformanceMetrics:
 
     @staticmethod
     def _summary_from_legacy(
-        summary: Mapping[str, Dict[str, int]],
+        summary: Mapping[str, dict[str, int]],
         transfer_size: int,
-        issues: Iterable["PerformanceIssue"],
-        opportunity_details: Iterable["PerformanceOpportunity"],
-    ) -> "PerformanceSummary":
+        issues: Iterable[PerformanceIssue],
+        opportunity_details: Iterable[PerformanceOpportunity],
+    ) -> PerformanceSummary:
         total_resource_bytes = sum(max(int(item.get("bytes", 0)), 0) for item in summary.values())
         total_resource_count = sum(max(int(item.get("count", 0)), 0) for item in summary.values())
         severities = [issue.severity for issue in issues]
@@ -208,7 +210,7 @@ class PerformanceMetrics:
         )
 
     @classmethod
-    def empty(cls) -> "PerformanceMetrics":
+    def empty(cls) -> PerformanceMetrics:
         return cls(
             nav_ttfb_ms=0.0,
             nav_total_ms=0.0,
@@ -225,10 +227,10 @@ class PerformanceMetrics:
         )
 
     @staticmethod
-    def _resource_summary(raw: Any) -> Dict[str, Dict[str, int]]:
+    def _resource_summary(raw: Any) -> dict[str, dict[str, int]]:
         if not isinstance(raw, Mapping):
             return {}
-        summary: Dict[str, Dict[str, int]] = {}
+        summary: dict[str, dict[str, int]] = {}
         for key, item in raw.items():
             if not isinstance(item, Mapping):
                 continue
@@ -243,7 +245,7 @@ class PerformanceMetrics:
         return [factory(item) for item in _mapping_items(raw)]
 
     @classmethod
-    def from_raw(cls, value: Any) -> "PerformanceMetrics":
+    def from_raw(cls, value: Any) -> PerformanceMetrics:
         if not isinstance(value, Mapping):
             return cls.empty()
 
@@ -280,20 +282,20 @@ class PerformanceMetrics:
             opportunity_details=opportunity_details,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            'nav_ttfb_ms': self.nav_ttfb_ms,
-            'nav_total_ms': self.nav_total_ms,
-            'transfer_size': self.transfer_size,
-            'status': self.status,
-            'resource_summary': {k: dict(v) for k, v in self.resource_summary.items()},
-            'resource_breakdown': [entry.to_dict() for entry in self.resource_breakdown],
-            'summary': self.summary.to_dict(),
-            'issues': [item.to_dict() for item in self.issues],
-            'opportunities': list(self.opportunities),
-            'top_offenders': [entry.to_dict() for entry in self.top_offenders],
-            'scripts': self.scripts.to_dict(),
-            'opportunity_details': [item.to_dict() for item in self.opportunity_details],
+            "nav_ttfb_ms": self.nav_ttfb_ms,
+            "nav_total_ms": self.nav_total_ms,
+            "transfer_size": self.transfer_size,
+            "status": self.status,
+            "resource_summary": {k: dict(v) for k, v in self.resource_summary.items()},
+            "resource_breakdown": [entry.to_dict() for entry in self.resource_breakdown],
+            "summary": self.summary.to_dict(),
+            "issues": [item.to_dict() for item in self.issues],
+            "opportunities": list(self.opportunities),
+            "top_offenders": [entry.to_dict() for entry in self.top_offenders],
+            "scripts": self.scripts.to_dict(),
+            "opportunity_details": [item.to_dict() for item in self.opportunity_details],
         }
 
 
@@ -304,7 +306,7 @@ class PerformanceResourceBreakdown:
     bytes: int
 
     @classmethod
-    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceResourceBreakdown":
+    def from_raw(cls, value: Mapping[str, Any]) -> PerformanceResourceBreakdown:
         try:
             count = int(value.get("count", 0))
         except (TypeError, ValueError):
@@ -319,7 +321,7 @@ class PerformanceResourceBreakdown:
             bytes=max(size, 0),
         )
 
-    def to_dict(self) -> Dict[str, int | str]:
+    def to_dict(self) -> dict[str, int | str]:
         return {"type": self.resource_type, "count": self.count, "bytes": self.bytes}
 
 
@@ -337,11 +339,11 @@ class PerformanceSummary:
     verdict: str
 
     @classmethod
-    def empty(cls) -> "PerformanceSummary":
+    def empty(cls) -> PerformanceSummary:
         return cls(0, 0, 0, 0, 0, 0, 0, 0, 0, "")
 
     @classmethod
-    def from_raw(cls, value: Any) -> "PerformanceSummary":
+    def from_raw(cls, value: Any) -> PerformanceSummary:
         if not isinstance(value, Mapping):
             return cls.empty()
 
@@ -364,7 +366,7 @@ class PerformanceSummary:
             verdict=str(value.get("verdict", "")).strip(),
         )
 
-    def to_dict(self) -> Dict[str, int | str]:
+    def to_dict(self) -> dict[str, int | str]:
         return {
             "transfer_size": self.transfer_size,
             "total_resource_bytes": self.total_resource_bytes,
@@ -388,7 +390,7 @@ class PerformanceIssue:
     recommendation: str
 
     @classmethod
-    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceIssue":
+    def from_raw(cls, value: Mapping[str, Any]) -> PerformanceIssue:
         return cls(
             key=str(value.get("key", "")).strip(),
             severity=str(value.get("severity", "info")).strip().lower() or "info",
@@ -397,7 +399,7 @@ class PerformanceIssue:
             recommendation=str(value.get("recommendation", "")).strip(),
         )
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "key": self.key,
             "severity": self.severity,
@@ -415,15 +417,15 @@ class PerformanceScripts:
     async_bytes: int
 
     @classmethod
-    def empty(cls) -> "PerformanceScripts":
+    def empty(cls) -> PerformanceScripts:
         return cls(0, 0, 0, 0)
 
     @classmethod
-    def from_raw(cls, value: Any) -> "PerformanceScripts":
+    def from_raw(cls, value: Any) -> PerformanceScripts:
         if not isinstance(value, Mapping):
             return cls.empty()
 
-        def _part(key: str) -> Dict[str, int]:
+        def _part(key: str) -> dict[str, int]:
             raw = value.get(key, {})
             if isinstance(raw, Mapping):
                 count = raw.get("count", 0)
@@ -450,7 +452,7 @@ class PerformanceScripts:
             async_bytes=async_part["bytes"],
         )
 
-    def to_dict(self) -> Dict[str, Dict[str, int]]:
+    def to_dict(self) -> dict[str, dict[str, int]]:
         return {
             "blocking": {"count": self.blocking_count, "bytes": self.blocking_bytes},
             "async": {"count": self.async_count, "bytes": self.async_bytes},
@@ -465,7 +467,7 @@ class PerformanceOffender:
     blocking: bool = False
 
     @classmethod
-    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceOffender":
+    def from_raw(cls, value: Mapping[str, Any]) -> PerformanceOffender:
         resource_type = str(value.get("type", "")).strip()
         url = str(value.get("url", "")).strip()
         try:
@@ -475,7 +477,7 @@ class PerformanceOffender:
         blocking = bool(value.get("blocking", False))
         return cls(resource_type=resource_type, url=url, bytes=max(size, 0), blocking=blocking)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.resource_type,
             "url": self.url,
@@ -490,27 +492,27 @@ class PerformanceOpportunity:
     severity: str
 
     @classmethod
-    def from_raw(cls, value: Mapping[str, Any]) -> "PerformanceOpportunity":
+    def from_raw(cls, value: Mapping[str, Any]) -> PerformanceOpportunity:
         message = str(value.get("message", "")).strip()
         severity = str(value.get("severity", "")).strip().lower()
         return cls(message=message, severity=severity or "info")
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return {"message": self.message, "severity": self.severity}
 
 
 @dataclass(frozen=True)
 class StructuredDataSummary:
     total: int
-    by_syntax: Dict[str, int]
-    by_type: Dict[str, int]
-    errors: List[str]
+    by_syntax: dict[str, int]
+    by_type: dict[str, int]
+    errors: list[str]
 
     @staticmethod
-    def _as_int_dict(value: Any) -> Dict[str, int]:
+    def _as_int_dict(value: Any) -> dict[str, int]:
         if not isinstance(value, Mapping):
             return {}
-        result: Dict[str, int] = {}
+        result: dict[str, int] = {}
         for key, raw in value.items():
             try:
                 result[str(key)] = int(raw)
@@ -533,7 +535,7 @@ class StructuredDataSummary:
         by_syntax = cls._as_int_dict(value.get("by_syntax"))
         by_type = cls._as_int_dict(value.get("by_type"))
         errors_raw = value.get("errors", [])
-        errors: List[str] = []
+        errors: list[str] = []
         if isinstance(errors_raw, Iterable) and not isinstance(errors_raw, (str, bytes)):
             for item in errors_raw:
                 text = str(item).strip()
@@ -542,8 +544,8 @@ class StructuredDataSummary:
         return cls(total=total, by_syntax=by_syntax, by_type=by_type, errors=errors)
 
     def with_errors(self, extra: Iterable[str]) -> StructuredDataSummary:
-        merged: List[str] = list(self.errors)
-        seen = {err for err in merged}
+        merged: list[str] = list(self.errors)
+        seen = set(merged)
         for item in extra:
             text = str(item).strip()
             if not text or text in seen:
@@ -559,7 +561,7 @@ class StructuredDataSummary:
             errors=merged,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total": self.total,
             "by_syntax": dict(self.by_syntax),
@@ -574,23 +576,30 @@ class StructuredDataEligibility:
     detected: bool
     count: int
     eligibility: str
-    missing_fields: List[str]
-    warnings: List[str]
+    missing_fields: list[str]
+    warnings: list[str]
 
     @classmethod
-    def from_raw(cls, value: Any) -> "StructuredDataEligibility":
+    def from_raw(cls, value: Any) -> StructuredDataEligibility:
         if not isinstance(value, Mapping):
-            return cls(schema_type="", detected=False, count=0, eligibility="Not detected", missing_fields=[], warnings=[])
+            return cls(
+                schema_type="",
+                detected=False,
+                count=0,
+                eligibility="Not detected",
+                missing_fields=[],
+                warnings=[],
+            )
         try:
             count = int(value.get("count", 0))
         except (TypeError, ValueError):
             count = 0
         missing_raw = value.get("missing_fields", [])
-        missing_fields: List[str] = []
+        missing_fields: list[str] = []
         if isinstance(missing_raw, Iterable) and not isinstance(missing_raw, (str, bytes)):
             missing_fields = [str(item).strip() for item in missing_raw if str(item).strip()]
         warnings_raw = value.get("warnings", [])
-        warnings: List[str] = []
+        warnings: list[str] = []
         if isinstance(warnings_raw, Iterable) and not isinstance(warnings_raw, (str, bytes)):
             warnings = [str(item).strip() for item in warnings_raw if str(item).strip()]
         return cls(
@@ -602,7 +611,7 @@ class StructuredDataEligibility:
             warnings=warnings,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.schema_type,
             "detected": self.detected,
@@ -615,17 +624,17 @@ class StructuredDataEligibility:
 
 @dataclass(frozen=True)
 class StructuredDataPayload:
-    blocks: List[Any]
+    blocks: list[Any]
     summary: StructuredDataSummary
-    fallback_raw: List[str]
-    eligibility: List[StructuredDataEligibility] = field(default_factory=list)
+    fallback_raw: list[str]
+    eligibility: list[StructuredDataEligibility] = field(default_factory=list)
 
     @classmethod
     def empty(cls) -> StructuredDataPayload:
         return cls(blocks=[], summary=StructuredDataSummary.empty(), fallback_raw=[], eligibility=[])
 
     @staticmethod
-    def _coerce_blocks(value: Any) -> List[Any]:
+    def _coerce_blocks(value: Any) -> list[Any]:
         if isinstance(value, list):
             return list(value)
         if _is_iterable_of_iterables(value):
@@ -633,10 +642,10 @@ class StructuredDataPayload:
         return []
 
     @staticmethod
-    def _coerce_fallback(raw: Any) -> List[str]:
+    def _coerce_fallback(raw: Any) -> list[str]:
         if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
             return []
-        fallback: List[str] = []
+        fallback: list[str] = []
         for item in raw:
             text = str(item).strip()
             if text:
@@ -657,15 +666,17 @@ class StructuredDataPayload:
             summary = summary.with_errors(issues_iter)
             fallback_raw = cls._coerce_fallback(value.get("fallback_raw"))
             eligibility_raw = value.get("eligibility", [])
-            eligibility: List[StructuredDataEligibility] = []
+            eligibility: list[StructuredDataEligibility] = []
             if isinstance(eligibility_raw, Iterable) and not isinstance(eligibility_raw, (str, bytes)):
-                eligibility = [StructuredDataEligibility.from_raw(item) for item in eligibility_raw if isinstance(item, Mapping)]
+                eligibility = [
+                    StructuredDataEligibility.from_raw(item) for item in eligibility_raw if isinstance(item, Mapping)
+                ]
             return cls(blocks=blocks, summary=summary, fallback_raw=fallback_raw, eligibility=eligibility)
         if isinstance(value, list):
             summary_raw: Mapping[str, Any] | None = None
-            issues_list: List[str] = []
-            blocks: List[Any] = []
-            fallback: List[str] = []
+            issues_list: list[str] = []
+            blocks: list[Any] = []
+            fallback: list[str] = []
             for item in value:
                 if isinstance(item, Mapping) and "_schema_summary" in item and summary_raw is None:
                     raw = item.get("_schema_summary", {})
@@ -689,7 +700,7 @@ class StructuredDataPayload:
             return cls(blocks=blocks, summary=summary, fallback_raw=fallback, eligibility=[])
         return cls.empty()
 
-    def to_mapping(self) -> Dict[str, Any]:
+    def to_mapping(self) -> dict[str, Any]:
         return {
             "blocks": list(self.blocks),
             "summary": self.summary.to_dict(),
@@ -751,7 +762,7 @@ class KeywordEntry:
             first_position=first_position if first_position is not None and first_position >= 0 else None,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "term": self.term,
             "length": self.length,
@@ -787,7 +798,7 @@ class ContentQuality:
     verdict: str
 
     @classmethod
-    def empty(cls) -> "ContentQuality":
+    def empty(cls) -> ContentQuality:
         return cls(
             language="",
             word_count=0,
@@ -806,7 +817,7 @@ class ContentQuality:
         )
 
     @classmethod
-    def from_raw(cls, value: Any) -> "ContentQuality":
+    def from_raw(cls, value: Any) -> ContentQuality:
         if not isinstance(value, Mapping):
             return cls.empty()
 
@@ -841,7 +852,7 @@ class ContentQuality:
             verdict=str(value.get("verdict", "")),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "language": self.language,
             "word_count": self.word_count,
@@ -876,7 +887,7 @@ class CanonicalInfo:
             status=str(value.get("status", "")),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
             "self": self.is_self,
@@ -887,7 +898,7 @@ class CanonicalInfo:
 
 @dataclass(frozen=True)
 class RedirectInfo:
-    chain: List[str]
+    chain: list[str]
     hops: int
     final_status: str
     loop: bool
@@ -903,7 +914,7 @@ class RedirectInfo:
             loop=bool(value.get("loop", False)),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "hops": self.hops,
             "chain": list(self.chain),
@@ -932,7 +943,7 @@ class SerpPreview:
             breadcrumb=str(value.get("breadcrumb", "")),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "description": self.description,
@@ -967,7 +978,7 @@ class SerpAudit:
             char_len=str(value.get("char_len", "")),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "too_long": self.too_long,
             "too_short": self.too_short,
@@ -993,7 +1004,7 @@ class SocialCard:
     image_height: int
     image_bytes: int
     image_type: str
-    issues: List[str]
+    issues: list[str]
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> SocialCard:
@@ -1012,7 +1023,7 @@ class SocialCard:
             issues=[str(item) for item in data.get("issues", []) if isinstance(item, (str, int))],
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "description": self.description,
@@ -1060,7 +1071,7 @@ class SocialPayload:
         tw_raw = _ensure_mapping(data.get("twitter", {}), "twitter")
         return cls(open_graph=SocialCard.from_raw(og_raw), twitter=SocialCard.from_raw(tw_raw))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"open_graph": self.open_graph.to_dict(), "twitter": self.twitter.to_dict()}
 
 
@@ -1074,7 +1085,7 @@ class AiVisibilityCheck:
     key: str = ""
 
     @classmethod
-    def from_raw(cls, value: Mapping[str, Any]) -> "AiVisibilityCheck":
+    def from_raw(cls, value: Mapping[str, Any]) -> AiVisibilityCheck:
         return cls(
             area=str(value.get("area", "")).strip(),
             check=str(value.get("check", "")).strip(),
@@ -1084,7 +1095,7 @@ class AiVisibilityCheck:
             key=str(value.get("key", "")).strip(),
         )
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "area": self.area,
             "check": self.check,
@@ -1104,11 +1115,11 @@ class AiVisibilitySummary:
     score: int = 0
 
     @classmethod
-    def empty(cls) -> "AiVisibilitySummary":
+    def empty(cls) -> AiVisibilitySummary:
         return cls(verdict="", good_count=0, warning_count=0, critical_count=0, score=0)
 
     @classmethod
-    def from_raw(cls, value: Any) -> "AiVisibilitySummary":
+    def from_raw(cls, value: Any) -> AiVisibilitySummary:
         if not isinstance(value, Mapping):
             return cls.empty()
 
@@ -1126,7 +1137,7 @@ class AiVisibilitySummary:
             score=_clamp_score(value.get("score", 0)),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "verdict": self.verdict,
             "good_count": self.good_count,
@@ -1147,28 +1158,28 @@ def _clamp_score(raw: Any) -> int:
 @dataclass(frozen=True)
 class AiVisibilityPayload:
     summary: AiVisibilitySummary
-    checks: List[AiVisibilityCheck]
+    checks: list[AiVisibilityCheck]
 
     @classmethod
-    def empty(cls) -> "AiVisibilityPayload":
+    def empty(cls) -> AiVisibilityPayload:
         return cls(summary=AiVisibilitySummary.empty(), checks=[])
 
     @classmethod
-    def from_raw(cls, value: Any) -> "AiVisibilityPayload":
+    def from_raw(cls, value: Any) -> AiVisibilityPayload:
         if not isinstance(value, Mapping):
             return cls.empty()
         checks_raw = value.get("checks", [])
-        checks = [
-            AiVisibilityCheck.from_raw(item)
-            for item in checks_raw
-            if isinstance(item, Mapping)
-        ] if isinstance(checks_raw, Iterable) and not isinstance(checks_raw, (str, bytes)) else []
+        checks = (
+            [AiVisibilityCheck.from_raw(item) for item in checks_raw if isinstance(item, Mapping)]
+            if isinstance(checks_raw, Iterable) and not isinstance(checks_raw, (str, bytes))
+            else []
+        )
         return cls(
             summary=AiVisibilitySummary.from_raw(value.get("summary", {})),
             checks=checks,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "summary": self.summary.to_dict(),
             "checks": [item.to_dict() for item in self.checks],
@@ -1177,20 +1188,20 @@ class AiVisibilityPayload:
 
 @dataclass(frozen=True)
 class CrawlPayload:
-    meta: List[List[str]]
-    headers: List[List[str]]
-    images: List[List[str]]
-    links: List[List[str]]
+    meta: list[list[str]]
+    headers: list[list[str]]
+    images: list[list[str]]
+    links: list[list[str]]
     schema: StructuredDataPayload
     canonical: CanonicalInfo
     redirect: RedirectInfo
-    robots: Dict[str, List[Tuple[str, str]]]
+    robots: dict[str, list[tuple[str, str]]]
     meta_robots: str
-    hreflang: List[List[str]]
-    ai_crawl: List[List[str]]
+    hreflang: list[list[str]]
+    ai_crawl: list[list[str]]
     serp: SerpPreview
     serp_audit: SerpAudit
-    keywords: List[KeywordEntry]
+    keywords: list[KeywordEntry]
     content_quality: ContentQuality = field(default_factory=ContentQuality.empty)
     ai_visibility: AiVisibilityPayload = field(default_factory=AiVisibilityPayload.empty)
     performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
@@ -1221,7 +1232,7 @@ class CrawlPayload:
             social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
         )
 
-    def to_mapping(self) -> Dict[str, Any]:
+    def to_mapping(self) -> dict[str, Any]:
         return {
             "meta": [row[:] for row in self.meta],
             "headers": [row[:] for row in self.headers],

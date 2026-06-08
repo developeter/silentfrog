@@ -2,6 +2,7 @@
 Async SEO crawler orchestrator: wires HTTP helpers, parsers, schema, performance,
 and keyword extraction into the public `analyse` / `analyse_images` API.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,59 +13,56 @@ from urllib.parse import urljoin
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from bs4 import BeautifulSoup, Comment
 
-from .crawl_options import CrawlOptions
-from .crawl_types import CrawlPayload
-from .crawler_utils import _hr_size
-from .http_client import fetch_page
-
 import silentfrog.crawl_http as crawl_http
+
+from .ai_visibility import build_ai_visibility_payload
+from .citation_readiness_content import extract_citation_content_signals
+from .content_quality import extract_content_quality
 from .crawl_http import (
     _BACKOFF_DELAY,
     _BACKOFF_STATUSES,
     _crawl_delay_for,
     _headers_from_options,
     _host_key,
+    _image_info,
     _link_status,
     _parse_robots,
     _throttle_host,
     _trace_redirects,
-    _image_info,
 )
-from .content_quality import extract_content_quality
-from .ai_visibility import build_ai_visibility_payload
-from .citation_readiness_content import extract_citation_content_signals
+from .crawl_options import CrawlOptions
+from .crawl_types import CrawlPayload
+from .crawler_utils import _hr_size
 from .discovery_files import fetch_discovery_files
 from .eeat_signals import extract_eeat_signals
-from .render_diff import compute_render_diff, render_with_playwright
-from .structure_signals import extract_structure_signals
+from .http_client import fetch_page
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
+    _check_canonical,
     _extract_headers,
+    _extract_hreflang,
     _extract_images,
     _extract_links,
     _extract_meta,
-    _extract_hreflang,
+    _extract_social_cards,
+    _make_serp_snippet,
     _meta_robots_value,
     _serp_preview,
-    _make_serp_snippet,
     _title_audit,
     _update_link_statuses,
-    _check_canonical,
-    _extract_social_cards,
 )
 from .perf_metrics import _collect_performance_metrics
+from .render_diff import compute_render_diff, render_with_playwright
 from .schema_extractor import _extract_schema_all
+from .structure_signals import extract_structure_signals
 
 # re-export host delay map for tests
 _HOST_DELAYS = crawl_http._HOST_DELAYS
 
 
 def _fetch_failure_message(url: str) -> str:
-    base = (
-        f"Unable to fetch {url}. "
-        "Check the URL, network connectivity, and HTTPS/TLS certificate setup."
-    )
+    base = f"Unable to fetch {url}. Check the URL, network connectivity, and HTTPS/TLS certificate setup."
     if sys.platform == "darwin":
         return (
             f"{base}\n\n"

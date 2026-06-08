@@ -15,7 +15,11 @@ from silentfrog.ai_review import (  # type: ignore[reportMissingImports]
     parse_ai_review_response,
     run_ai_review,
 )
-from silentfrog.audit_issues import IssueCategory, IssueEvidence, IssueSeverity  # type: ignore[reportMissingImports]
+from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
+    IssueCategory,
+    IssueEvidence,
+    IssueSeverity,
+)
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult  # type: ignore[reportMissingImports]
 
@@ -27,19 +31,36 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
             "headers": [],
             "images": [],
             "links": [],
-            "schema": {"summary": {"total": 0, "by_type": {}, "errors": []}, "blocks": [], "issues": [], "eligibility": []},
+            "schema": {
+                "summary": {"total": 0, "by_type": {}, "errors": []},
+                "blocks": [],
+                "issues": [],
+                "eligibility": [],
+            },
             "canonical": {"target": url, "self": True, "multiple": False, "status": "200"},
             "redirect": {"chain": [url], "hops": 0, "final_status": "200", "loop": False},
             "robots": {"*": [["Allow", "/"]]},
             "meta_robots": "index, follow",
             "hreflang": [],
             "ai_crawl": [],
-            "serp": {"title": "", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp": {
+                "title": "",
+                "description": "",
+                "url": url,
+                "site_name": "",
+                "breadcrumb": "",
+                "favicon": "",
+            },
             "serp_audit": {},
             "keywords": [],
             "content_quality": {"word_count": 80, "h1_count": 0, "verdict": "Weak"},
             "ai_visibility": {
-                "summary": {"verdict": "Needs work", "good_count": 0, "warning_count": 1, "critical_count": 0},
+                "summary": {
+                    "verdict": "Needs work",
+                    "good_count": 0,
+                    "warning_count": 1,
+                    "critical_count": 0,
+                },
                 "checks": [
                     {
                         "area": "Answerability",

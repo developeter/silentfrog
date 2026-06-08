@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from qtpy import QtCore
 
-from silentfrog.audit_issues import AuditIssue, IssueCategory, IssueEvidence, IssueSeverity  # type: ignore[reportMissingImports]
+from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
+    AuditIssue,
+    IssueCategory,
+    IssueEvidence,
+    IssueSeverity,
+)
 from silentfrog.audit_recap import AuditRecapWidget, summarize_issues  # type: ignore[reportMissingImports]
 
 

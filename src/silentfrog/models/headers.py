@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 from difflib import SequenceMatcher
-from typing import List
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
@@ -12,7 +12,7 @@ from .base import _BaseModel
 class HeaderModel(_BaseModel):
     HEADERS = ["Tag", "Text"]
 
-    def __init__(self, rows: List[List[str]], title_text: str | None = None) -> None:
+    def __init__(self, rows: list[list[str]], title_text: str | None = None) -> None:
         super().__init__(rows)
         self._brushes: StatusBrushPalette = status_brushes()
         self._title_text = (title_text or "").strip().lower()

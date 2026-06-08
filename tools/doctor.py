@@ -13,7 +13,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from tools.source_install import installer_paths  # noqa: E402
 
-
 MIN_PYTHON = (3, 12)
 POETRY_REQUIRED_IMPORTS = (
     "PyQt5",
@@ -29,7 +28,7 @@ POETRY_REQUIRED_IMPORTS = (
 # Distribution name → import name only differs for these entries; keep them paired
 # with comments so a refresh after a dep change stays an easy two-line edit.
 VENV_REQUIRED_IMPORTS = (
-    "PySide6",        # pyside6
+    "PySide6",  # pyside6
     "qtpy",
     "numpy",
     "pandas",
@@ -37,7 +36,7 @@ VENV_REQUIRED_IMPORTS = (
     "requests",
     "openpyxl",
     "httpx",
-    "bs4",            # beautifulsoup4
+    "bs4",  # beautifulsoup4
     "lxml",
     "html5lib",
     "tldextract",
@@ -45,7 +44,7 @@ VENV_REQUIRED_IMPORTS = (
     "aiohttp",
     "certifi",
     "nltk",
-    "PIL",            # pillow
+    "PIL",  # pillow
     "humanize",
 )
 REQUIRED_PATHS = (
@@ -113,10 +112,7 @@ def _check_imports_via(python: Path, modules: tuple[str, ...], label: str) -> No
     code = "\n".join(f"import {name}" for name in modules)
     completed = subprocess.run([str(python), "-c", code], check=False, capture_output=True, text=True)
     if completed.returncode:
-        raise DoctorError(
-            f"{label}: missing or broken dependencies.\n"
-            f"  stderr: {completed.stderr.strip()}"
-        )
+        raise DoctorError(f"{label}: missing or broken dependencies.\n  stderr: {completed.stderr.strip()}")
     print(f"[doctor] Dependency imports OK ({label})")
 
 
@@ -125,11 +121,7 @@ def _check_packaged_files() -> None:
         package_root = resources.files("silentfrog")
     except Exception as exc:  # pragma: no cover - diagnostic path
         raise DoctorError(f"Unable to resolve package resources: {exc!r}") from exc
-    missing = [
-        rel_path
-        for rel_path in REQUIRED_PACKAGE_FILES
-        if not package_root.joinpath(rel_path).is_file()
-    ]
+    missing = [rel_path for rel_path in REQUIRED_PACKAGE_FILES if not package_root.joinpath(rel_path).is_file()]
     if missing:
         joined = "\n - ".join(missing)
         raise DoctorError(f"Missing files in package resources:\n - {joined}")
@@ -175,9 +167,7 @@ def doctor_targets_for_mode(mode: str, repo_root: Path) -> tuple[DoctorTarget, .
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Silentfrog doctor: dependency, resource, compile and test checks."
-    )
+    parser = argparse.ArgumentParser(description="Silentfrog doctor: dependency, resource, compile and test checks.")
     parser.add_argument(
         "--skip-tests",
         action="store_true",

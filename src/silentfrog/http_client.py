@@ -1,13 +1,13 @@
 from __future__ import annotations
-from dataclasses import dataclass
+
 import ssl
+from dataclasses import dataclass
+from time import perf_counter
 from typing import Optional
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 import certifi
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
-
-from time import perf_counter
 
 from .crawl_options import DEFAULT_USER_AGENT
 

@@ -1,44 +1,44 @@
 from __future__ import annotations
-from dataclasses import replace
-import importlib.resources
-from pathlib import Path
-from typing import Any, Callable
 
+import importlib.resources
+import logging
 import sys
+import webbrowser
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from qtpy import QtCore, QtGui, QtWidgets
 
 from .audit_issues import AuditIssue, issues_for_payload
 from .audit_recap import AuditRecapWidget
-from .crawl_types import CrawlPayload
 from .crawl_options import CrawlOptions
-from .settings_dialog import CrawlSettingsDialog
+from .crawl_types import CrawlPayload
 from .exporters import export_page_analysis
+from .settings_dialog import CrawlSettingsDialog
 from .tabs import (
-    MetaTab,
-    HeadersTab,
-    ImagesTab,
-    SocialTab,
-    LinksTab,
-    RedirectTab,
-    CanonicalTab,
-    IndexabilityTab,
-    ContentQualityTab,
-    RobotsTab,
-    HreflangTab,
     AiTab,
     AiVisibilityTab,
+    CanonicalTab,
+    ContentQualityTab,
+    HeadersTab,
+    HreflangTab,
+    ImagesTab,
+    IndexabilityTab,
     KeywordsTab,
+    LinksTab,
+    MetaTab,
     PerformanceTab,
+    RedirectTab,
+    RobotsTab,
     SchemaTab,
     SerpTab,
+    SocialTab,
 )
 from .theme import left_align_tab_bar
 from .workers import run_crawl, run_image_analysis
-
-import webbrowser
-import logging
 
 
 class _RecentUrls:
@@ -105,6 +105,7 @@ class _RecentUrlsDelegate(QtWidgets.QStyledItemDelegate):
         painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, "X")
         painter.restore()
 
+
 class _RecentUrlsView(QtWidgets.QListView):
     def __init__(
         self,
@@ -152,7 +153,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     """Main SEO analysis window wiring reusable tabs and async workers."""
 
     dataReady = QtCore.Signal(dict)  # payload dei dati
-    errorSig = QtCore.Signal(str)    # messaggio d'errore
+    errorSig = QtCore.Signal(str)  # messaggio d'errore
 
     def __init__(self) -> None:
         super().__init__()
@@ -203,9 +204,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         # past the screen width. The widget still grows with the layout
         # via setSizePolicy below, and the dropdown popup always shows
         # full items.
-        self.url_edit.setSizeAdjustPolicy(
-            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
+        self.url_edit.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.url_edit.setMinimumContentsLength(40)
         self.url_edit.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
@@ -383,11 +382,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         }
         bg, fg, border = colors.get(self._resolve_theme(), colors["light"])
         button.setStyleSheet(
-            "QPushButton:disabled {"
-            f" background-color: {bg};"
-            f" color: {fg};"
-            f" border: 1px solid {border};"
-            "}"
+            f"QPushButton:disabled {{ background-color: {bg}; color: {fg}; border: 1px solid {border};}}"
         )
 
     def _refresh_dimmed_buttons(self) -> None:
@@ -569,7 +564,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._progress_value = clamped
         self.bar.setValue(clamped)
 
-
     def _start_progress_drift(self, limit: int = 80) -> None:
         self._progress_limit = max(0, min(100, limit))
         if self._progress_timer is None:
@@ -710,12 +704,8 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             "light": ("#1c1c1c", "#4a4a4a"),
         }
         title_color, hint_color = scheme.get(self._resolve_theme(), scheme["light"])
-        self._intro_title.setStyleSheet(
-            f"font-size: 18px; font-weight: 600; color: {title_color};"
-        )
-        self._intro_hint.setStyleSheet(
-            f"color: {hint_color}; max-width: 460px;"
-        )
+        self._intro_title.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {title_color};")
+        self._intro_hint.setStyleSheet(f"color: {hint_color}; max-width: 460px;")
 
     def _style_progress_bar(self) -> None:
         theme = self._resolve_theme()
@@ -790,4 +780,3 @@ if __name__ == "__main__":
     window = WebpageSeoWindow()
     window.show()
     sys.exit(app.exec())
-

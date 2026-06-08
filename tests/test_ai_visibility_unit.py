@@ -11,7 +11,10 @@ from silentfrog.ai_visibility import (  # type: ignore[reportMissingImports]
     build_ai_visibility_summary,
     normalize_ai_visibility_status,
 )
-from silentfrog.crawl_types import AiVisibilityCheck, AiVisibilityPayload  # type: ignore[reportMissingImports]
+from silentfrog.crawl_types import (  # type: ignore[reportMissingImports]
+    AiVisibilityCheck,
+    AiVisibilityPayload,
+)
 
 
 def test_ai_visibility_status_normalization() -> None:
@@ -31,7 +34,14 @@ def test_ai_visibility_summary_returns_strong_for_clean_checks() -> None:
     checks = [
         AiVisibilityCheck("Access", "AI agents can fetch the page", "good", "Allowed", "Keep access open", "access"),
         AiVisibilityCheck("Topic clarity", "Primary topic is explicit", "good", "Clear title and H1", "Keep", "topic"),
-        AiVisibilityCheck("Answerability", "Intro answers the topic quickly", "warning", "Summary block is missing", "Add one", "answer"),
+        AiVisibilityCheck(
+            "Answerability",
+            "Intro answers the topic quickly",
+            "warning",
+            "Summary block is missing",
+            "Add one",
+            "answer",
+        ),
     ]
 
     summary = build_ai_visibility_summary(checks)
@@ -44,8 +54,22 @@ def test_ai_visibility_summary_returns_strong_for_clean_checks() -> None:
 
 def test_ai_visibility_summary_returns_needs_work_for_limited_access() -> None:
     checks = [
-        AiVisibilityCheck("Access", "Snippet reuse is limited", "warning", "nosnippet found", "Remove nosnippet", "access_snippet"),
-        AiVisibilityCheck("Citation readiness", "Structured data is incomplete", "warning", "Missing organization details", "Complete schema", "citation"),
+        AiVisibilityCheck(
+            "Access",
+            "Snippet reuse is limited",
+            "warning",
+            "nosnippet found",
+            "Remove nosnippet",
+            "access_snippet",
+        ),
+        AiVisibilityCheck(
+            "Citation readiness",
+            "Structured data is incomplete",
+            "warning",
+            "Missing organization details",
+            "Complete schema",
+            "citation",
+        ),
     ]
 
     summary = build_ai_visibility_summary(checks)
@@ -56,8 +80,22 @@ def test_ai_visibility_summary_returns_needs_work_for_limited_access() -> None:
 
 def test_ai_visibility_summary_returns_weak_for_critical_access() -> None:
     checks = [
-        AiVisibilityCheck("Access", "AI crawlers are blocked", "critical", "robots.txt blocks the audited agents", "Open robots.txt access", "access_blocked"),
-        AiVisibilityCheck("Topic clarity", "Primary topic is vague", "warning", "Title and H1 are generic", "Clarify the topic", "topic_vague"),
+        AiVisibilityCheck(
+            "Access",
+            "AI crawlers are blocked",
+            "critical",
+            "robots.txt blocks the audited agents",
+            "Open robots.txt access",
+            "access_blocked",
+        ),
+        AiVisibilityCheck(
+            "Topic clarity",
+            "Primary topic is vague",
+            "warning",
+            "Title and H1 are generic",
+            "Clarify the topic",
+            "topic_vague",
+        ),
     ]
 
     summary = build_ai_visibility_summary(checks)
@@ -94,7 +132,15 @@ def test_ai_visibility_analyzer_builds_expected_checks() -> None:
         {
             "ai_crawl": [
                 ["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"],
-                ["Googlebot", "googlebot", "Yes", "-", "nosnippet", "Limited", "Google search controls: nosnippet"],
+                [
+                    "Googlebot",
+                    "googlebot",
+                    "Yes",
+                    "-",
+                    "nosnippet",
+                    "Limited",
+                    "Google search controls: nosnippet",
+                ],
             ],
             "meta": [["title", "Lago Not Only White Sofa", "24"]],
             "headers": [["h1", "Lago Not Only White Sofa"]],
@@ -116,16 +162,45 @@ def test_ai_visibility_analyzer_builds_expected_checks() -> None:
                 "verdict": "Strong",
             },
             "schema": {
-                "summary": {"total": 2, "by_syntax": {"json-ld": 2}, "by_type": {"Product": 1, "Organization": 1}, "errors": []},
+                "summary": {
+                    "total": 2,
+                    "by_syntax": {"json-ld": 2},
+                    "by_type": {"Product": 1, "Organization": 1},
+                    "errors": [],
+                },
                 "eligibility": [
-                    {"type": "Product", "detected": True, "count": 1, "eligibility": "Eligible", "missing_fields": [], "warnings": []},
-                    {"type": "Organization", "detected": True, "count": 1, "eligibility": "Eligible", "missing_fields": [], "warnings": []},
+                    {
+                        "type": "Product",
+                        "detected": True,
+                        "count": 1,
+                        "eligibility": "Eligible",
+                        "missing_fields": [],
+                        "warnings": [],
+                    },
+                    {
+                        "type": "Organization",
+                        "detected": True,
+                        "count": 1,
+                        "eligibility": "Eligible",
+                        "missing_fields": [],
+                        "warnings": [],
+                    },
                 ],
                 "blocks": [],
                 "fallback_raw": [],
             },
-            "canonical": {"target": "https://example.com/sofa", "self": True, "multiple": False, "status": "200"},
-            "redirect": {"chain": ["https://example.com/sofa"], "hops": 0, "final_status": "200", "loop": False},
+            "canonical": {
+                "target": "https://example.com/sofa",
+                "self": True,
+                "multiple": False,
+                "status": "200",
+            },
+            "redirect": {
+                "chain": ["https://example.com/sofa"],
+                "hops": 0,
+                "final_status": "200",
+                "loop": False,
+            },
             "social": {
                 "open_graph": {
                     "title": "Lago Not Only White Sofa",
@@ -161,8 +236,24 @@ def test_ai_visibility_analyzer_marks_blocked_access_as_weak() -> None:
     checks = build_ai_visibility_checks(
         {
             "ai_crawl": [
-                ["GPTBot", "gptbot", "No", "noai", "-", "Blocked", "Blocked by robots.txt: /private; Nonstandard directives detected: noai"],
-                ["Google-Extended", "google-extended", "No", "noai", "-", "Blocked", "Blocked by robots.txt: /private; Nonstandard directives detected: noai"],
+                [
+                    "GPTBot",
+                    "gptbot",
+                    "No",
+                    "noai",
+                    "-",
+                    "Blocked",
+                    "Blocked by robots.txt: /private; Nonstandard directives detected: noai",
+                ],
+                [
+                    "Google-Extended",
+                    "google-extended",
+                    "No",
+                    "noai",
+                    "-",
+                    "Blocked",
+                    "Blocked by robots.txt: /private; Nonstandard directives detected: noai",
+                ],
             ],
             "meta": [["title", "Generic Page", "12"]],
             "headers": [["h1", "Generic Page"]],
@@ -183,9 +274,24 @@ def test_ai_visibility_analyzer_marks_blocked_access_as_weak() -> None:
                 "heading_structure": "Good",
                 "verdict": "Weak",
             },
-            "schema": {"summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []}, "eligibility": [], "blocks": [], "fallback_raw": []},
-            "canonical": {"target": "https://example.com/private", "self": True, "multiple": False, "status": "200"},
-            "redirect": {"chain": ["https://example.com/private"], "hops": 0, "final_status": "200", "loop": False},
+            "schema": {
+                "summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []},
+                "eligibility": [],
+                "blocks": [],
+                "fallback_raw": [],
+            },
+            "canonical": {
+                "target": "https://example.com/private",
+                "self": True,
+                "multiple": False,
+                "status": "200",
+            },
+            "redirect": {
+                "chain": ["https://example.com/private"],
+                "hops": 0,
+                "final_status": "200",
+                "loop": False,
+            },
             "social": {"open_graph": {}, "twitter": {}},
         }
     )
@@ -219,7 +325,12 @@ _MIN_PAYLOAD = {
         "heading_structure": "Good",
         "verdict": "Strong",
     },
-    "schema": {"summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []}, "eligibility": [], "blocks": [], "fallback_raw": []},
+    "schema": {
+        "summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []},
+        "eligibility": [],
+        "blocks": [],
+        "fallback_raw": [],
+    },
     "canonical": {"target": "https://example.com/", "self": True, "multiple": False, "status": "200"},
     "redirect": {"chain": ["https://example.com/"], "hops": 0, "final_status": "200", "loop": False},
     "social": {"open_graph": {}, "twitter": {}},
@@ -240,10 +351,38 @@ def test_ai_visibility_emits_four_discovery_checks_in_access_area() -> None:
 
 def test_ai_visibility_discovery_checks_are_good_when_files_present() -> None:
     discovery = {
-        "llms_txt": {"url": "https://example.com/llms.txt", "status": 200, "present": True, "body_excerpt": "# x", "parsed": {"title": "x"}, "source": "fetch"},
-        "llms_full_txt": {"url": "https://example.com/llms-full.txt", "status": 200, "present": True, "body_excerpt": "# y", "parsed": {}, "source": "fetch"},
-        "well_known_ai_json": {"url": "https://example.com/.well-known/ai.json", "status": 200, "present": True, "body_excerpt": "{}", "parsed": {"policy": "allow"}, "source": "fetch"},
-        "sitemap": {"url": "https://example.com/sitemap.xml", "status": 200, "present": True, "body_excerpt": "<urlset/>", "parsed": {"robots_sitemap_count": 1}, "source": "robots-sitemap"},
+        "llms_txt": {
+            "url": "https://example.com/llms.txt",
+            "status": 200,
+            "present": True,
+            "body_excerpt": "# x",
+            "parsed": {"title": "x"},
+            "source": "fetch",
+        },
+        "llms_full_txt": {
+            "url": "https://example.com/llms-full.txt",
+            "status": 200,
+            "present": True,
+            "body_excerpt": "# y",
+            "parsed": {},
+            "source": "fetch",
+        },
+        "well_known_ai_json": {
+            "url": "https://example.com/.well-known/ai.json",
+            "status": 200,
+            "present": True,
+            "body_excerpt": "{}",
+            "parsed": {"policy": "allow"},
+            "source": "fetch",
+        },
+        "sitemap": {
+            "url": "https://example.com/sitemap.xml",
+            "status": 200,
+            "present": True,
+            "body_excerpt": "<urlset/>",
+            "parsed": {"robots_sitemap_count": 1},
+            "source": "robots-sitemap",
+        },
     }
     checks = build_ai_visibility_checks(_payload_with_discovery(discovery))
     by_key = {item.key: item for item in checks}
@@ -272,7 +411,9 @@ def test_ai_visibility_myth_tooltips_carry_google_disclaimer(myth_key: str) -> N
     # Google-myth disclaimer. Every myth-flagged tooltip names Google.
     tooltip = ai_visibility_check_tooltip(myth_key)
     assert "Google" in tooltip
-    assert any(token in tooltip for token in ("not required", "NOT required", "Google-not-required", "AI Optimization Guide"))
+    assert any(
+        token in tooltip for token in ("not required", "NOT required", "Google-not-required", "AI Optimization Guide")
+    )
 
 
 def test_ai_visibility_areas_include_eeat() -> None:
@@ -285,9 +426,14 @@ def test_ai_visibility_emits_eeat_and_structure_rows() -> None:
     checks = build_ai_visibility_checks(_payload_with_discovery({}))
     keys = {item.key for item in checks}
     for key in (
-        "eeat_author_byline", "eeat_publish_date", "eeat_update_freshness",
-        "eeat_author_bio", "eeat_external_citations",
-        "structure_semantic_html", "structure_internal_links", "citation_images_alt",
+        "eeat_author_byline",
+        "eeat_publish_date",
+        "eeat_update_freshness",
+        "eeat_author_bio",
+        "eeat_external_citations",
+        "structure_semantic_html",
+        "structure_internal_links",
+        "citation_images_alt",
     ):
         assert key in keys, f"missing M2 check: {key}"
 
@@ -356,8 +502,7 @@ def test_m3_myth_tooltips_carry_google_disclaimer(myth_key: str) -> None:
     tooltip = ai_visibility_check_tooltip(myth_key)
     assert "Google" in tooltip
     assert any(
-        token in tooltip
-        for token in ("not required", "NOT required", "AI Optimization Guide", "positive signal")
+        token in tooltip for token in ("not required", "NOT required", "AI Optimization Guide", "positive signal")
     )
 
 
@@ -396,7 +541,16 @@ def test_geo_score_clamps_to_zero() -> None:
 
 def test_ai_visibility_summary_payload_carries_score() -> None:
     payload = AiVisibilityPayload.from_raw(
-        {"summary": {"verdict": "Strong", "good_count": 5, "warning_count": 0, "critical_count": 0, "score": 92}, "checks": []}
+        {
+            "summary": {
+                "verdict": "Strong",
+                "good_count": 5,
+                "warning_count": 0,
+                "critical_count": 0,
+                "score": 92,
+            },
+            "checks": [],
+        }
     )
     assert payload.summary.score == 92
     assert payload.to_dict()["summary"]["score"] == 92
@@ -417,7 +571,12 @@ def test_ai_visibility_emits_ssr_parity_row_with_info_when_render_absent() -> No
 
 def test_ai_visibility_propagates_render_diff_when_present() -> None:
     payload = _payload_with_discovery({})
-    payload["render"] = {"status": "critical", "missing_headings": ["H1"], "missing_main_text_chars": 900, "missing_links": 8}
+    payload["render"] = {
+        "status": "critical",
+        "missing_headings": ["H1"],
+        "missing_main_text_chars": 900,
+        "missing_links": 8,
+    }
     checks = build_ai_visibility_checks(payload)
     ssr = next(item for item in checks if item.key == "access_ssr_parity")
     assert ssr.status == "critical"

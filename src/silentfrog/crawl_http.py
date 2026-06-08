@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlparse, urlunparse, urljoin
-from urllib.robotparser import RobotFileParser
-import re
+from urllib.parse import urljoin, urlparse
 
 import aiohttp  # type: ignore[import]  # aiohttp lacks complete stubs in our environment
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
-from .http_client import fetch_text
-from .crawl_options import CrawlOptions
 from .crawl_constants import _ACCEPT_DEFAULT, _ACCEPT_LANGUAGE_DEFAULT
+from .crawl_options import CrawlOptions
+from .http_client import fetch_text
+
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
 _HOST_DELAYS: dict[str, float] = {}
@@ -78,6 +78,7 @@ async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
         cache_hint = _cache_hint(r.headers)
         try:
             from io import BytesIO
+
             from PIL import Image  # type: ignore
 
             with Image.open(BytesIO(raw)) as im:
@@ -103,8 +104,8 @@ def _cache_hint(headers: Any) -> str:
         try:
             dt = parsedate_to_datetime(str(expires))
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            remaining = int((dt - datetime.now(timezone.utc)).total_seconds())
+                dt = dt.replace(tzinfo=UTC)
+            remaining = int((dt - datetime.now(UTC)).total_seconds())
             if remaining > 0:
                 return _human_duration(remaining)
         except Exception:

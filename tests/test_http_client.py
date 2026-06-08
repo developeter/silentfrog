@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 import ssl
+
+import pytest
 
 from silentfrog.http_client import HttpResponse, fetch_page  # type: ignore[reportMissingImports]
 

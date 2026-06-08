@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
-from urllib.parse import urlparse, urlunparse, urljoin
+from typing import Any
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
@@ -131,11 +131,11 @@ _PERFORMANCE_ISSUE_TOOLTIPS = {
 @dataclass
 class _PerformanceCollectionState:
     base_url: str
-    resources: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    fetch_targets: Dict[str, List[str]] = field(default_factory=dict)
-    resource_entries: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
-    script_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    script_entry_map: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    resources: dict[str, dict[str, int]] = field(default_factory=dict)
+    fetch_targets: dict[str, list[str]] = field(default_factory=dict)
+    resource_entries: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    script_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    script_entry_map: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _normalize_resource_type(resource_type: str) -> str:
@@ -158,7 +158,7 @@ def _is_third_party_resource(base_url: str, resource_url: str) -> bool:
     return bool(resource_url) and _host_root(base_url) != _host_root(resource_url)
 
 
-def _build_resource_breakdown(transfer_size: int, resources: Dict[str, Dict[str, int]]) -> list[dict[str, int | str]]:
+def _build_resource_breakdown(transfer_size: int, resources: dict[str, dict[str, int]]) -> list[dict[str, int | str]]:
     html_entry = {"type": "html", "count": 1, "bytes": max(transfer_size, 0)}
     buckets = {
         key: {
@@ -168,14 +168,17 @@ def _build_resource_breakdown(transfer_size: int, resources: Dict[str, Dict[str,
         }
         for key, value in resources.items()
     }
-    return [html_entry, *(buckets.get(key, {"type": key, "count": 0, "bytes": 0}) for key in _RESOURCE_BREAKDOWN_ORDER[1:])]
+    return [
+        html_entry,
+        *(buckets.get(key, {"type": key, "count": 0, "bytes": 0}) for key in _RESOURCE_BREAKDOWN_ORDER[1:]),
+    ]
 
 
 def _build_performance_summary(
     base_url: str,
     transfer_size: int,
-    resources: Dict[str, Dict[str, int]],
-    resource_entries: Dict[str, List[Dict[str, Any]]],
+    resources: dict[str, dict[str, int]],
+    resource_entries: dict[str, list[dict[str, Any]]],
 ) -> dict[str, int]:
     third_party_urls: dict[str, int] = {}
     for entries in resource_entries.values():
@@ -200,8 +203,8 @@ def _build_performance_summary(
 
 
 def _build_performance_issues(
-    resources: Dict[str, Dict[str, int]],
-    script_stats: Dict[str, Dict[str, int]],
+    resources: dict[str, dict[str, int]],
+    script_stats: dict[str, dict[str, int]],
     summary: dict[str, int],
 ) -> list[dict[str, str]]:
     issue_builders = (
@@ -257,7 +260,7 @@ def _page_weight_issue(summary: dict[str, int]) -> dict[str, str] | None:
     )
 
 
-def _blocking_js_issue(script_stats: Dict[str, Dict[str, int]]) -> dict[str, str] | None:
+def _blocking_js_issue(script_stats: dict[str, dict[str, int]]) -> dict[str, str] | None:
     blocking_count = script_stats["blocking"]["count"]
     if blocking_count <= 0:
         return None
@@ -272,7 +275,7 @@ def _blocking_js_issue(script_stats: Dict[str, Dict[str, int]]) -> dict[str, str
     )
 
 
-def _resource_weight_issue(resource_key: str, resources: Dict[str, Dict[str, int]]) -> dict[str, str] | None:
+def _resource_weight_issue(resource_key: str, resources: dict[str, dict[str, int]]) -> dict[str, str] | None:
     rule = _RESOURCE_WEIGHT_RULES[resource_key]
     resource_bytes = resources[resource_key]["bytes"]
     severity = _threshold_severity(resource_bytes, rule["warning_threshold"], rule["critical_threshold"])
@@ -368,7 +371,7 @@ def performance_issue_tooltip(issue_key: str) -> str:
     return _PERFORMANCE_ISSUE_TOOLTIPS.get(issue_key.strip().lower(), "")
 
 
-def _empty_resources() -> Dict[str, Dict[str, int]]:
+def _empty_resources() -> dict[str, dict[str, int]]:
     return {
         "css": {"count": 0, "bytes": 0},
         "js": {"count": 0, "bytes": 0},
@@ -410,7 +413,12 @@ def _register_resource(
     if url.startswith("data:"):
         size_val = _data_uri_size(url)
         state.resources[bucket]["bytes"] += size_val
-        entry = {"type": bucket.upper(), "url": label or url[:80], "bytes": size_val, "blocking": bool(blocking)}
+        entry = {
+            "type": bucket.upper(),
+            "url": label or url[:80],
+            "bytes": size_val,
+            "blocking": bool(blocking),
+        }
         state.resource_entries[bucket].append(entry)
         if bucket == "js":
             kind = "blocking" if blocking else "async"
@@ -423,7 +431,12 @@ def _register_resource(
         return
     normalized = urlunparse(parsed)
     state.fetch_targets[bucket].append(normalized)
-    entry = {"type": bucket.upper(), "url": normalized, "bytes": max(preset_bytes or 0, 0), "blocking": bool(blocking)}
+    entry = {
+        "type": bucket.upper(),
+        "url": normalized,
+        "bytes": max(preset_bytes or 0, 0),
+        "blocking": bool(blocking),
+    }
     state.resource_entries[bucket].append(entry)
     if bucket != "js":
         return
@@ -486,8 +499,8 @@ def _collect_image_resources(state: _PerformanceCollectionState, soup: Any) -> N
 
 def _merge_remote_resource_sizes(
     state: _PerformanceCollectionState,
-    remote_sizes: Dict[str, int],
-    url_sizes: Dict[str, Dict[str, int]],
+    remote_sizes: dict[str, int],
+    url_sizes: dict[str, dict[str, int]],
 ) -> None:
     for resource_type, size in remote_sizes.items():
         state.resources[resource_type]["bytes"] += size
@@ -507,15 +520,15 @@ def _merge_remote_resource_sizes(
                 state.script_stats[script_info["kind"]]["bytes"] += entry_size
 
 
-def _top_offenders(resource_entries: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    offenders: List[Dict[str, Any]] = []
+def _top_offenders(resource_entries: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    offenders: list[dict[str, Any]] = []
     for entries in resource_entries.values():
         offenders.extend(entries)
     offenders.sort(key=lambda item: item.get("bytes", 0), reverse=True)
     return offenders[:10]
 
 
-def _add_opportunity(opportunities: list[str], details: list[Dict[str, str]], message: str, severity: str) -> None:
+def _add_opportunity(opportunities: list[str], details: list[dict[str, str]], message: str, severity: str) -> None:
     text = message.strip()
     if not text:
         return
@@ -526,11 +539,11 @@ def _add_opportunity(opportunities: list[str], details: list[Dict[str, str]], me
 def _collect_opportunities(
     transfer_size: int,
     response: Any,
-    resources: Dict[str, Dict[str, int]],
-    script_stats: Dict[str, Dict[str, int]],
-) -> tuple[list[str], list[Dict[str, str]]]:
+    resources: dict[str, dict[str, int]],
+    script_stats: dict[str, dict[str, int]],
+) -> tuple[list[str], list[dict[str, str]]]:
     opportunities: list[str] = []
-    opportunity_details: list[Dict[str, str]] = []
+    opportunity_details: list[dict[str, str]] = []
     total_resource_bytes = sum(info.get("bytes", 0) for info in resources.values())
     total_page_weight = transfer_size + total_resource_bytes
 
@@ -599,7 +612,7 @@ def _data_uri_size(data_uri: str) -> int:
     return 0
 
 
-def _limited_fetch_targets(targets: Dict[str, List[str]]) -> list[tuple[str, str]]:
+def _limited_fetch_targets(targets: dict[str, list[str]]) -> list[tuple[str, str]]:
     url_bucket: list[tuple[str, str]] = []
     for resource_type, urls in targets.items():
         seen: set[str] = set()
@@ -672,8 +685,8 @@ async def _probe_remote_resource(
 
 
 def _merge_remote_probe_results(
-    aggregated: Dict[str, int],
-    per_url: Dict[str, Dict[str, int]],
+    aggregated: dict[str, int],
+    per_url: dict[str, dict[str, int]],
     results: list[tuple[str, str, int]],
 ) -> None:
     for resource_type, url, size in results:
@@ -683,9 +696,11 @@ def _merge_remote_probe_results(
         per_url.setdefault(resource_type, {})[url] = size
 
 
-async def _measure_remote_resources(targets: Dict[str, List[str]]) -> tuple[Dict[str, int], Dict[str, Dict[str, int]]]:
-    aggregated = {key: 0 for key in targets}
-    per_url: Dict[str, Dict[str, int]] = {key: {} for key in targets}
+async def _measure_remote_resources(
+    targets: dict[str, list[str]],
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+    aggregated = dict.fromkeys(targets, 0)
+    per_url: dict[str, dict[str, int]] = {key: {} for key in targets}
     url_bucket = _limited_fetch_targets(targets)
 
     if not url_bucket:
@@ -723,7 +738,7 @@ def _format_bytes(value: int | float) -> str:
     return f"{number:.1f} TB"
 
 
-async def _collect_performance_metrics(response: Any, soup: Any) -> Dict[str, object]:
+async def _collect_performance_metrics(response: Any, soup: Any) -> dict[str, object]:
     transfer_size = len(response.body.encode("utf-8", errors="ignore"))
     state = _new_collection_state(response.url)
     _collect_link_resources(state, soup)

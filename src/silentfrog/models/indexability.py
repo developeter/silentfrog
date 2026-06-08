@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 from qtpy import QtCore
 from qtpy.QtCore import Qt
 
@@ -10,7 +8,7 @@ from .base import GenericModel
 
 
 class IndexabilityModel(GenericModel):
-    def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
+    def __init__(self, headers: list[str], rows: list[list[str]]) -> None:
         super().__init__(headers, rows)
         self._brushes: StatusBrushPalette = status_brushes()
         self._background_handlers = {

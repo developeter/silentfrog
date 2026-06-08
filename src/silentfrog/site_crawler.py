@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -59,10 +60,7 @@ async def crawl_site(
     for _ in range(worker_count):
         queue.put_nowait(None)
     await asyncio.gather(
-        *[
-            _crawl_worker(queue, config, timeout, results, on_event, cancel_event)
-            for _ in range(worker_count)
-        ]
+        *[_crawl_worker(queue, config, timeout, results, on_event, cancel_event) for _ in range(worker_count)]
     )
     ordered = sorted(results, key=lambda result: urls.index(result.url) if result.url in urls else len(urls))
     return SiteCrawlReport.from_results(ordered, discovered_count=len(urls))
@@ -132,7 +130,9 @@ async def _discover_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[
 
 
 async def _robots_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[str]:
-    response = await fetch_page(_site_url(config, "robots.txt"), timeout=timeout, headers=_headers_from_options(config.crawl_options))
+    response = await fetch_page(
+        _site_url(config, "robots.txt"), timeout=timeout, headers=_headers_from_options(config.crawl_options)
+    )
     if response.status >= 400 or not response.body:
         return []
     return _robots_sitemap_directives(response.body)

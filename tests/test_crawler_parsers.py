@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import textwrap
-from typing import Dict, List
 
 import pytest
 from bs4 import BeautifulSoup
@@ -255,7 +254,7 @@ def test_schema_validation_flags_breadcrumb_and_product() -> None:
 
 
 def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
-    robots: Dict[str, List[tuple[str, str]]] = {
+    robots: dict[str, list[tuple[str, str]]] = {
         "*": [("Disallow", "/private"), ("Allow", "/")],
         "GPTBot": [("Allow", "/")],
         "GoogleBot": [("Allow", "/")],

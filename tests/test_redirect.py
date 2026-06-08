@@ -1,16 +1,15 @@
 import pathlib
+
 import pandas as pd
-import requests_mock  # type: ignore[reportMissingImports]
 import pytest
+import requests_mock  # type: ignore[reportMissingImports]
 from openpyxl import load_workbook
 
 from silentfrog.redirect import check_redirects  # type: ignore[reportMissingImports]
 
 
 def test_check_redirects(tmp_path: pathlib.Path):
-    df = pd.DataFrame(
-        {0: ["https://old.example.com/page"], 1: ["https://new.example.com/page"]}
-    )
+    df = pd.DataFrame({0: ["https://old.example.com/page"], 1: ["https://new.example.com/page"]})
     in_xlsx = tmp_path / "input.xlsx"
     df.to_excel(in_xlsx, index=False, header=False)
 

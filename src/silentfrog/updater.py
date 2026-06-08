@@ -13,7 +13,7 @@ import os
 import ssl
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -21,7 +21,6 @@ from typing import Optional
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 import certifi
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -192,7 +191,7 @@ def _parse_iso8601_utc(value: str) -> datetime:
     try:
         return datetime.fromisoformat(normalized)
     except ValueError:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 def compare(local: LocalRevision, remote: Optional[RemoteRevision]) -> UpdateStatus:

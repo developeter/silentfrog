@@ -18,9 +18,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, cast
+from typing import Optional, cast
 
 from qtpy import QtCore
 from qtpy.QtCore import QProcess
@@ -47,7 +48,6 @@ from .updater import (
     find_repo_root,
     read_local_revision,
 )
-
 
 _REPO_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 
@@ -169,9 +169,7 @@ class UpdateDialog(QDialog):
         }
 
     def _render_up_to_date(self, result: UpdateCheckResult) -> None:
-        self._status_label.setText(
-            f"You’re on the latest version ({_short_sha(result.local.sha)})."
-        )
+        self._status_label.setText(f"You’re on the latest version ({_short_sha(result.local.sha)}).")
         self._details_label.setText("")
         self._set_buttons({"OK": self._close_ok})
 
@@ -182,10 +180,7 @@ class UpdateDialog(QDialog):
         if remote is None:
             self._render_unknown(result)
             return
-        self._status_label.setText(
-            "Update available: "
-            f"{_short_sha(result.local.sha)} → {_short_sha(remote.sha)}"
-        )
+        self._status_label.setText(f"Update available: {_short_sha(result.local.sha)} → {_short_sha(remote.sha)}")
         first_line = remote.message.splitlines()[0] if remote.message else ""
         self._details_label.setText(first_line)
         self._pending_apply_sha = remote.sha
@@ -215,9 +210,7 @@ class UpdateDialog(QDialog):
 
     def _render_unknown(self, _result: UpdateCheckResult) -> None:
         self._status_label.setText("Could not determine the current revision.")
-        self._details_label.setText(
-            "If this is a fresh install, reinstall Silentfrog to record a revision."
-        )
+        self._details_label.setText("If this is a fresh install, reinstall Silentfrog to record a revision.")
         self._set_buttons({"OK": self._close_ok})
 
     def _set_buttons(self, mapping: dict[str, Callable[[], None]]) -> None:
@@ -244,16 +237,12 @@ class UpdateDialog(QDialog):
         if not self._pending_apply_sha:
             return
         self._status_label.setText("Applying update…")
-        self._details_label.setText(
-            f"Fetching {_short_sha(self._pending_apply_sha)} and refreshing the venv."
-        )
+        self._details_label.setText(f"Fetching {_short_sha(self._pending_apply_sha)} and refreshing the venv.")
         self._buttons.clear()
         process = QProcess(self)
         process.setProcessChannelMode(QProcess.MergedChannels)
         process.finished.connect(self._on_apply_finished)
-        process.readyReadStandardOutput.connect(
-            lambda: self._append_log(bytes(process.readAllStandardOutput()))
-        )
+        process.readyReadStandardOutput.connect(lambda: self._append_log(bytes(process.readAllStandardOutput())))
         program, args = _updater_subprocess_command(self._pending_apply_sha)
         process.start(program, args)
         self._process = process
@@ -265,9 +254,7 @@ class UpdateDialog(QDialog):
         self._status_label.setText("Update failed.")
         existing = self._details_label.text()
         error_line = f"`tools.update_silentfrog` exited with code {exit_code}."
-        self._details_label.setText(
-            f"{existing}\n\n{error_line}" if existing else error_line
-        )
+        self._details_label.setText(f"{existing}\n\n{error_line}" if existing else error_line)
         self._set_buttons({"Close": self._close_ok})
 
     def _append_log(self, chunk: bytes) -> None:

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
 import hashlib
 import json
 import shutil
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 _MANIFEST_VERSION = 1
 _DISCLOSURE = (
@@ -153,7 +154,9 @@ class LocalFolderSyncClient:
     def list_items(self) -> tuple[RemoteSyncItem, ...]:
         if not self.root.exists():
             return ()
-        return tuple(_item_from_remote_path(path, self.provider) for path in sorted(self.root.iterdir()) if path.is_file())
+        return tuple(
+            _item_from_remote_path(path, self.provider) for path in sorted(self.root.iterdir()) if path.is_file()
+        )
 
 
 def build_upload_plan(
@@ -287,7 +290,7 @@ def _safe_remote_name(value: str) -> str:
 
 
 def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 __all__ = [

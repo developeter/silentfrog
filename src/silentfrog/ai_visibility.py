@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from collections import Counter
 import re
-from typing import Any, Iterable, Mapping
+from collections import Counter
+from collections.abc import Iterable, Mapping
+from typing import Any
 
+from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .crawl_types import (
     AiVisibilityCheck,
     AiVisibilityPayload,
@@ -15,7 +17,6 @@ from .crawl_types import (
     SocialPayload,
     StructuredDataPayload,
 )
-from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
 from .render_diff import RenderDiff, build_render_diff_check
@@ -210,7 +211,7 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "they are accurate and supportable. Warning only when zero quantitative tokens are found."
     ),
     "citation_definition_patterns": (
-        "Checks whether the page defines its key terms with clear \"X is Y\" sentences.\n\n"
+        'Checks whether the page defines its key terms with clear "X is Y" sentences.\n\n'
         "Per Google's AI Optimization Guide this is a positive signal, never a requirement. Present => good; "
         "absent => info. Never warned. Best practice: where it fits the editorial style, open sections with "
         "a one-sentence definition."
@@ -273,11 +274,7 @@ def build_ai_visibility_summary(
     critical_count = counts.get("critical", 0)
     warning_count = counts.get("warning", 0)
     good_count = counts.get("good", 0)
-    access_statuses = {
-        normalize_ai_visibility_status(item.status)
-        for item in items
-        if item.area == "Access"
-    }
+    access_statuses = {normalize_ai_visibility_status(item.status) for item in items if item.area == "Access"}
 
     verdict = _VERDICT_STRONG
     if "critical" in access_statuses or critical_count >= 2 or (critical_count == 1 and warning_count >= 2):
@@ -314,11 +311,15 @@ def _payload_mapping(value: CrawlPayload | Mapping[str, Any]) -> Mapping[str, An
 
 
 def _rows(value: Any) -> list[list[str]]:
-    return [
-        [str(cell) for cell in row]
-        for row in value
-        if isinstance(row, Iterable) and not isinstance(row, (str, bytes))
-    ] if isinstance(value, Iterable) and not isinstance(value, (str, bytes)) else []
+    return (
+        [
+            [str(cell) for cell in row]
+            for row in value
+            if isinstance(row, Iterable) and not isinstance(row, (str, bytes))
+        ]
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes))
+        else []
+    )
 
 
 def _title_from_meta(meta_rows: list[list[str]]) -> str:
@@ -336,11 +337,7 @@ def _schema_type_sets(schema: StructuredDataPayload) -> tuple[set[str], set[str]
         for entry in schema.eligibility
         if entry.schema_type and entry.eligibility.casefold() == "eligible"
     }
-    detected = {
-        entry.schema_type.casefold()
-        for entry in schema.eligibility
-        if entry.schema_type and entry.detected
-    }
+    detected = {entry.schema_type.casefold() for entry in schema.eligibility if entry.schema_type and entry.detected}
     return all_types, eligible, detected
 
 
@@ -416,7 +413,11 @@ def _build_topic_clarity_checks(
     title: str,
     h1: str,
 ) -> list[AiVisibilityCheck]:
-    alignment_status = "good" if quality.title_present and quality.h1_count == 1 and quality.title_h1_alignment in {"Aligned", "Exact match"} else "warning"
+    alignment_status = (
+        "good"
+        if quality.title_present and quality.h1_count == 1 and quality.title_h1_alignment in {"Aligned", "Exact match"}
+        else "warning"
+    )
     alignment_status = "critical" if not quality.title_present or quality.h1_count == 0 else alignment_status
     topic_alignment = _check(
         "Topic clarity",
@@ -460,7 +461,9 @@ def _build_answerability_checks(quality: ContentQuality) -> list[AiVisibilityChe
         "Add a concise opening paragraph that explains the page topic immediately.",
         "answer_intro",
     )
-    chunking_status = "good" if quality.heading_structure == "Good" and quality.substantial_paragraph_count >= 2 else "warning"
+    chunking_status = (
+        "good" if quality.heading_structure == "Good" and quality.substantial_paragraph_count >= 2 else "warning"
+    )
     chunking_status = "critical" if quality.heading_structure in {"Missing H1", "Multiple H1s"} else chunking_status
     chunking_check = _check(
         "Answerability",
@@ -486,7 +489,9 @@ def _build_citation_checks(
 ) -> list[AiVisibilityCheck]:
     all_types, eligible_types, detected_types = _schema_type_sets(schema)
     schema_status = "good" if eligible_types & _RICH_SCHEMA_TYPES else "warning"
-    schema_status = "critical" if detected_types & _RICH_SCHEMA_TYPES and not eligible_types & _RICH_SCHEMA_TYPES else schema_status
+    schema_status = (
+        "critical" if detected_types & _RICH_SCHEMA_TYPES and not eligible_types & _RICH_SCHEMA_TYPES else schema_status
+    )
     schema_check = _check(
         "Citation readiness",
         "Structured data supports interpretation and citation",
@@ -539,7 +544,11 @@ def _build_entity_checks(
 ) -> list[AiVisibilityCheck]:
     social_titles = [card.title for card in (social.open_graph, social.twitter) if card.title]
     title_matches = [_overlap_ratio(title, social_title) >= _SOCIAL_TITLE_SIMILARITY for social_title in social_titles]
-    naming_status = "good" if title and h1 and _overlap_ratio(title, h1) >= _SOCIAL_TITLE_SIMILARITY and all(title_matches or [True]) else "warning"
+    naming_status = (
+        "good"
+        if title and h1 and _overlap_ratio(title, h1) >= _SOCIAL_TITLE_SIMILARITY and all(title_matches or [True])
+        else "warning"
+    )
     naming_check = _check(
         "Entity clarity",
         "Naming is consistent across the page and social metadata",
@@ -616,7 +625,9 @@ def _render_diff_from_raw(value: Any) -> RenderDiff | None:
     if status not in {"good", "warning", "critical", "not_measured"}:
         return None
     missing_headings = value.get("missing_headings") or ()
-    headings_tuple = tuple(str(item) for item in missing_headings) if isinstance(missing_headings, (list, tuple)) else ()
+    headings_tuple = (
+        tuple(str(item) for item in missing_headings) if isinstance(missing_headings, (list, tuple)) else ()
+    )
     return RenderDiff(
         status=status,  # type: ignore[arg-type]
         missing_headings=headings_tuple,

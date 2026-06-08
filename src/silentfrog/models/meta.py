@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
@@ -18,7 +17,7 @@ _WARN_MARGIN = 40
 class MetaModel(_BaseModel):
     HEADERS = ["Name/Property", "Content", "Length"]
 
-    def __init__(self, rows: List[List[str]], add_placeholders: bool = True) -> None:
+    def __init__(self, rows: list[list[str]], add_placeholders: bool = True) -> None:
         processed = [list(row) for row in rows]
         self._brushes: StatusBrushPalette = status_brushes()
         self._add_placeholders = add_placeholders
@@ -46,15 +45,9 @@ class MetaModel(_BaseModel):
         counts = Counter(name for name in names if name)
         self._duplicate_rows = {idx for idx, name in enumerate(names) if name and counts[name] > 1}
         self._empty_rows = {idx for idx, row in enumerate(self._rows) if not str(row[1]).strip()}
-        self._viewport_state = {
-            idx: "good"
-            for idx, name in enumerate(names)
-            if name == "viewport"
-        }
+        self._viewport_state = {idx: "good" for idx, name in enumerate(names) if name == "viewport"}
         self._charset_state = {
-            idx: ("good" if idx <= 5 else "warn")
-            for idx, name in enumerate(names)
-            if name == "charset"
+            idx: ("good" if idx <= 5 else "warn") for idx, name in enumerate(names) if name == "charset"
         }
 
     def _after_sort(self) -> None:

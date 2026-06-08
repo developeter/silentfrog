@@ -43,7 +43,6 @@ from tools.source_update import (  # noqa: E402
     validate_archive,
 )
 
-
 EXIT_OK = 0
 EXIT_USAGE_ERROR = 1
 EXIT_DEVELOPER_MODE = 2
@@ -85,9 +84,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Apply an update to a user-mode Silentfrog install"
-    )
+    parser = argparse.ArgumentParser(description="Apply an update to a user-mode Silentfrog install")
     parser.add_argument(
         "--revision",
         required=True,

@@ -1,14 +1,15 @@
 from __future__ import annotations
-from typing import Any, List, Sequence
+
+from collections.abc import Sequence
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
 
 
 class _BaseModel(QtCore.QAbstractTableModel):
-    HEADERS: List[str] = []
+    HEADERS: list[str] = []
 
-    def __init__(self, rows: List[List[str]]) -> None:
+    def __init__(self, rows: list[list[str]]) -> None:
         super().__init__()
         self._rows = rows
 
@@ -65,7 +66,7 @@ class _BaseModel(QtCore.QAbstractTableModel):
                 return None
             return number * units.get(parts[1], 1)
 
-        def _key(row: List[str]):
+        def _key(row: list[str]):
             cell = row[column].strip()
             size_value = _size_to_bytes(cell)
             if size_value is not None:
@@ -97,8 +98,8 @@ class _BaseModel(QtCore.QAbstractTableModel):
 class GenericModel(_BaseModel):
     def __init__(
         self,
-        headers: List[str],
-        rows: List[List[str]],
+        headers: list[str],
+        rows: list[list[str]],
         header_tooltips: Sequence[str] | None = None,
     ) -> None:
         self.HEADERS = headers  # type: ignore[assignment]
@@ -117,4 +118,3 @@ class GenericModel(_BaseModel):
 
 
 __all__ = ["_BaseModel", "GenericModel"]
-

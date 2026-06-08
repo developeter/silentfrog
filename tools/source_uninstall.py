@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,12 +24,15 @@ def _remove_path(path: Path) -> bool:
     return False
 
 
-def run_uninstall(targets: UninstallTargets, current_script: Path | None = None, purge: bool = False) -> UninstallOutcome:
+def run_uninstall(
+    targets: UninstallTargets, current_script: Path | None = None, purge: bool = False
+) -> UninstallOutcome:
     removed: list[Path] = []
     skipped: list[Path] = []
     candidates: list[Path] = [targets.venv_dir, targets.desktop_lnk, targets.desktop_command]
     candidates.extend(
-        path for path in targets.launcher_scripts
+        path
+        for path in targets.launcher_scripts
         if current_script is None or path.resolve() != current_script.resolve()
     )
     if purge:
@@ -45,7 +47,9 @@ def run_uninstall(targets: UninstallTargets, current_script: Path | None = None,
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Uninstall Silentfrog's local .venv and launchers")
-    parser.add_argument("--purge", action="store_true", help="Also delete local crawl history under the user data directory")
+    parser.add_argument(
+        "--purge", action="store_true", help="Also delete local crawl history under the user data directory"
+    )
     return parser.parse_args(argv)
 
 

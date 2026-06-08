@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from bs4 import BeautifulSoup
 
-from silentfrog.keywords import _extract_keywords, _keyword_density_threshold  # type: ignore[reportMissingImports]
+from silentfrog.keywords import (  # type: ignore[reportMissingImports]
+    _extract_keywords,
+    _keyword_density_threshold,
+)
 
 
 def test_keywords_density_flags_and_positions() -> None:

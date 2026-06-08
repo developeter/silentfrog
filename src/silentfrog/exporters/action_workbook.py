@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 import xlsxwriter
 
@@ -29,7 +29,16 @@ ACTION_SHEET_NAMES = [
     "Appendix - raw data",
 ]
 
-_ISSUE_HEADERS = ["Severity", "Category", "URL", "Issue", "Evidence", "Recommendation", "Source", "Confidence"]
+_ISSUE_HEADERS = [
+    "Severity",
+    "Category",
+    "URL",
+    "Issue",
+    "Evidence",
+    "Recommendation",
+    "Source",
+    "Confidence",
+]
 
 
 class ActionFormats:
@@ -73,7 +82,10 @@ def write_page_action_sheets(workbook: xlsxwriter.Workbook, payload: CrawlPayloa
 
 def _write_action_front_matter(workbook: xlsxwriter.Workbook, formats: ActionFormats, scope: str) -> None:
     rows = [
-        ["Workbook purpose", "This report starts with prioritized actions. Raw/detail sheets follow as appendix evidence."],
+        [
+            "Workbook purpose",
+            "This report starts with prioritized actions. Raw/detail sheets follow as appendix evidence.",
+        ],
         ["Scope", scope],
         ["Critical / red", "Only blockers or high-confidence damage."],
         ["Warning / yellow", "Issues worth reviewing, not necessarily immediate blockers."],

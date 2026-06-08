@@ -10,10 +10,12 @@ alt-text coverage. Feeds three myth-flagged check_keys:
 All three follow the §1.5 rule: absent => "info" (mapped to "good"),
 present => "good". They never emit warning or critical.
 """
+
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 import bs4
@@ -37,7 +39,7 @@ class StructurePayload:
     images_total: int = 0
 
     @classmethod
-    def empty(cls) -> "StructurePayload":
+    def empty(cls) -> StructurePayload:
         return cls()
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,15 +52,11 @@ class StructurePayload:
         }
 
     @classmethod
-    def from_raw(cls, value: Any) -> "StructurePayload":
+    def from_raw(cls, value: Any) -> StructurePayload:
         if not isinstance(value, Mapping):
             return cls.empty()
         counts_raw = value.get("semantic_container_counts", {})
-        counts = (
-            {str(k): int(v) for k, v in counts_raw.items()}
-            if isinstance(counts_raw, Mapping)
-            else {}
-        )
+        counts = {str(k): int(v) for k, v in counts_raw.items()} if isinstance(counts_raw, Mapping) else {}
         return cls(
             semantic_container_counts=counts,
             internal_link_count=int(value.get("internal_link_count", 0) or 0),

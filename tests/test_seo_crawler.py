@@ -1,14 +1,21 @@
 import asyncio
-import pytest
 import warnings
-import aiohttp  # type: ignore[reportMissingImports]
-from aiohttp import web  # type: ignore[reportMissingImports]
 from pathlib import Path
 
+import aiohttp  # type: ignore[reportMissingImports]
+import pytest
+from aiohttp import web  # type: ignore[reportMissingImports]
+
 from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
-from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
-from silentfrog.image_diagnostics import CACHE_COL, DECLARED_HEIGHT_COL, DECLARED_WIDTH_COL, RESPONSIVE_COL, SIZES_COL  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
+    CACHE_COL,
+    DECLARED_HEIGHT_COL,
+    DECLARED_WIDTH_COL,
+    RESPONSIVE_COL,
+    SIZES_COL,
+)
+from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
 
 # ------------------------------------------------------------------
 # Silence third-party warning inside pyRdfa only
@@ -21,9 +28,7 @@ warnings.filterwarnings(
 )
 
 # Silence pyRdfa's deprecated datetime.utcnow() once for this module
-pytestmark = pytest.mark.filterwarnings(
-    "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated:DeprecationWarning")
 
 FIXTURES = Path(__file__).resolve().parents[1] / "docs" / "tests" / "fixtures"
 HTML = (FIXTURES / "example_page.html").read_text(encoding="utf-8")
@@ -219,8 +224,8 @@ async def test_analyse_uses_get_fallback_for_blocked_canonical_and_hreflang_head
         <html>
           <head>
             <title>Fallback Probe Test</title>
-            <link rel="canonical" href="{server.make_url('/canonical')}">
-            <link rel="alternate" hreflang="en" href="{server.make_url('/en')}">
+            <link rel="canonical" href="{server.make_url("/canonical")}">
+            <link rel="alternate" hreflang="en" href="{server.make_url("/en")}">
           </head>
           <body><h1>Fallback Probe Test</h1></body>
         </html>
@@ -283,9 +288,7 @@ async def test_host_throttle_limits_concurrency(aiohttp_server):
     options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
-        await asyncio.gather(
-            *[crawler._link_status(session, url, 5, options) for _ in range(6)]
-        )
+        await asyncio.gather(*[crawler._link_status(session, url, 5, options) for _ in range(6)])
     assert tracker["max"] <= 2
 
 

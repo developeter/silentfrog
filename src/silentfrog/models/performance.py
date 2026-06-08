@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 from qtpy import QtCore
 from qtpy.QtCore import Qt
 
@@ -11,7 +9,7 @@ from .base import GenericModel
 
 
 class PerformanceIssueModel(GenericModel):
-    def __init__(self, headers: List[str], rows: List[List[str]], issue_keys: List[str]) -> None:
+    def __init__(self, headers: list[str], rows: list[list[str]], issue_keys: list[str]) -> None:
         super().__init__(headers, rows)
         self._issue_keys = issue_keys
         self._brushes: StatusBrushPalette = status_brushes()
@@ -44,7 +42,7 @@ class PerformanceIssueModel(GenericModel):
         column: int,
         order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.AscendingOrder,
     ) -> None:
-        paired = list(zip(self._rows, self._issue_keys))
+        paired = list(zip(self._rows, self._issue_keys, strict=False))
 
         def _size_to_bytes(text: str) -> float | None:
             units = {
@@ -65,7 +63,7 @@ class PerformanceIssueModel(GenericModel):
                 return None
             return num * units.get(parts[1], 1)
 
-        def _key(item: tuple[List[str], str]):
+        def _key(item: tuple[list[str], str]):
             row, _issue_key = item
             cell = row[column].strip()
             size_val = _size_to_bytes(cell)

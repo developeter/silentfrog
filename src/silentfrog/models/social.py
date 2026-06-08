@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from typing import List
-
 from qtpy import QtCore
 from qtpy.QtCore import Qt
 
+from ..theme import StatusBrushPalette, status_brushes
 from .base import GenericModel
-from ..theme import status_brushes, StatusBrushPalette
 
 
 class SocialIssuesModel(GenericModel):
-    def __init__(self, rows: List[List[str]]) -> None:
+    def __init__(self, rows: list[list[str]]) -> None:
         super().__init__(["Source", "Issue"], rows)
         self._brushes: StatusBrushPalette = status_brushes()
 

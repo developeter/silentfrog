@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 from . import seo_crawler
 from .crawl_types import CrawlPayload
@@ -12,7 +13,7 @@ __all__ = ["CrawlResult", "ImageAnalysis", "analyse", "analyse_images"]
 class CrawlResult:
     payload: CrawlPayload
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return self.payload.to_mapping()
 
     def as_payload(self) -> CrawlPayload:
@@ -27,9 +28,9 @@ class CrawlResult:
 
 @dataclass(frozen=True)
 class ImageAnalysis:
-    rows: List[List[str]]
+    rows: list[list[str]]
 
-    def as_rows(self) -> List[List[str]]:
+    def as_rows(self) -> list[list[str]]:
         return [list(row) for row in self.rows]
 
     def __iter__(self):
@@ -41,6 +42,6 @@ async def analyse(url: str, timeout: int = 10) -> CrawlResult:
     return CrawlResult(payload=data)
 
 
-async def analyse_images(base: str, rows: List[List[str]], timeout: int = 10) -> ImageAnalysis:
+async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) -> ImageAnalysis:
     data = await seo_crawler.analyse_images(base, rows, timeout=timeout)
     return ImageAnalysis(rows=data)

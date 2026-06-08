@@ -8,20 +8,20 @@ exact command and allow it only when a quoted ``-m "..."`` (or
 message. Bare ``git commit`` (which would open the editor) is denied
 with a routing note pointing at the ``caveman-commit`` skill.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import sys
 
-
 _ALLOWED_FORMS = (
     re.compile(r'\bgit\s+commit\b[^|;&]*\s-m\s+(["\']).+?\1', re.DOTALL),
-    re.compile(r'\bgit\s+commit\b[^|;&]*\s-F\s+\S+'),
-    re.compile(r'\bgit\s+commit\b[^|;&]*\s--amend\b'),  # editor allowed on amend
-    re.compile(r'\bgit\s+commit\b[^|;&]*\s--no-edit\b'),
-    re.compile(r'\bgit\s+commit\b[^|;&]*\s--allow-empty-message\b'),
-    re.compile(r'\bgit\s+commit\b[^|;&]*\s--message=\S+'),
+    re.compile(r"\bgit\s+commit\b[^|;&]*\s-F\s+\S+"),
+    re.compile(r"\bgit\s+commit\b[^|;&]*\s--amend\b"),  # editor allowed on amend
+    re.compile(r"\bgit\s+commit\b[^|;&]*\s--no-edit\b"),
+    re.compile(r"\bgit\s+commit\b[^|;&]*\s--allow-empty-message\b"),
+    re.compile(r"\bgit\s+commit\b[^|;&]*\s--message=\S+"),
 )
 
 

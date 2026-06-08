@@ -3,15 +3,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import urllib.robotparser
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Tuple
 from urllib.parse import urlparse
 
 import pandas as pd
 import requests
-import urllib.robotparser
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -62,7 +62,7 @@ def _single(
     new_url: str,
     timeout: int,
     respect_robots: bool,
-) -> Tuple[str | int, str, bool, int, str]:
+) -> tuple[str | int, str, bool, int, str]:
     if respect_robots and not _robots_allowed(old_url):
         return "Robots-block", "", False, 0, ""
 

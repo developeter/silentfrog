@@ -82,7 +82,7 @@ def test_render_with_playwright_returns_result_with_stubbed_runtime(monkeypatch)
     class _Runtime:
         chromium = _Chromium()
 
-        def __enter__(self) -> "_Runtime":
+        def __enter__(self) -> _Runtime:
             return self
 
         def __exit__(self, exc_type, exc, tb) -> bool:

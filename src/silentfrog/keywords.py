@@ -4,15 +4,16 @@ import re
 import string
 from collections import Counter
 from html import unescape
-from typing import Any, Dict, List
+from typing import Any
 
 from bs4 import BeautifulSoup
+
 from .crawl_constants import STOP, _keyword_density_threshold
 
 
 def _tokenize(raw: str) -> list[str]:
     cleaned = unescape(raw.lower())
-    cleaned = re.sub(r"[{}]".format(re.escape(string.punctuation)), " ", cleaned)
+    cleaned = re.sub(rf"[{re.escape(string.punctuation)}]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)
     tokens: list[str] = []
     for token in cleaned.split():
@@ -80,14 +81,11 @@ def _heading_counters(heading_tokens: list[list[str]]) -> dict[int, Counter[str]
 
 
 def _section_phrase_sets(sections: dict[str, list[str]]) -> dict[str, dict[int, set[str]]]:
-    return {
-        section: {n: _phrase_set(tokens, n) for n in (1, 2, 3)}
-        for section, tokens in sections.items()
-    }
+    return {section: {n: _phrase_set(tokens, n) for n in (1, 2, 3)} for section, tokens in sections.items()}
 
 
-def _ngram_stats(body_tokens: list[str]) -> Dict[int, Dict[str, Any]]:
-    stats: Dict[int, Dict[str, Any]] = {}
+def _ngram_stats(body_tokens: list[str]) -> dict[int, dict[str, Any]]:
+    stats: dict[int, dict[str, Any]] = {}
     for n in (1, 2, 3):
         stats[n] = {
             "counts": _phrase_counter(body_tokens, n),

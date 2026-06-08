@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Sequence
 
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL, SRC_COL

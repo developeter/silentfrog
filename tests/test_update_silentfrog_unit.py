@@ -35,14 +35,10 @@ def _make_user_install(root: Path) -> None:
     (target_pkg / "gui.py").write_text("# old gui\n", encoding="utf-8")
     (target_pkg / "updater.py").write_text("# old updater\n", encoding="utf-8")
     (target_pkg / "exporters").mkdir()
-    (target_pkg / "exporters" / "action_workbook.py").write_text(
-        "# old workbook\n", encoding="utf-8"
-    )
+    (target_pkg / "exporters" / "action_workbook.py").write_text("# old workbook\n", encoding="utf-8")
 
 
-def test_sync_site_packages_overwrites_installed_files(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_sync_site_packages_overwrites_installed_files(tmp_path: Path, monkeypatch) -> None:
     """Regression: replaces ``pip install . --no-deps`` which was
     failing on Windows when the GUI was still running. Pure file copy
     leaves the package importable even on partial failure.
@@ -57,9 +53,7 @@ def test_sync_site_packages_overwrites_installed_files(
     sp = tmp_path / ".venv" / "Lib" / "site-packages" / "silentfrog"
     assert (sp / "gui.py").read_text(encoding="utf-8") == "# new gui\n"
     assert (sp / "updater.py").read_text(encoding="utf-8") == "# new updater\n"
-    assert (sp / "exporters" / "action_workbook.py").read_text(
-        encoding="utf-8"
-    ) == "# new workbook\n"
+    assert (sp / "exporters" / "action_workbook.py").read_text(encoding="utf-8") == "# new workbook\n"
 
 
 def test_sync_site_packages_skips_pycache(tmp_path: Path, monkeypatch) -> None:
@@ -73,15 +67,11 @@ def test_sync_site_packages_skips_pycache(tmp_path: Path, monkeypatch) -> None:
     (pycache / "gui.cpython-312.pyc").write_bytes(b"old-bytecode")
     exit_code = _sync_site_packages(tmp_path)
     assert exit_code == 0
-    target_pycache = (
-        tmp_path / ".venv" / "Lib" / "site-packages" / "silentfrog" / "__pycache__"
-    )
+    target_pycache = tmp_path / ".venv" / "Lib" / "site-packages" / "silentfrog" / "__pycache__"
     assert not target_pycache.exists(), "__pycache__ must not be copied"
 
 
-def test_sync_site_packages_fails_clearly_when_source_missing(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_sync_site_packages_fails_clearly_when_source_missing(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "tools.update_silentfrog._venv_site_packages",
         lambda root: tmp_path / ".venv" / "Lib" / "site-packages",
@@ -92,9 +82,7 @@ def test_sync_site_packages_fails_clearly_when_source_missing(
     assert "source package missing" in capsys.readouterr().out
 
 
-def test_sync_site_packages_fails_clearly_when_target_missing(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_sync_site_packages_fails_clearly_when_target_missing(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "tools.update_silentfrog._venv_site_packages",
         lambda root: tmp_path / ".venv" / "Lib" / "site-packages",
@@ -118,12 +106,12 @@ def test_venv_site_packages_windows_path() -> None:
 def test_runtime_dep_specs_reads_project_dependencies(tmp_path: Path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
-        '[project]\n'
+        "[project]\n"
         'name = "x"\n'
-        'dependencies = [\n'
+        "dependencies = [\n"
         '    "extruct (>=0.16.0,<0.17.0)",\n'
         '    "w3lib (>=2.1.0,<3.0.0)",\n'
-        ']\n',
+        "]\n",
         encoding="utf-8",
     )
     assert _runtime_dep_specs(pyproject) == [
@@ -136,9 +124,7 @@ def test_runtime_dep_specs_missing_file_returns_empty(tmp_path: Path) -> None:
     assert _runtime_dep_specs(tmp_path / "missing.toml") == []
 
 
-def test_install_runtime_deps_calls_pip_with_named_specs(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_install_runtime_deps_calls_pip_with_named_specs(tmp_path: Path, monkeypatch, capsys) -> None:
     """Regression for exit-code-4 file-lock failure: the deps_changed
     path must NOT run `pip install .` (which uninstalls silentfrog and
     fails on Windows when the GUI is running). It must run direct
@@ -175,17 +161,13 @@ def test_install_runtime_deps_calls_pip_with_named_specs(
     assert "." not in captured["cmd"]
 
 
-def test_refresh_install_deps_changed_uses_direct_pip_not_full_reinstall(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_refresh_install_deps_changed_uses_direct_pip_not_full_reinstall(tmp_path: Path, monkeypatch) -> None:
     """Both the deps-changed and deps-unchanged paths must avoid
     `install_silentfrog.py` / `pip install .` so silentfrog.exe is never
     overwritten while the GUI is running.
     """
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\nname = "x"\ndependencies = ["aiohttp"]\n', encoding="utf-8"
-    )
+    pyproject.write_text('[project]\nname = "x"\ndependencies = ["aiohttp"]\n', encoding="utf-8")
     _make_user_install(tmp_path)
     monkeypatch.setattr(
         "tools.update_silentfrog._venv_site_packages",
@@ -208,9 +190,7 @@ def test_refresh_install_deps_changed_uses_direct_pip_not_full_reinstall(
     assert "aiohttp" in calls[0]
 
 
-def test_refresh_install_deps_unchanged_skips_pip_entirely(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_refresh_install_deps_unchanged_skips_pip_entirely(tmp_path: Path, monkeypatch) -> None:
     _make_user_install(tmp_path)
     monkeypatch.setattr(
         "tools.update_silentfrog._venv_site_packages",

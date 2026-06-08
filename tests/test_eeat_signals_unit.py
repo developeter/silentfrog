@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from bs4 import BeautifulSoup
 
-import silentfrog.eeat_signals as eeat  # type: ignore[reportMissingImports]
 from silentfrog.eeat_signals import (  # type: ignore[reportMissingImports]
     EeatPayload,
     _freshness_threshold_days,

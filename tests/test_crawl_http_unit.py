@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+
 import pytest
 
 from silentfrog import crawl_http  # type: ignore[reportMissingImports]

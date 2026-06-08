@@ -16,10 +16,7 @@ _USER = "Mozilla/5.0"
 
 
 def _line(path: str, status: int, agent: str = _GOOGLEBOT) -> str:
-    return (
-        f'66.249.66.1 - - [05/May/2026:10:00:00 +0000] '
-        f'"GET {path} HTTP/1.1" {status} 123 "-" "{agent}"'
-    )
+    return f'66.249.66.1 - - [05/May/2026:10:00:00 +0000] "GET {path} HTTP/1.1" {status} 123 "-" "{agent}"'
 
 
 def test_parse_log_line_reads_common_combined_log_fields() -> None:
@@ -75,7 +72,9 @@ def test_analyse_log_entries_flags_missing_googlebot_activity() -> None:
 
 def test_issues_for_log_report_maps_findings_to_audit_issues() -> None:
     entry = parse_log_line(_line("/blocked/", 500))
-    report = analyse_log_entries([entry for entry in [entry] if entry], LogAnalysisConfig(site_base_url="https://example.com"))
+    report = analyse_log_entries(
+        [entry for entry in [entry] if entry], LogAnalysisConfig(site_base_url="https://example.com")
+    )
 
     issues = issues_for_log_report(report)
 

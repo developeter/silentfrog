@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
 import os
 import re
-import html as _html
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 import bs4
 from bs4 import BeautifulSoup
@@ -65,7 +65,7 @@ def _schema_primary_type(value: Any) -> str:
     return text.strip()
 
 
-def _schema_block_label(index: int, obj: Dict[str, Any]) -> str:
+def _schema_block_label(index: int, obj: dict[str, Any]) -> str:
     type_name = _schema_primary_type(obj.get("@type"))
     via = obj.get("_extracted_via", "")
     label = f"Block #{index}"
@@ -76,7 +76,7 @@ def _schema_block_label(index: int, obj: Dict[str, Any]) -> str:
     return label
 
 
-def _schema_normalize_entries(value: Any) -> List[Any]:
+def _schema_normalize_entries(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     if isinstance(value, tuple):
@@ -86,8 +86,8 @@ def _schema_normalize_entries(value: Any) -> List[Any]:
     return [value]
 
 
-def _schema_validate_breadcrumb(obj: Dict[str, Any]) -> List[str]:
-    errors: List[str] = []
+def _schema_validate_breadcrumb(obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     entries = obj.get("itemListElement")
     if not entries:
         errors.append("missing itemListElement")
@@ -110,8 +110,8 @@ def _schema_validate_breadcrumb(obj: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
-    errors: List[str] = []
+def _schema_validate_product(obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     if not obj.get("name"):
         errors.append("missing name")
     if not obj.get("description"):
@@ -132,7 +132,7 @@ def _schema_validate_product(obj: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def _schema_offer_flags(offers: List[Any]) -> tuple[bool, bool]:
+def _schema_offer_flags(offers: list[Any]) -> tuple[bool, bool]:
     have_price = False
     have_currency = False
     for offer in offers:
@@ -151,7 +151,7 @@ def _schema_offer_flags(offers: List[Any]) -> tuple[bool, bool]:
     return have_price, have_currency
 
 
-def _schema_validate_article(obj: Dict[str, Any]) -> List[str]:
+def _schema_validate_article(obj: dict[str, Any]) -> list[str]:
     checks = [
         (not obj.get("headline"), "missing headline"),
         (not obj.get("image"), "missing image"),
@@ -161,8 +161,8 @@ def _schema_validate_article(obj: Dict[str, Any]) -> List[str]:
     return [message for failed, message in checks if failed]
 
 
-def _schema_validate_faq_page(obj: Dict[str, Any]) -> List[str]:
-    errors: List[str] = []
+def _schema_validate_faq_page(obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     entries = _schema_normalize_entries(obj.get("mainEntity"))
     if not entries:
         return ["missing mainEntity"]
@@ -182,7 +182,7 @@ def _schema_validate_faq_page(obj: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def _schema_validate_organization(obj: Dict[str, Any]) -> List[str]:
+def _schema_validate_organization(obj: dict[str, Any]) -> list[str]:
     checks = [
         (not obj.get("name"), "missing name"),
         (not obj.get("url"), "missing url"),
@@ -191,7 +191,7 @@ def _schema_validate_organization(obj: Dict[str, Any]) -> List[str]:
     return [message for failed, message in checks if failed]
 
 
-def _schema_validate_local_business(obj: Dict[str, Any]) -> List[str]:
+def _schema_validate_local_business(obj: dict[str, Any]) -> list[str]:
     checks = [
         (not obj.get("name"), "missing name"),
         (not obj.get("address"), "missing address"),
@@ -200,14 +200,14 @@ def _schema_validate_local_business(obj: Dict[str, Any]) -> List[str]:
     return [message for failed, message in checks if failed]
 
 
-def _schema_validate_person(obj: Dict[str, Any]) -> List[str]:
+def _schema_validate_person(obj: dict[str, Any]) -> list[str]:
     checks = [
         (not obj.get("name"), "missing name"),
     ]
     return [message for failed, message in checks if failed]
 
 
-def _schema_validate_how_to_step(idx: int, step: Any) -> List[str]:
+def _schema_validate_how_to_step(idx: int, step: Any) -> list[str]:
     if not isinstance(step, dict):
         return [f"step[{idx}] is not an object"]
     if step.get("text") or step.get("name") or step.get("itemListElement"):
@@ -215,8 +215,8 @@ def _schema_validate_how_to_step(idx: int, step: Any) -> List[str]:
     return [f"step[{idx}] missing text or name"]
 
 
-def _schema_validate_how_to(obj: Dict[str, Any]) -> List[str]:
-    errors: List[str] = []
+def _schema_validate_how_to(obj: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     if not obj.get("name"):
         errors.append("missing name")
     steps = _schema_normalize_entries(obj.get("step"))
@@ -228,7 +228,7 @@ def _schema_validate_how_to(obj: Dict[str, Any]) -> List[str]:
     return errors
 
 
-def _schema_validate_website(obj: Dict[str, Any]) -> List[str]:
+def _schema_validate_website(obj: dict[str, Any]) -> list[str]:
     checks = [
         (not obj.get("name"), "missing name"),
         (not obj.get("url"), "missing url"),
@@ -236,7 +236,7 @@ def _schema_validate_website(obj: Dict[str, Any]) -> List[str]:
     return [message for failed, message in checks if failed]
 
 
-_SCHEMA_VALIDATORS: Dict[str, Any] = {
+_SCHEMA_VALIDATORS: dict[str, Any] = {
     "breadcrumblist": _schema_validate_breadcrumb,
     "product": _schema_validate_product,
     "article": _schema_validate_article,
@@ -251,15 +251,15 @@ _SCHEMA_VALIDATORS: Dict[str, Any] = {
 
 @dataclass
 class _SchemaState:
-    collected: list[Dict[str, Any]] = field(default_factory=list)
+    collected: list[dict[str, Any]] = field(default_factory=list)
     seen: set[str] = field(default_factory=set)
     syntax_counter: Counter[str] = field(default_factory=Counter)
     type_counter: Counter[str] = field(default_factory=Counter)
     fallback_raw: list[str] = field(default_factory=list)
 
 
-def _unique_text(values: List[str]) -> List[str]:
-    ordered: List[str] = []
+def _unique_text(values: list[str]) -> list[str]:
+    ordered: list[str] = []
     seen: set[str] = set()
     for value in values:
         text = str(value).strip()
@@ -270,14 +270,14 @@ def _unique_text(values: List[str]) -> List[str]:
     return ordered
 
 
-def _schema_build_eligibility(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    indexed: Dict[str, List[Dict[str, Any]]] = {key: [] for key, _ in _SCHEMA_ELIGIBILITY_TYPES}
+def _schema_build_eligibility(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    indexed: dict[str, list[dict[str, Any]]] = {key: [] for key, _ in _SCHEMA_ELIGIBILITY_TYPES}
     for block in blocks:
         schema_type = _schema_primary_type(block.get("@type")).lower()
         if schema_type in indexed:
             indexed[schema_type].append(block)
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for key, label in _SCHEMA_ELIGIBILITY_TYPES:
         matches = indexed[key]
         if not matches:
@@ -295,7 +295,7 @@ def _schema_build_eligibility(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
 
         valid_blocks = sum(1 for block in matches if not block.get("_schema_errors"))
         missing_fields = _unique_text([error for block in matches for error in block.get("_schema_errors", [])])
-        warnings: List[str] = []
+        warnings: list[str] = []
         if len(matches) > 1:
             warnings.append(f"{len(matches)} blocks detected")
         if valid_blocks and valid_blocks < len(matches):
@@ -316,7 +316,7 @@ def _schema_build_eligibility(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
     return rows
 
 
-def _schema_add_flat(state: _SchemaState, obj: Dict[str, Any], via: str) -> None:
+def _schema_add_flat(state: _SchemaState, obj: dict[str, Any], via: str) -> None:
     graph = obj.get("@graph")
     if isinstance(graph, list) and graph:
         for node in graph:
@@ -434,7 +434,9 @@ def _microdata_bs(soup: BeautifulSoup) -> list[dict]:
         for prop in scope.find_all(attrs={"itemprop": True}):
             if not isinstance(prop, Tag) or _is_within_other(scope, prop, "itemscope"):
                 continue
-            value = _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            value = (
+                _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            )
             for key in _attr(prop, "itemprop").split():
                 if key:
                     item[key] = value
@@ -455,7 +457,9 @@ def _rdfa_bs(soup: BeautifulSoup) -> list[dict]:
             key = _attr(prop, "property").strip()
             if not key:
                 continue
-            value = _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            value = (
+                _attr(prop, "content") or _attr(prop, "href") or _attr(prop, "src") or " ".join(prop.stripped_strings)
+            )
             item[key] = value
         out.append(item)
     return out
@@ -512,7 +516,7 @@ def _collect_heuristic_jsonld(state: _SchemaState, html_text: str) -> None:
         _log_schema(f"heuristic nested json-ld nodes found={hits}")
 
 
-def _extract_extruct(html_text: str, response_url: str, syntaxes: List[str]) -> dict[str, Any]:
+def _extract_extruct(html_text: str, response_url: str, syntaxes: list[str]) -> dict[str, Any]:
     def _extract_lxml() -> dict[str, Any]:
         data = extruct.extract(html_text, base_url=response_url, syntaxes=syntaxes, uniform=True)  # type: ignore[arg-type]
         _log_schema("extruct:lxml ok")
@@ -540,7 +544,7 @@ def _extract_extruct(html_text: str, response_url: str, syntaxes: List[str]) -> 
         return {}
 
 
-def _collect_extruct_items(state: _SchemaState, html_text: str, response_url: str, syntaxes: List[str]) -> None:
+def _collect_extruct_items(state: _SchemaState, html_text: str, response_url: str, syntaxes: list[str]) -> None:
     if not USE_EXTRUCT:
         return
     data = _extract_extruct(html_text, response_url, syntaxes)
@@ -569,7 +573,7 @@ def _collect_raw_jsonld_fallback(state: _SchemaState, html_text: str) -> None:
     if state.collected:
         return
     soup = BeautifulSoup(html_text, "html.parser")
-    fallback_blocks: list[Dict[str, Any]] = []
+    fallback_blocks: list[dict[str, Any]] = []
     for script in soup.find_all("script", {"type": "application/ld+json"}):
         raw = script.get_text(strip=True) or ""
         if not raw:
@@ -583,9 +587,9 @@ def _collect_raw_jsonld_fallback(state: _SchemaState, html_text: str) -> None:
     _log_schema(f"fallback: raw json-ld captured={len(fallback_blocks)}")
 
 
-def _schema_block_issues(obj: Dict[str, Any]) -> List[str]:
+def _schema_block_issues(obj: dict[str, Any]) -> list[str]:
     via_lower = str(obj.get("_extracted_via", "")).strip().lower()
-    issues: List[str] = []
+    issues: list[str] = []
     if via_lower in {"json-ld", "json-ld-raw"}:
         checks = [
             ("@raw" in obj, "Unparseable JSON-LD block"),
@@ -602,8 +606,8 @@ def _schema_block_issues(obj: Dict[str, Any]) -> List[str]:
     return sorted(set(issues))
 
 
-def _annotate_schema_blocks(blocks: List[Dict[str, Any]]) -> List[str]:
-    aggregate: List[str] = []
+def _annotate_schema_blocks(blocks: list[dict[str, Any]]) -> list[str]:
+    aggregate: list[str] = []
     for index, obj in enumerate(blocks, start=1):
         issues = _schema_block_issues(obj)
         if not issues:
@@ -614,24 +618,18 @@ def _annotate_schema_blocks(blocks: List[Dict[str, Any]]) -> List[str]:
     return aggregate
 
 
-def _schema_summary(state: _SchemaState, aggregate: List[str]) -> Dict[str, Any]:
+def _schema_summary(state: _SchemaState, aggregate: list[str]) -> dict[str, Any]:
     return {
         "total": int(sum(state.syntax_counter.values())),
         "by_syntax": {
-            name: state.syntax_counter[name]
-            for name in sorted(state.syntax_counter)
-            if state.syntax_counter[name]
+            name: state.syntax_counter[name] for name in sorted(state.syntax_counter) if state.syntax_counter[name]
         },
-        "by_type": {
-            name: state.type_counter[name]
-            for name in sorted(state.type_counter)
-            if state.type_counter[name]
-        },
+        "by_type": {name: state.type_counter[name] for name in sorted(state.type_counter) if state.type_counter[name]},
         "errors": sorted(set(aggregate)),
     }
 
 
-def _extract_schema_all(html_text: str, response_url: str) -> Dict[str, Any]:
+def _extract_schema_all(html_text: str, response_url: str) -> dict[str, Any]:
     syntaxes = ["json-ld", "microdata", "opengraph", "microformat", "rdfa"]
     state = _SchemaState()
     try:

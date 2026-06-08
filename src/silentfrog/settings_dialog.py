@@ -45,8 +45,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         if not _playwright_available():
             self.chk_ssr_parity.setEnabled(False)
             self.chk_ssr_parity.setToolTip(
-                self.chk_ssr_parity.toolTip()
-                + "\n\nPlaywright is not installed: enable by running "
+                self.chk_ssr_parity.toolTip() + "\n\nPlaywright is not installed: enable by running "
                 "`pip install silentfrog[geo-render]` and `playwright install chromium`."
             )
         geo_layout.addRow(self.chk_ssr_parity)
@@ -124,9 +123,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         return self.adv_group
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
-        )
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         help_btn = cast(QtWidgets.QAbstractButton, buttons.addButton("Help", QtWidgets.QDialogButtonBox.HelpRole))
         help_btn.clicked.connect(self._show_help)
         buttons.accepted.connect(self.accept)
@@ -176,11 +173,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         )
 
     def _load_from_options(self, options: CrawlOptions) -> bool:
-        headers_lines = [
-            f"{key}: {value}"
-            for key, value in options.extra_headers.items()
-            if key.lower() != "cookie"
-        ]
+        headers_lines = [f"{key}: {value}" for key, value in options.extra_headers.items() if key.lower() != "cookie"]
         headers_text = "\n".join(headers_lines)
         cookie_text = options.extra_headers.get("Cookie", "")
         advanced_on = bool(headers_text or cookie_text)

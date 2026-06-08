@@ -46,7 +46,8 @@ def test_home_window_logo_label_holds_pixmap_size(qtbot) -> None:
     win = HomeWindow()
     qtbot.addWidget(win)
     labels = [
-        label for label in win.findChildren(QtWidgets.QLabel)
+        label
+        for label in win.findChildren(QtWidgets.QLabel)
         if label.pixmap() is not None and not label.pixmap().isNull()
     ]
     assert labels, "expected at least one QLabel holding the frog pixmap"

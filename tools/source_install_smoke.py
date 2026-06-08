@@ -10,7 +10,6 @@ sys.path.insert(0, str(ROOT))
 
 from tools.source_install import installer_paths
 
-
 SMOKE_CODE = """
 import os
 os.environ.setdefault("QT_API", "pyside6")

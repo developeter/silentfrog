@@ -32,7 +32,9 @@ class CrawlHistoryRunsModel(QtCore.QAbstractTableModel):
             return run
         return None
 
-    def headerData(self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+    def headerData(
+        self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.ItemDataRole.DisplayRole
+    ):
         if orientation != QtCore.Qt.Orientation.Horizontal:
             return None
         return _HISTORY_HEADERS[section] if role == QtCore.Qt.ItemDataRole.DisplayRole else None
@@ -135,7 +137,9 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
     def _update_details(self) -> None:
         run = self._selected_run()
         self._sync_actions()
-        self.details.setPlainText(_details_text(run, self._previous_run(run)) if run else "No saved Site Crawl runs yet.")
+        self.details.setPlainText(
+            _details_text(run, self._previous_run(run)) if run else "No saved Site Crawl runs yet."
+        )
 
     def _previous_run(self, run: CrawlHistoryRun | None) -> CrawlHistoryRun | None:
         if run is None:
@@ -221,7 +225,9 @@ def _top_issues(run: CrawlHistoryRun) -> str:
     if not run.issues:
         return "Top issues: none recorded."
     lines = ["Top issues:"]
-    lines.extend(f"- {issue.severity.value}: {issue.issue_id} | {issue.url or run.scope_key}" for issue in run.issues[:10])
+    lines.extend(
+        f"- {issue.severity.value}: {issue.issue_id} | {issue.url or run.scope_key}" for issue in run.issues[:10]
+    )
     return "\n".join(lines)
 
 

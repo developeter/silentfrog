@@ -12,14 +12,15 @@ def _expected_venv_python(repo_root: Path) -> Path:
         return repo_root / ".venv" / "Scripts" / "python.exe"
     return repo_root / ".venv" / "bin" / "python"
 
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.doctor import (
-    DoctorError,
     POETRY_REQUIRED_IMPORTS,
     VENV_REQUIRED_IMPORTS,
+    DoctorError,
     _build_parser,
     _check_imports_via,
     doctor_targets_for_mode,

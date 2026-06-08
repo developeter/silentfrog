@@ -10,11 +10,13 @@ never "warning". ``citation_stats_density`` is a regular best-practice
 check — it can emit "warning" when the page contains zero concrete
 data points.
 """
+
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import bs4
 from bs4 import BeautifulSoup
@@ -51,12 +53,12 @@ _DEFINITION_IT = re.compile(
 # 2026, 50 mg, 95 °C. Anchored to word boundaries so "v2" doesn't match.
 _STATS_TOKEN = re.compile(
     r"(?<!\w)("
-    r"\d+(?:[.,]\d+)?\s*%"                # percentages
+    r"\d+(?:[.,]\d+)?\s*%"  # percentages
     r"|[\$€£¥]\s*\d+(?:[.,]\d+)?"  # currency
     r"|\d+(?:[.,]\d+)?\s*(?:mg|kg|g|ml|l|cm|mm|m|km|MB|GB|TB|MHz|GHz|°C|°F)"
     r"|\d{4}(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?"  # years and dates
-    r"|\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?"     # thousand-separated
-    r"|\d+[.,]\d+"                            # decimals
+    r"|\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?"  # thousand-separated
+    r"|\d+[.,]\d+"  # decimals
     r")(?!\w)",
     re.UNICODE,
 )
@@ -72,7 +74,7 @@ class CitationContentPayload:
     language: str = ""
 
     @classmethod
-    def empty(cls) -> "CitationContentPayload":
+    def empty(cls) -> CitationContentPayload:
         return cls()
 
     def to_dict(self) -> dict[str, Any]:
@@ -86,7 +88,7 @@ class CitationContentPayload:
         }
 
     @classmethod
-    def from_raw(cls, value: Any) -> "CitationContentPayload":
+    def from_raw(cls, value: Any) -> CitationContentPayload:
         if not isinstance(value, Mapping):
             return cls.empty()
         return cls(
@@ -206,7 +208,7 @@ _CHECK_META = {
         "Include concrete data points (percentages, monetary values, dated events) when accurate and supportable.",
     ),
     "citation_definition_patterns": (
-        "Sections open with clear \"X is Y\" definitions",
+        'Sections open with clear "X is Y" definitions',
         "Where it fits the editorial style, open sections with a one-sentence definition. "
         "Per Google's AI Optimization Guide this is a positive signal, never a requirement.",
     ),

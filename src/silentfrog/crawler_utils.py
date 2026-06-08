@@ -1,10 +1,10 @@
 from __future__ import annotations
+
 from typing import Any, Optional
 
 import bs4
-from bs4.element import Tag
-
 import humanize  # type: ignore[import]  # humanize ships without typing
+from bs4.element import Tag
 
 
 def _attr(tag: Any, key: str) -> str:

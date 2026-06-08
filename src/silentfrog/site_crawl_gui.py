@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from pathlib import Path
-import threading
 from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
@@ -11,8 +11,8 @@ from qtpy import QtCore, QtGui, QtWidgets
 
 from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
 from .audit_recap import AuditRecapWidget
-from .crawl_options import CrawlOptions
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
+from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .exporters import export_site_crawl_report
 from .settings_dialog import CrawlSettingsDialog
@@ -83,7 +83,9 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
             return self._foreground(result)
         return None
 
-    def headerData(self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+    def headerData(
+        self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.ItemDataRole.DisplayRole
+    ):
         if orientation != QtCore.Qt.Orientation.Horizontal:
             return None
         if role == QtCore.Qt.ItemDataRole.DisplayRole:
@@ -244,9 +246,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self.lbl_discovery = QtWidgets.QLabel("Ready")
         self.lbl_eta = QtWidgets.QLabel("ETA: -")
-        self.lbl_eta.setAlignment(
-            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
+        self.lbl_eta.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.lbl_discovery, 1)
         row.addWidget(self.lbl_eta)
         return row
@@ -263,9 +263,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         # `FieldsStayAtSizeHint`, which renders our QLineEdit / QPlainTextEdit
         # rows at their preferred (small) width centred in the window. Force
         # the fields to fill the available row width across all platforms.
-        form.setFieldGrowthPolicy(
-            QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
-        )
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows)
         self.base_url = QtWidgets.QLineEdit()
         self.base_url.setPlaceholderText("https://www.example.com")
@@ -295,18 +293,20 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.status_filter = QtWidgets.QComboBox()
         self.status_filter.addItems(["All", "200", "301", "302", "403", "404", "429", "error", "skipped"])
         self.indexability_filter = QtWidgets.QComboBox()
-        self.indexability_filter.addItems([
-            "All",
-            "Indexable",
-            "Indexable with warnings",
-            "Not indexable",
-            "Noindex",
-            "Blocked by robots.txt",
-            "Redirected",
-            "Canonicalized elsewhere",
-            "Failed",
-            "Skipped",
-        ])
+        self.indexability_filter.addItems(
+            [
+                "All",
+                "Indexable",
+                "Indexable with warnings",
+                "Not indexable",
+                "Noindex",
+                "Blocked by robots.txt",
+                "Redirected",
+                "Canonicalized elsewhere",
+                "Failed",
+                "Skipped",
+            ]
+        )
         row.addWidget(self.search_edit, 1)
         row.addWidget(self.status_filter)
         row.addWidget(self.indexability_filter)
@@ -396,7 +396,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _apply_tooltips(self) -> None:
         self.base_url.setToolTip("Site root or branch URL used as the crawl scope.")
-        self.sitemap_url.setToolTip("Optional. Leave empty to detect sitemaps from robots.txt and common sitemap paths.")
+        self.sitemap_url.setToolTip(
+            "Optional. Leave empty to detect sitemaps from robots.txt and common sitemap paths."
+        )
         self.include_text.setToolTip("Optional path prefixes to include, one per line. Example: /design/")
         self.exclude_text.setToolTip("Optional URL fragments or path prefixes to exclude, one per line.")
         self.url_list.setToolTip("Optional explicit URLs to crawl, one per line. This bypasses sitemap discovery.")
@@ -658,7 +660,9 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
     def _build_actions(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
         self.btn_img_dl = QtWidgets.QPushButton("Analyze images")
-        self.btn_img_dl.setToolTip("Fetch image dimensions, file size, content type, and cache headers for this cached page detail.")
+        self.btn_img_dl.setToolTip(
+            "Fetch image dimensions, file size, content type, and cache headers for this cached page detail."
+        )
         self.btn_img_dl.clicked.connect(self._start_image_analysis)
         row.addWidget(self.btn_img_dl)
         row.addStretch()
@@ -707,7 +711,9 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
         canonical_tab = CanonicalTab()
         canonical_tab.update(data.get("canonical", {}))
         indexability_tab = IndexabilityTab()
-        indexability_tab.update(payload.redirect.to_dict(), payload.canonical.to_dict(), payload.meta_robots, payload.robots)
+        indexability_tab.update(
+            payload.redirect.to_dict(), payload.canonical.to_dict(), payload.meta_robots, payload.robots
+        )
         robots_tab = RobotsTab()
         robots_tab.update(payload.meta_robots, payload.robots)
         serp_tab = SerpTab()

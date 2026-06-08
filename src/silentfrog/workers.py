@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Any, Callable, Iterable
+
 import asyncio
 import threading
+from collections.abc import Callable, Iterable
+from typing import Any
 
-from .seo_crawler import analyse, analyse_images
 from .crawl_options import CrawlOptions
-from .site_crawler import crawl_site
+from .seo_crawler import analyse, analyse_images
 from .site_crawl_types import SiteCrawlConfig, SiteCrawlReport
+from .site_crawler import crawl_site
 
 
 def run_crawl(

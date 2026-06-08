@@ -4,10 +4,9 @@ import argparse
 import ast
 import json
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 DEFAULT_PATHS = ("src/silentfrog", "tools")
 BASELINE_PATH = Path("tools/code_shape_baseline.json")

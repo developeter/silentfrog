@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
 import pytest
 
 from silentfrog.updater import (  # type: ignore[reportMissingImports]
+    REVISION_FILE_NAME,
+    UPDATE_BRANCH,
     InstallMode,
     LocalRevision,
     RemoteRevision,
-    REVISION_FILE_NAME,
-    UPDATE_BRANCH,
     UpdateStatus,
     commit_api_url,
     compare,
@@ -26,6 +26,7 @@ from silentfrog.updater import (  # type: ignore[reportMissingImports]
 
 def test_default_ssl_context_uses_certifi_bundle() -> None:
     import certifi
+
     # certifi must ship a non-empty CA file; the SSL context must inherit
     # those CAs so HTTPS to api.github.com works on python.org Framework
     # Python that ships without system CAs.
@@ -64,9 +65,7 @@ def test_read_local_revision_unknown_when_neither_marker_present(tmp_path: Path)
     assert local.sha == ""
 
 
-def test_read_local_revision_dev_mode_handles_missing_git_binary(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_read_local_revision_dev_mode_handles_missing_git_binary(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
 
     def fake_run(*_args, **_kwargs):
@@ -108,7 +107,7 @@ def test_compare_status_matrix(
     if remote is not None:
         remote_rev = RemoteRevision(
             sha=remote[0],
-            committed_at=datetime(2026, 5, 19, tzinfo=timezone.utc),
+            committed_at=datetime(2026, 5, 19, tzinfo=UTC),
             message="anything",
         )
     assert compare(local, remote_rev) is expected
@@ -116,9 +115,7 @@ def test_compare_status_matrix(
 
 def test_commit_api_url_is_pinned_to_developeter_repo() -> None:
     url = commit_api_url()
-    assert url == (
-        "https://api.github.com/repos/developeter/silentfrog/commits/" + UPDATE_BRANCH
-    )
+    assert url == ("https://api.github.com/repos/developeter/silentfrog/commits/" + UPDATE_BRANCH)
 
 
 @pytest.mark.asyncio

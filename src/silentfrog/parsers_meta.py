@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from base64 import b64encode
-import re
 import asyncio
+import re
+from base64 import b64encode
 from dataclasses import dataclass
-from typing import Any, Tuple
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import bs4
-from bs4 import BeautifulSoup
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+import bs4
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
+from bs4 import BeautifulSoup
 
-from .crawl_options import CrawlOptions
 from .crawl_http import _headers_from_options, _polite_probe_response
-from .crawler_utils import _attr, _hr_size, normalize_text, safe_attr
+from .crawl_options import CrawlOptions
+from .crawler_utils import _attr, normalize_text, safe_attr
 from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
 
 Tag = bs4.element.Tag
@@ -370,6 +370,7 @@ def _image_data_uri(raw: bytes, content_type: str) -> str:
 def _decode_image_size(raw: bytes, content_type: str) -> tuple[int, int, str]:
     try:
         from io import BytesIO
+
         from PIL import Image  # type: ignore
 
         with Image.open(BytesIO(raw)) as image:
@@ -473,7 +474,7 @@ async def _extract_social_cards(base: str, soup: BeautifulSoup, timeout: int = 5
     return {"open_graph": og, "twitter": twitter}
 
 
-def _link_domain_info(url: str) -> Tuple[str, str]:
+def _link_domain_info(url: str) -> tuple[str, str]:
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     if not domain:
@@ -531,7 +532,7 @@ def _link_status_note(code: int) -> str:
 
 
 def _update_link_statuses(rows: list[list[str]], statuses: Any) -> None:
-    for row, status in zip(rows, statuses):
+    for row, status in zip(rows, statuses, strict=False):
         code = status if isinstance(status, int) else 0
         row[4] = str(code)
         row[5] = _link_status_note(code)
@@ -542,11 +543,7 @@ def _meta_robots_value(headers: dict[str, str], soup: BeautifulSoup) -> str:
     if header_value:
         return header_value
     return next(
-        (
-            meta[1]
-            for meta in _extract_meta(soup)
-            if meta and (meta[0] or "").lower() == "robots"
-        ),
+        (meta[1] for meta in _extract_meta(soup) if meta and (meta[0] or "").lower() == "robots"),
         "",
     )
 
@@ -654,11 +651,7 @@ _GOOGLE_SEARCH_CONTROLS = {"noindex", "nosnippet"}
 
 
 def _meta_directives(meta_robots: str) -> set[str]:
-    return {
-        directive.strip().lower()
-        for directive in str(meta_robots or "").split(",")
-        if directive.strip()
-    }
+    return {directive.strip().lower() for directive in str(meta_robots or "").split(",") if directive.strip()}
 
 
 def _page_path(page_url: str) -> str:
@@ -673,7 +666,7 @@ def _path_matches_rule(page_path: str, rule: str) -> bool:
 def _agent_directives(
     robots_map: dict[str, list[tuple[str, str]]],
     agent_token: str,
- ) -> list[tuple[str, str]]:
+) -> list[tuple[str, str]]:
     normalized = {str(agent).strip().casefold(): directives for agent, directives in robots_map.items()}
     return normalized.get(agent_token.casefold()) or normalized.get("*", [])
 
@@ -818,10 +811,13 @@ async def _to_data_uri(img_url: str) -> str:
                     return img_url
                 raw = await response.read()
                 from io import BytesIO
+
                 from PIL import Image, ImageDraw  # type: ignore[import]  # pillow stubs missing
 
                 with Image.open(BytesIO(raw)).convert("RGBA") as image:
-                    image = image.resize((16, 16), Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS)
+                    image = image.resize(
+                        (16, 16), Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+                    )
                     mask = Image.new("L", (16, 16), 0)
                     ImageDraw.Draw(mask).ellipse((0, 0, 16, 16), fill=255)
                     image.putalpha(mask)

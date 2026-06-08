@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,7 @@ class _DummyResponse:
         self.status = status
         self._body = body
 
-    async def __aenter__(self) -> "_DummyResponse":
+    async def __aenter__(self) -> _DummyResponse:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
@@ -46,7 +47,7 @@ class _DummySession:
         self._routes = dict(routes)
         self.calls: list[str] = []
 
-    async def __aenter__(self) -> "_DummySession":
+    async def __aenter__(self) -> _DummySession:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
@@ -160,7 +161,7 @@ async def test_fetch_discovery_files_swallows_network_errors(monkeypatch) -> Non
         def __init__(self, **_: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "_BoomSession":
+        async def __aenter__(self) -> _BoomSession:
             return self
 
         async def __aexit__(self, exc_type, exc, tb) -> bool:
@@ -252,7 +253,7 @@ def test_build_discovery_checks_all_present_are_good() -> None:
         ),
     )
     checks = {item.key: item for item in build_discovery_checks(payload)}
-    assert {k for k in checks} == {
+    assert set(checks) == {
         "access_llms_txt",
         "access_llms_full_txt",
         "access_well_known_ai_json",

@@ -4,6 +4,7 @@
 Fires when the session is about to stop. We never block — we only
 emit a one-line systemMessage so the user notices uncommitted work.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,12 +31,7 @@ def main() -> int:
         return 0
     print(
         json.dumps(
-            {
-                "systemMessage": (
-                    "Staged changes detected — consider running the "
-                    "`caveman-commit` skill before exiting."
-                )
-            }
+            {"systemMessage": ("Staged changes detected — consider running the `caveman-commit` skill before exiting.")}
         )
     )
     return 0

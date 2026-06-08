@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import importlib.resources
+import sys
 import threading
 import time
-import sys
 from pathlib import Path
+
 from qtpy import QtCore, QtGui, QtWidgets
+
 from .redirect import check_redirects
 
 
@@ -22,7 +25,6 @@ class RedirectWorker(QtCore.QThread):
         verify_ssl: bool,
     ):
         super().__init__()
-        icon_path = Path(__file__).with_name("assets").joinpath("icon.png")
         self.excel_path = excel_path
         self.timeout = timeout
         self.workers = workers
@@ -138,9 +140,7 @@ class RedirectWindow(QtWidgets.QWidget):
 
     # ----- slot GUI ------------------------------------------------------ #
     def _select_file(self) -> None:
-        fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select file", "", "Excel (*.xlsx *.xls)"
-        )
+        fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select file", "", "Excel (*.xlsx *.xls)")
         if fname:
             self.excel_path = fname
             self.lbl_file.setText(Path(fname).name)
@@ -193,10 +193,6 @@ class RedirectWindow(QtWidgets.QWidget):
         self.btn_file.setEnabled(True)
 
         if out_path:
-            QtWidgets.QMessageBox.information(
-                self, "Done", f"Results saved to:\n{out_path}"
-            )
+            QtWidgets.QMessageBox.information(self, "Done", f"Results saved to:\n{out_path}")
         else:
-            QtWidgets.QMessageBox.warning(
-                self, "Error", "Processing interrupted or failed."
-            )
+            QtWidgets.QMessageBox.warning(self, "Error", "Processing interrupted or failed.")

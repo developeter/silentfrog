@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Callable, Sequence
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Callable, List, Sequence
+from typing import Any
 
 import xlsxwriter
 
-from .action_workbook import write_page_action_sheets
-from ..crawl_types import AiVisibilityPayload, CrawlPayload, PerformanceMetrics
 from ..content_quality import build_content_quality_rows
+from ..crawl_types import AiVisibilityPayload, CrawlPayload, PerformanceMetrics
 from ..image_diagnostics import (
     ALT_COL,
     CACHE_COL,
@@ -24,6 +24,7 @@ from ..image_diagnostics import (
     normalize_image_rows,
 )
 from ..indexability import build_indexability_rows
+from .action_workbook import write_page_action_sheets
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
 SummaryRow = tuple[str, str, xlsxwriter.format.Format | None]
@@ -114,12 +115,12 @@ def _write_table_section(worksheet, start_row: int, headers: Sequence[str], rows
     return start_row + max(len(rows), 1)
 
 
-def _stringify_rows(data: Sequence[Sequence[object]]) -> List[List[str]]:
+def _stringify_rows(data: Sequence[Sequence[object]]) -> list[list[str]]:
     return [[str(cell) for cell in row] for row in data]
 
 
-def _social_rows(payload: CrawlPayload) -> List[List[str]]:
-    rows: List[List[str]] = []
+def _social_rows(payload: CrawlPayload) -> list[list[str]]:
+    rows: list[list[str]] = []
     for source, card in (("OpenGraph", payload.social.open_graph), ("Twitter", payload.social.twitter)):
         rows.append(
             [
@@ -226,7 +227,7 @@ def _ai_visibility_status_format(formats: _Formats, status: str):
     )
 
 
-def _ai_visibility_summary_rows(formats: _Formats, payload: AiVisibilityPayload) -> List[SummaryRow]:
+def _ai_visibility_summary_rows(formats: _Formats, payload: AiVisibilityPayload) -> list[SummaryRow]:
     checks = list(payload.checks)
     area_names = ", ".join(dict.fromkeys(check.area for check in checks if check.area)) or "-"
     summary = payload.summary
@@ -312,7 +313,7 @@ def _write_geo_score_sheet(
     worksheet.set_column(1, 1, 90)
 
 
-def _performance_summary_rows(formats: _Formats, performance: PerformanceMetrics) -> List[SummaryRow]:
+def _performance_summary_rows(formats: _Formats, performance: PerformanceMetrics) -> list[SummaryRow]:
     summary = performance.summary
     total_page_kb = (
         summary.total_page_bytes
@@ -338,7 +339,7 @@ def _performance_summary_rows(formats: _Formats, performance: PerformanceMetrics
     ]
 
 
-def _performance_resource_rows(performance: PerformanceMetrics) -> List[List[str]]:
+def _performance_resource_rows(performance: PerformanceMetrics) -> list[list[str]]:
     resource_rows = [
         [row.resource_type.upper(), str(row.count), f"{row.bytes / 1024:.1f} KB"]
         for row in performance.resource_breakdown
@@ -351,14 +352,28 @@ def _performance_resource_rows(performance: PerformanceMetrics) -> List[List[str
     return resource_rows or [["-", "-", "-"]]
 
 
-def _performance_script_rows(performance: PerformanceMetrics) -> List[List[str]]:
+def _performance_script_rows(performance: PerformanceMetrics) -> list[list[str]]:
     return [
-        ["Blocking", str(performance.scripts.blocking_count), f"{performance.scripts.blocking_bytes / 1024:.1f} KB"],
-        ["Async/Deferred", str(performance.scripts.async_count), f"{performance.scripts.async_bytes / 1024:.1f} KB"],
+        [
+            "Blocking",
+            str(performance.scripts.blocking_count),
+            f"{performance.scripts.blocking_bytes / 1024:.1f} KB",
+        ],
+        [
+            "Async/Deferred",
+            str(performance.scripts.async_count),
+            f"{performance.scripts.async_bytes / 1024:.1f} KB",
+        ],
     ]
 
 
-def _write_performance_issues(worksheet, start_row: int, workbook: xlsxwriter.Workbook, formats: _Formats, performance: PerformanceMetrics) -> int:
+def _write_performance_issues(
+    worksheet,
+    start_row: int,
+    workbook: xlsxwriter.Workbook,
+    formats: _Formats,
+    performance: PerformanceMetrics,
+) -> int:
     worksheet.write_row(start_row, 0, ["Severity", "Issue", "Evidence", "Recommendation"])
     wrap = workbook.add_format({"text_wrap": True})
     if performance.issues:
@@ -399,7 +414,7 @@ def _write_performance_opportunities(
     return start_row + 1
 
 
-def _performance_offender_rows(performance: PerformanceMetrics) -> List[List[str]]:
+def _performance_offender_rows(performance: PerformanceMetrics) -> list[list[str]]:
     rows = [
         [
             offender.resource_type.upper() or "-",
@@ -431,7 +446,12 @@ def _write_performance_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, p
     _write_performance_opportunities(worksheet, opp_start, workbook, formats, performance)
 
     offenders_start = opp_start + max(2, len(performance.opportunity_details) + 2, len(performance.opportunities) + 2)
-    _write_table_section(worksheet, offenders_start, ["Type", "URL", "Script", "Bytes"], _performance_offender_rows(performance))
+    _write_table_section(
+        worksheet,
+        offenders_start,
+        ["Type", "URL", "Script", "Bytes"],
+        _performance_offender_rows(performance),
+    )
 
     worksheet.set_column(0, 0, 80)
     worksheet.set_column(1, 3, 80)
@@ -505,10 +525,14 @@ def _write_headers_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, paylo
             jump_rows.add(idx)
         prev_level = level
 
-    title_reference = next(
-        (row[1] for row in payload.meta if row and (row[0] or "").lower() == "title"),
-        "",
-    ).strip().lower()
+    title_reference = (
+        next(
+            (row[1] for row in payload.meta if row and (row[0] or "").lower() == "title"),
+            "",
+        )
+        .strip()
+        .lower()
+    )
     title_warn_rows = set()
     if title_reference:
         for idx, row in enumerate(payload.headers):
@@ -787,7 +811,7 @@ def _write_indexability_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, 
     _write_sheet(workbook, "Indexability", ["Check", "Value"], rows, _formatter)
 
 
-def _robots_value_format(formats: _Formats, row_idx: int, col_idx: int, row: List[str]):
+def _robots_value_format(formats: _Formats, row_idx: int, col_idx: int, row: list[str]):
     key = row[0].lower()
     value = row[1].lower() if len(row) > 1 else ""
     if row_idx == 0 and col_idx == 1:
@@ -818,7 +842,7 @@ def _robots_value_format(formats: _Formats, row_idx: int, col_idx: int, row: Lis
 
 
 def _write_robots_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, payload: CrawlPayload) -> None:
-    rows: List[List[str]] = [["Meta robots", payload.meta_robots or "-"]]
+    rows: list[list[str]] = [["Meta robots", payload.meta_robots or "-"]]
     for agent, directives in payload.robots.items():
         rows.append([f"User-agent: {agent}", ""])
         for verb, value in directives:
@@ -882,29 +906,32 @@ def _write_ai_crawl_sheet(workbook: xlsxwriter.Workbook, formats: _Formats, payl
     )
 
 
-def _write_structured_sheets(workbook: xlsxwriter.Workbook, formats: _Formats, payload: CrawlPayload) -> None:
+_STRUCTURED_SYNTAX_LABELS = {
+    "json-ld": "JSON-LD",
+    "json-ld-raw": "JSON-LD raw",
+    "microdata": "Microdata",
+    "microformat": "Microformat",
+    "opengraph": "OpenGraph",
+    "rdfa": "RDFa",
+}
+
+
+def _structured_blocks(payload: CrawlPayload) -> list:
     structured = payload.schema
     blocks = list(structured.blocks)
     if not blocks and structured.fallback_raw:
         blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in structured.fallback_raw]
+    return blocks
 
-    syntax_labels = {
-        "json-ld": "JSON-LD",
-        "json-ld-raw": "JSON-LD raw",
-        "microdata": "Microdata",
-        "microformat": "Microformat",
-        "opengraph": "OpenGraph",
-        "rdfa": "RDFa",
-    }
-    summary = structured.summary
+
+def _write_structured_summary_sheet(workbook, payload: CrawlPayload, blocks: list) -> None:
+    summary = payload.schema.summary
     syntax_text = ", ".join(
-        f"{syntax_labels.get(name, name)} {count}"
+        f"{_STRUCTURED_SYNTAX_LABELS.get(name, name)} {count}"
         for name, count in sorted(summary.by_syntax.items())
         if count
     )
-    type_text = ", ".join(
-        f"{schema_type} {count}" for schema_type, count in sorted(summary.by_type.items()) if count
-    )
+    type_text = ", ".join(f"{schema_type} {count}" for schema_type, count in sorted(summary.by_type.items()) if count)
     summary_rows = [
         ["Total items", str(summary.total or len(blocks))],
         ["Syntax", syntax_text or "-"],
@@ -914,6 +941,8 @@ def _write_structured_sheets(workbook: xlsxwriter.Workbook, formats: _Formats, p
         summary_rows.append(["Errors", "\n".join(summary.errors)])
     _write_sheet(workbook, "Structured summary", ["Metric", "Value"], summary_rows)
 
+
+def _write_structured_eligibility_sheet(workbook, formats: _Formats, payload: CrawlPayload) -> None:
     eligibility_rows = [
         [
             item.schema_type,
@@ -922,10 +951,10 @@ def _write_structured_sheets(workbook: xlsxwriter.Workbook, formats: _Formats, p
             ", ".join(item.missing_fields) or "-",
             "; ".join(item.warnings) or "-",
         ]
-        for item in structured.eligibility
+        for item in payload.schema.eligibility
     ] or [["-", "No", "Not detected", "-", "-"]]
 
-    def _eligibility_formatter(row_idx: int, col_idx: int, value: str):
+    def _formatter(row_idx: int, col_idx: int, _value: str):
         if col_idx != 2 or row_idx >= len(eligibility_rows):
             return None
         status = str(eligibility_rows[row_idx][2]).strip().lower()
@@ -940,24 +969,44 @@ def _write_structured_sheets(workbook: xlsxwriter.Workbook, formats: _Formats, p
         "Structured eligibility",
         ["Type", "Detected", "Eligibility", "Missing fields", "Warnings"],
         eligibility_rows,
-        _eligibility_formatter,
+        _formatter,
     )
 
-    detail_rows: List[List[str]] = []
-    for idx, item in enumerate(blocks, start=1):
-        if isinstance(item, dict):
-            raw_snapshot = json.dumps(
-                {key: value for key, value in item.items() if key != "_schema_errors"},
-                ensure_ascii=False,
-            )
-            error_text = "; ".join(str(err).strip() for err in item.get("_schema_errors", []) if str(err).strip())
-            detail_rows.append([str(idx), str(item.get("_extracted_via", "")), _schema_type_label(item.get("@type")), error_text or "-", raw_snapshot])
-            continue
-        if isinstance(item, list):
-            detail_rows.append([str(idx), "list", "", "-", json.dumps(item, ensure_ascii=False)])
-            continue
-        detail_rows.append([str(idx), "", "", "-", str(item)])
-    _write_sheet(workbook, "Structured data", ["#", "Source", "Type", "Errors", "Raw"], detail_rows or [["-", "-", "-", "-", "-"]])
+
+def _structured_detail_row(idx: int, item) -> list[str]:
+    if isinstance(item, dict):
+        raw_snapshot = json.dumps(
+            {key: value for key, value in item.items() if key != "_schema_errors"},
+            ensure_ascii=False,
+        )
+        error_text = "; ".join(str(err).strip() for err in item.get("_schema_errors", []) if str(err).strip())
+        return [
+            str(idx),
+            str(item.get("_extracted_via", "")),
+            _schema_type_label(item.get("@type")),
+            error_text or "-",
+            raw_snapshot,
+        ]
+    if isinstance(item, list):
+        return [str(idx), "list", "", "-", json.dumps(item, ensure_ascii=False)]
+    return [str(idx), "", "", "-", str(item)]
+
+
+def _write_structured_detail_sheet(workbook, blocks: list) -> None:
+    detail_rows = [_structured_detail_row(idx, item) for idx, item in enumerate(blocks, start=1)]
+    _write_sheet(
+        workbook,
+        "Structured data",
+        ["#", "Source", "Type", "Errors", "Raw"],
+        detail_rows or [["-", "-", "-", "-", "-"]],
+    )
+
+
+def _write_structured_sheets(workbook: xlsxwriter.Workbook, formats: _Formats, payload: CrawlPayload) -> None:
+    blocks = _structured_blocks(payload)
+    _write_structured_summary_sheet(workbook, payload, blocks)
+    _write_structured_eligibility_sheet(workbook, formats, payload)
+    _write_structured_detail_sheet(workbook, blocks)
 
 
 def _h1_count_style(formats: _Formats, value: str):
@@ -1065,7 +1114,16 @@ def _write_keywords_sheet(workbook: xlsxwriter.Workbook, payload: CrawlPayload) 
     _write_sheet(
         workbook,
         "Keywords",
-        ["Keyword", "Type", "Frequency", "Density %", "In Title", "Meta Description", "Headings", "1st Occurrence"],
+        [
+            "Keyword",
+            "Type",
+            "Frequency",
+            "Density %",
+            "In Title",
+            "Meta Description",
+            "Headings",
+            "1st Occurrence",
+        ],
         keyword_rows or [["-", "-", "-", "-", "-", "-", "-", "-"]],
     )
 

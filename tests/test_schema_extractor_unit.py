@@ -4,8 +4,13 @@ import json
 from pathlib import Path
 
 import silentfrog.schema_extractor as schema_extractor  # type: ignore[reportMissingImports]
-from silentfrog.schema_extractor import _extract_schema_all, _schema_primary_type  # type: ignore[reportMissingImports]
-from silentfrog.schema_extractor import (  # type: ignore[reportMissingImports]
+from silentfrog.ai_visibility import (  # type: ignore[reportMissingImports]
+    _ENTITY_SCHEMA_TYPES,
+    _RICH_SCHEMA_TYPES,
+)
+from silentfrog.schema_extractor import (  # type: ignore[reportMissingImports]  # type: ignore[reportMissingImports]
+    _extract_schema_all,
+    _schema_primary_type,
     _schema_validate_article,
     _schema_validate_breadcrumb,
     _schema_validate_faq_page,
@@ -14,7 +19,6 @@ from silentfrog.schema_extractor import (  # type: ignore[reportMissingImports]
     _schema_validate_product,
     _schema_validate_website,
 )
-from silentfrog.ai_visibility import _ENTITY_SCHEMA_TYPES, _RICH_SCHEMA_TYPES  # type: ignore[reportMissingImports]
 
 FIXTURES = Path(__file__).resolve().parents[1] / "docs" / "tests" / "fixtures"
 
@@ -24,11 +28,7 @@ def _load_fixture(name: str) -> dict:
 
 
 def _wrap_jsonld(obj: dict) -> str:
-    return (
-        "<html><head>"
-        f'<script type="application/ld+json">{json.dumps(obj)}</script>'
-        "</head><body></body></html>"
-    )
+    return f'<html><head><script type="application/ld+json">{json.dumps(obj)}</script></head><body></body></html>'
 
 
 def _wrap_graph(*entries: dict) -> str:

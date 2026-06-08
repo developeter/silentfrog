@@ -10,6 +10,7 @@ Only the I/O helper (``render_with_playwright``) talks to Playwright.
 fixture pair under ``docs/tests/fixtures/render_diff_*.html`` is enough
 to cover the verdict logic without ever installing Chromium.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

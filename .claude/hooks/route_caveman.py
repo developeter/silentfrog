@@ -5,6 +5,7 @@ Fires on every prompt submission. We never block — we only enrich the
 context with a one-line system note pointing at the appropriate
 caveman skill when the prompt mentions a commit or review task.
 """
+
 from __future__ import annotations
 
 import json

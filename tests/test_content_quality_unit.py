@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 from bs4 import BeautifulSoup
 
-from silentfrog.content_quality import build_content_quality_rows, extract_content_quality  # type: ignore[reportMissingImports]
+from silentfrog.content_quality import (  # type: ignore[reportMissingImports]
+    build_content_quality_rows,
+    extract_content_quality,
+)
 
 
 @pytest.mark.parametrize(

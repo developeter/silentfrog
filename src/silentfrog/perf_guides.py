@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ def _script_heavy(context: PerformanceContext) -> bool:
     return context.js_count > 30
 
 
-_GUIDE_HINTS: List[_GuideHint] = [
+_GUIDE_HINTS: list[_GuideHint] = [
     _GuideHint(
         title="HTTP Archive Web Almanac (open source)",
         rationale="Page weight is above 1.5 MB; compare with the community benchmarks",
@@ -68,11 +68,10 @@ def guides_enabled() -> bool:
     return raw not in {"0", "false", "no"}
 
 
-def open_source_hints(context: PerformanceContext) -> List[str]:
+def open_source_hints(context: PerformanceContext) -> list[str]:
     if not guides_enabled():
         return []
     return [hint.render() for hint in _GUIDE_HINTS if hint.condition(context)]
 
 
 __all__ = ["PerformanceContext", "guides_enabled", "open_source_hints"]
-

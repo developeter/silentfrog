@@ -12,13 +12,12 @@ import io
 import shutil
 import ssl
 import zipfile
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 from urllib.request import Request, urlopen
 
 import certifi
-
 
 # python.org Framework Python on macOS ships with an empty SSL trust
 # store unless ``Install Certificates.command`` was run. urllib then
@@ -81,9 +80,7 @@ def extract_archive(archive_path: Path, target_dir: Path) -> Path:
         zf.extractall(target_dir)
     children = [p for p in target_dir.iterdir() if p.is_dir()]
     if len(children) != 1:
-        raise RuntimeError(
-            f"Expected one top-level directory in archive, got {len(children)}"
-        )
+        raise RuntimeError(f"Expected one top-level directory in archive, got {len(children)}")
     return children[0]
 
 
@@ -94,9 +91,7 @@ def validate_archive(extracted_root: Path) -> None:
         raise RuntimeError(f"Extracted archive missing pyproject.toml: {extracted_root}")
     content = pyproject.read_text(encoding="utf-8")
     if 'name = "silentfrog"' not in content:
-        raise RuntimeError(
-            f"pyproject.toml in archive is not a Silentfrog project: {pyproject}"
-        )
+        raise RuntimeError(f"pyproject.toml in archive is not a Silentfrog project: {pyproject}")
 
 
 def pyproject_changed(repo_root: Path, extracted_root: Path) -> bool:

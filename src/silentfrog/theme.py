@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from qtpy import QtCore, QtGui, QtWidgets
-
+from qtpy import QtGui, QtWidgets
 
 # `QTabWidget::tab-bar { left: 0px }` anchors the QTabBar to the left
 # edge of the QTabWidget's top area, neutralising macOS's default of
@@ -22,6 +21,7 @@ def left_align_tab_bar(tab_widget: QtWidgets.QTabWidget) -> None:
     combined = f"{existing} {_LEFT_ALIGN_TAB_STYLESHEET}".strip()
     tab_widget.setStyleSheet(combined)
     tab_widget.tabBar().setExpanding(False)
+
 
 DARK_STYLESHEET = """
 QWidget            { background: #1e1e1e; color: #f0f0f0; }

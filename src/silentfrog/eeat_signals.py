@@ -9,12 +9,14 @@ rule (absent => info, never warning) — see ``docs/geo_roadmap.md``.
 The other four E-E-A-T checks may warn because they reflect concrete
 best practices, not Google "not required" myths.
 """
+
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 import bs4
@@ -61,7 +63,7 @@ class EeatPayload:
     external_citations: tuple[str, ...] = ()
 
     @classmethod
-    def empty(cls) -> "EeatPayload":
+    def empty(cls) -> EeatPayload:
         return cls()
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,7 +78,7 @@ class EeatPayload:
         }
 
     @classmethod
-    def from_raw(cls, value: Any) -> "EeatPayload":
+    def from_raw(cls, value: Any) -> EeatPayload:
         if not isinstance(value, Mapping):
             return cls.empty()
         same_as = tuple(_string_tuple(value.get("same_as")))

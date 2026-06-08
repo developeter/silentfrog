@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
 import os
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 from .audit_issues import AuditIssue, IssueCategory, IssueSeverity, issues_for_site_report, severity_rank
@@ -29,7 +30,7 @@ class CrawlHistoryIssue:
     confidence: str
 
     @classmethod
-    def from_audit_issue(cls, issue: AuditIssue) -> "CrawlHistoryIssue":
+    def from_audit_issue(cls, issue: AuditIssue) -> CrawlHistoryIssue:
         return cls(
             issue_id=issue.issue_id,
             severity=issue.severity,
@@ -42,7 +43,7 @@ class CrawlHistoryIssue:
         )
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "CrawlHistoryIssue":
+    def from_dict(cls, value: dict[str, Any]) -> CrawlHistoryIssue:
         return cls(
             issue_id=str(value.get("issue_id", "")),
             severity=IssueSeverity(str(value.get("severity", IssueSeverity.INFO.value))),
@@ -82,12 +83,8 @@ class CrawlHistoryRun:
     issues: tuple[CrawlHistoryIssue, ...]
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "CrawlHistoryRun":
-        issues = tuple(
-            CrawlHistoryIssue.from_dict(item)
-            for item in value.get("issues", [])
-            if isinstance(item, dict)
-        )
+    def from_dict(cls, value: dict[str, Any]) -> CrawlHistoryRun:
+        issues = tuple(CrawlHistoryIssue.from_dict(item) for item in value.get("issues", []) if isinstance(item, dict))
         return cls(
             run_id=str(value.get("run_id", "")),
             created_at=str(value.get("created_at", "")),
@@ -283,9 +280,7 @@ def _worsened_issues(
     keys: Iterable[tuple[str, str]],
 ) -> tuple[CrawlHistoryIssue, ...]:
     worsened = [
-        current[key]
-        for key in keys
-        if severity_rank(current[key].severity) < severity_rank(previous[key].severity)
+        current[key] for key in keys if severity_rank(current[key].severity) < severity_rank(previous[key].severity)
     ]
     return tuple(sorted(worsened, key=lambda issue: issue.key()))
 
@@ -300,7 +295,7 @@ def _platform_data_root() -> Path:
 
 
 def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _safe_filename(value: str) -> str:

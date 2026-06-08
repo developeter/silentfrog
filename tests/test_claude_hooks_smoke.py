@@ -6,14 +6,12 @@ piping a synthetic JSON payload through stdin and inspecting the
 JSON output. We do NOT spin up the harness — these are unit tests on
 the hook's decision logic.
 """
+
 from __future__ import annotations
 
-import io
 import json
-import os
 import subprocess
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -53,8 +51,7 @@ def test_settings_json_parses_and_declares_three_events() -> None:
                 assert handler["command"] == "python"
                 args = handler.get("args") or []
                 assert any("${CLAUDE_PROJECT_DIR}" in arg for arg in args), (
-                    "hook args must reference ${CLAUDE_PROJECT_DIR} so the "
-                    "harness resolves them on every machine"
+                    "hook args must reference ${CLAUDE_PROJECT_DIR} so the harness resolves them on every machine"
                 )
 
 

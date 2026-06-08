@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Sequence
+from collections.abc import Sequence
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
@@ -13,8 +13,8 @@ from .base import GenericModel
 class AiVisibilityModel(GenericModel):
     def __init__(
         self,
-        headers: List[str],
-        rows: List[List[str]],
+        headers: list[str],
+        rows: list[list[str]],
         check_keys: Sequence[str],
         header_tooltips: Sequence[str] | None = None,
     ) -> None:
@@ -50,7 +50,7 @@ class AiVisibilityModel(GenericModel):
         column: int,
         order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.AscendingOrder,
     ) -> None:
-        paired = list(zip(self._rows, self._check_keys))
+        paired = list(zip(self._rows, self._check_keys, strict=False))
 
         def _size_to_bytes(text: str) -> float | None:
             units = {
@@ -71,7 +71,7 @@ class AiVisibilityModel(GenericModel):
                 return None
             return number * units.get(parts[1], 1)
 
-        def _key(item: tuple[List[str], str]):
+        def _key(item: tuple[list[str], str]):
             row, _check_key = item
             cell = row[column].strip()
             size_value = _size_to_bytes(cell)

@@ -1,12 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
 from openpyxl import load_workbook
 
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
-from silentfrog.exporters.action_workbook import ACTION_SHEET_NAMES  # type: ignore[reportMissingImports]
 from silentfrog.exporters import export_page_analysis  # type: ignore[reportMissingImports]
+from silentfrog.exporters.action_workbook import ACTION_SHEET_NAMES  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import normalize_image_row  # type: ignore[reportMissingImports]
 
 
@@ -76,12 +76,7 @@ def _sample_payload() -> CrawlPayload:
             ]
         ],
         "schema": {
-            "summary": {
-                "total": 1,
-                "by_syntax": {"json-ld": 1},
-                "by_type": {"WebPage": 1},
-                "errors": []
-            },
+            "summary": {"total": 1, "by_syntax": {"json-ld": 1}, "by_type": {"WebPage": 1}, "errors": []},
             "eligibility": [
                 {
                     "type": "Product",
@@ -98,11 +93,11 @@ def _sample_payload() -> CrawlPayload:
                     "@type": "WebPage",
                     "name": "Example Page",
                     "url": "https://example.com/page",
-                    "_extracted_via": "json-ld"
+                    "_extracted_via": "json-ld",
                 }
             ],
             "issues": [],
-            "fallback_raw": []
+            "fallback_raw": [],
         },
         "canonical": {
             "target": "https://example.com",
@@ -119,15 +114,17 @@ def _sample_payload() -> CrawlPayload:
         "robots": {"*": [("Allow", "/"), ("Disallow", "/tmp")]},
         "meta_robots": "index, follow",
         "hreflang": [["en", "https://example.com", "200", "Yes", "Yes"]],
-        "ai_crawl": [[
-            "GPTBot",
-            "gptbot",
-            "Yes",
-            "-",
-            "-",
-            "Allowed",
-            "No explicit AI restrictions detected",
-        ]],
+        "ai_crawl": [
+            [
+                "GPTBot",
+                "gptbot",
+                "Yes",
+                "-",
+                "-",
+                "Allowed",
+                "No explicit AI restrictions detected",
+            ]
+        ],
         "ai_visibility": {
             "summary": {
                 "verdict": "Needs work",
@@ -261,7 +258,10 @@ def _sample_payload() -> CrawlPayload:
                     "message": "HTTP Archive Web Almanac (open source): Page weight is above 1.5 MB; compare with the community benchmarks (https://almanac.httparchive.org/en/2023/performance#page-weight)",
                     "severity": "critical",
                 },
-                {"message": "High stylesheet count; inline critical CSS and combine static files.", "severity": "warning"},
+                {
+                    "message": "High stylesheet count; inline critical CSS and combine static files.",
+                    "severity": "warning",
+                },
             ],
         },
     }
@@ -278,6 +278,7 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
 
     workbook = load_workbook(out_file)
     try:
+
         def _row_values(sheet_name: str) -> list[list[object]]:
             sheet = workbook[sheet_name]
             return [[cell.value for cell in row] for row in sheet.iter_rows()]
@@ -288,7 +289,9 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert workbook["Prioritized issues"]["D2"].value == "Total page weight is very high."
         assert workbook["Affected URLs"]["A2"].value == "https://example.com"
         assert workbook["Technical actions"]["B2"].value == "Performance"
-        assert workbook["AI-GEO actions"]["D2"].value == "OpenGraph title/description: Yes; Twitter title/description: No."
+        assert (
+            workbook["AI-GEO actions"]["D2"].value == "OpenGraph title/description: Yes; Twitter title/description: No."
+        )
         assert workbook["Appendix - raw data"]["A2"].value == "Meta / Headers / Images"
         assert "Meta" in workbook.sheetnames
         assert "SERP Preview" in workbook.sheetnames
@@ -415,12 +418,12 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
             for row in performance_rows
         )
         assert ["Severity", "Opportunity", None, None] in performance_rows
-        assert any("HTTP Archive Web Almanac" in str(row[1] or "") for row in performance_rows if row and row[0] == "Critical")
+        assert any(
+            "HTTP Archive Web Almanac" in str(row[1] or "") for row in performance_rows if row and row[0] == "Critical"
+        )
         assert ["Type", "URL", "Script", "Bytes"] in performance_rows
         assert any(
-            row[0] == "JS"
-            and row[1] == "https://example.com/app.js"
-            and row[3] == f"{420000 / 1024:.1f} KB"
+            row[0] == "JS" and row[1] == "https://example.com/app.js" and row[3] == f"{420000 / 1024:.1f} KB"
             for row in performance_rows
         )
     finally:
@@ -432,7 +435,10 @@ def test_export_page_analysis_writes_ai_visibility_placeholder_when_empty(tmp_pa
     payload = CrawlPayload.from_raw(
         {
             **payload.to_mapping(),
-            "ai_visibility": {"summary": {"verdict": "", "good_count": 0, "warning_count": 0, "critical_count": 0}, "checks": []},
+            "ai_visibility": {
+                "summary": {"verdict": "", "good_count": 0, "warning_count": 0, "critical_count": 0},
+                "checks": [],
+            },
         }
     )
     out_file = tmp_path / "report-empty-ai.xlsx"

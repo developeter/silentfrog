@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 import re
-from typing import List
 
 from qtpy import QtCore
 from qtpy.QtCore import Qt
@@ -10,7 +10,7 @@ from .base import GenericModel
 
 
 class HreflangModel(GenericModel):
-    def __init__(self, headers: List[str], rows: List[List[str]]) -> None:
+    def __init__(self, headers: list[str], rows: list[list[str]]) -> None:
         super().__init__(headers, rows)
         self._brushes: StatusBrushPalette = status_brushes()
 
@@ -37,9 +37,5 @@ class HreflangModel(GenericModel):
             if column == 3:
                 return self._brushes.good if str(row[3]).strip().lower().startswith("y") else self._brushes.bad
             if column == 4:
-                return (
-                    self._brushes.good
-                    if str(row[4]).strip().lower().startswith("y")
-                    else self._brushes.warn
-                )
+                return self._brushes.good if str(row[4]).strip().lower().startswith("y") else self._brushes.warn
         return None

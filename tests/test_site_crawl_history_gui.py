@@ -6,7 +6,11 @@ from pathlib import Path
 from qtpy import QtCore, QtWidgets
 
 from silentfrog.audit_issues import IssueCategory, IssueSeverity  # type: ignore[reportMissingImports]
-from silentfrog.crawl_history import CrawlHistoryIssue, CrawlHistoryRun, CrawlHistoryStore  # type: ignore[reportMissingImports]
+from silentfrog.crawl_history import (  # type: ignore[reportMissingImports]
+    CrawlHistoryIssue,
+    CrawlHistoryRun,
+    CrawlHistoryStore,
+)
 from silentfrog.site_crawl_history_gui import CrawlHistoryDialog  # type: ignore[reportMissingImports]
 
 

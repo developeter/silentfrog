@@ -34,6 +34,12 @@ def test_indexability_verdict_variants() -> None:
     assert _verdict_value(_rows_for(robots_map={"*": [("Disallow", "/page")]})) == "Blocked by robots.txt"
     assert _verdict_value(_rows_for(meta_robots="noindex")) == "Noindex"
     assert _verdict_value(_rows_for(hops=1)) == "Redirected"
-    assert _verdict_value(_rows_for(canonical_target="https://example.com/other", canonical_self=False)) == "Canonicalized elsewhere"
-    assert _verdict_value(_rows_for(canonical_target="https://example.com/page", canonical_status="500")) == "Indexable with warnings"
+    assert (
+        _verdict_value(_rows_for(canonical_target="https://example.com/other", canonical_self=False))
+        == "Canonicalized elsewhere"
+    )
+    assert (
+        _verdict_value(_rows_for(canonical_target="https://example.com/page", canonical_status="500"))
+        == "Indexable with warnings"
+    )
     assert _verdict_value(_rows_for(canonical_multiple=True)) == "Indexable with warnings"

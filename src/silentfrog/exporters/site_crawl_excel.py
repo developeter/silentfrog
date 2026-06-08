@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from collections import Counter
 import json
+from collections import Counter
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import xlsxwriter
 
-from .action_workbook import write_site_crawl_action_sheets
 from ..content_quality import build_content_quality_rows
 from ..crawl_types import CrawlPayload
 from ..image_diagnostics import IMAGE_HEADERS, normalize_image_rows
 from ..indexability import build_indexability_rows
 from ..site_crawl_types import SITE_CRAWL_HEADERS, SiteCrawlReport, SiteCrawlResult
+from .action_workbook import write_site_crawl_action_sheets
 
 _PayloadRows = list[tuple[str, CrawlPayload]]
 
@@ -44,10 +45,28 @@ def _write_summary_sheets(
     _write_rows(workbook, "Summary", SITE_CRAWL_HEADERS, [result.row() for result in results], formats)
     _write_rows(workbook, "Indexability issues", _issue_headers(), _indexability_rows(results), formats)
     _write_rows(workbook, "Meta issues", _issue_headers(), _meta_issue_rows(results), formats)
-    _write_rows(workbook, "Structured data", ["URL", "Schema count", "Types", "Error count"], _structured_rows(results), formats)
+    _write_rows(
+        workbook,
+        "Structured data",
+        ["URL", "Schema count", "Types", "Error count"],
+        _structured_rows(results),
+        formats,
+    )
     _write_rows(workbook, "Images", ["URL", "Images", "Image issues"], _image_rows(results), formats)
-    _write_rows(workbook, "GEO Score", ["URL", "Score", "Verdict", "Good", "Warning", "Critical"], _geo_score_rows(results), formats)
-    _write_rows(workbook, "AI Visibility", ["URL", "Verdict", "Good", "Warning", "Critical"], _ai_rows(results), formats)
+    _write_rows(
+        workbook,
+        "GEO Score",
+        ["URL", "Score", "Verdict", "Good", "Warning", "Critical"],
+        _geo_score_rows(results),
+        formats,
+    )
+    _write_rows(
+        workbook,
+        "AI Visibility",
+        ["URL", "Verdict", "Good", "Warning", "Critical"],
+        _ai_rows(results),
+        formats,
+    )
     _write_rows(workbook, "Errors", ["URL", "Status", "Error"], _error_rows(results), formats)
 
 
@@ -143,7 +162,14 @@ def _indexability_rows(results: Iterable[SiteCrawlResult]) -> list[list[str]]:
         verdict = result.indexability.strip()
         if verdict in {"", "-", "Indexable", "Skipped", "Failed"}:
             continue
-        rows.append([result.url, "Indexability risk", verdict, "Review robots, canonical, redirects, and meta robots."])
+        rows.append(
+            [
+                result.url,
+                "Indexability risk",
+                verdict,
+                "Review robots, canonical, redirects, and meta robots.",
+            ]
+        )
     return rows or [["-", "-", "-", "-"]]
 
 
@@ -162,7 +188,14 @@ def _single_meta_rows(result: SiteCrawlResult, title_counts: Counter[str]) -> li
     elif title_counts[result.title.strip().lower()] > 1:
         rows.append([result.url, "Duplicate title", result.title, "Make the title unique for this URL."])
     if result.description_state not in {"", "OK"}:
-        rows.append([result.url, "Meta description", result.description_state, "Review description length and presence."])
+        rows.append(
+            [
+                result.url,
+                "Meta description",
+                result.description_state,
+                "Review description length and presence.",
+            ]
+        )
     return rows
 
 
@@ -182,11 +215,7 @@ def _structured_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
 
 
 def _image_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
-    rows = [
-        [result.url, len(result.payload.images), result.image_issue_count]
-        for result in results
-        if result.payload
-    ]
+    rows = [[result.url, len(result.payload.images), result.image_issue_count] for result in results if result.payload]
     return rows or [["-", 0, 0]]
 
 
@@ -196,7 +225,15 @@ def _ai_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
         if not result.payload:
             continue
         summary = result.payload.ai_visibility.summary
-        rows.append([result.url, summary.verdict or "-", summary.good_count, summary.warning_count, summary.critical_count])
+        rows.append(
+            [
+                result.url,
+                summary.verdict or "-",
+                summary.good_count,
+                summary.warning_count,
+                summary.critical_count,
+            ]
+        )
     return rows or [["-", "-", 0, 0, 0]]
 
 
@@ -206,14 +243,16 @@ def _geo_score_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
         if not result.payload:
             continue
         summary = result.payload.ai_visibility.summary
-        rows.append([
-            result.url,
-            summary.score,
-            summary.verdict or "-",
-            summary.good_count,
-            summary.warning_count,
-            summary.critical_count,
-        ])
+        rows.append(
+            [
+                result.url,
+                summary.score,
+                summary.verdict or "-",
+                summary.good_count,
+                summary.warning_count,
+                summary.critical_count,
+            ]
+        )
     return rows or [["-", 0, "-", 0, 0, 0]]
 
 
@@ -226,16 +265,18 @@ def _geo_score_detail_rows(rows: _PayloadRows) -> list[list[object]]:
     for url, payload in rows:
         score = payload.ai_visibility.summary.score
         for check in payload.ai_visibility.checks:
-            out.append([
-                url,
-                score,
-                check.area,
-                check.check,
-                check.status.title(),
-                check.key,
-                check.details,
-                check.recommendation,
-            ])
+            out.append(
+                [
+                    url,
+                    score,
+                    check.area,
+                    check.check,
+                    check.status.title(),
+                    check.key,
+                    check.details,
+                    check.recommendation,
+                ]
+            )
     return out
 
 
@@ -344,7 +385,13 @@ def _structured_block_row(url: str, item: Any) -> list[str]:
     if isinstance(item, Mapping):
         errors = _join(item.get("_schema_errors", []))
         raw = {key: value for key, value in item.items() if key != "_schema_errors"}
-        return [url, str(item.get("_extracted_via", "")), _schema_type_label(item.get("@type")), errors, _json_value(raw)]
+        return [
+            url,
+            str(item.get("_extracted_via", "")),
+            _schema_type_label(item.get("@type")),
+            errors,
+            _json_value(raw),
+        ]
     source = "list" if isinstance(item, list) else ""
     return [url, source, "", "-", _json_value(item)]
 
@@ -431,7 +478,16 @@ def _keyword_rows(url: str, payload: CrawlPayload) -> list[list[object]]:
 
 
 def _ai_crawl_headers() -> list[str]:
-    return ["Page URL", "Agent", "Token", "Robots.txt OK", "Nonstandard directive", "Google controls", "Verdict", "Notes"]
+    return [
+        "Page URL",
+        "Agent",
+        "Token",
+        "Robots.txt OK",
+        "Nonstandard directive",
+        "Google controls",
+        "Verdict",
+        "Notes",
+    ]
 
 
 def _ai_crawl_detail_rows(rows: _PayloadRows) -> list[list[object]]:
@@ -462,7 +518,6 @@ def _performance_detail_rows(rows: _PayloadRows) -> list[list[object]]:
 
 
 def _performance_rows(url: str, payload: CrawlPayload) -> list[list[object]]:
-    performance = payload.performance
     return [
         *_performance_summary_rows(url, payload),
         *_performance_resource_rows(url, payload),
@@ -529,12 +584,24 @@ def _serp_detail_rows(rows: _PayloadRows) -> list[list[object]]:
 
 def _serp_rows(url: str, payload: CrawlPayload) -> list[list[object]]:
     preview = [[url, "Preview", key.replace("_", " ").title(), value] for key, value in payload.serp.to_dict().items()]
-    audit = [[url, "Audit", key.replace("_", " ").title(), value] for key, value in payload.serp_audit.to_dict().items()]
+    audit = [
+        [url, "Audit", key.replace("_", " ").title(), value] for key, value in payload.serp_audit.to_dict().items()
+    ]
     return [*preview, *audit]
 
 
 def _social_headers() -> list[str]:
-    return ["Page URL", "Source", "Title", "Description", "Image", "Card", "Image type", "Image size", "Issues"]
+    return [
+        "Page URL",
+        "Source",
+        "Title",
+        "Description",
+        "Image",
+        "Card",
+        "Image type",
+        "Image size",
+        "Issues",
+    ]
 
 
 def _social_detail_rows(rows: _PayloadRows) -> list[list[object]]:

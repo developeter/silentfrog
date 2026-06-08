@@ -4,7 +4,6 @@ import ctypes
 import importlib.resources
 import platform
 import sys
-from pathlib import Path
 from typing import cast
 
 from qtpy import QtCore, QtGui, QtWidgets
@@ -57,8 +56,7 @@ class HomeWindow(QMainWindow):
         logo = QtWidgets.QLabel()
         logo.setAlignment(Qt.AlignCenter)  # type: ignore[reportAttributeAccessIssue]
         logo_pix = (
-            QtGui.QPixmap(str(icon_path))
-            .scaledToWidth(120, Qt.SmoothTransformation)  # type: ignore[reportAttributeAccessIssue]
+            QtGui.QPixmap(str(icon_path)).scaledToWidth(120, Qt.SmoothTransformation)  # type: ignore[reportAttributeAccessIssue]
         )
         logo.setPixmap(logo_pix)
         # Pin the label to fit the pixmap so a stylesheet re-polish on

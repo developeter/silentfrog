@@ -8,10 +8,10 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from stat import S_IXGRP, S_IXOTH, S_IXUSR
-from typing import Iterable, Mapping
 
 MIN_PYTHON = (3, 12)
 MAX_PYTHON = (3, 15)
@@ -117,9 +117,7 @@ def launcher_script_paths(root: Path) -> tuple[Path, ...]:
     return tuple(root / name for name in _LAUNCHER_SCRIPT_NAMES)
 
 
-_PYTHON_ORG_FRAMEWORK_RE = re.compile(
-    r"/Library/Frameworks/Python\.framework/Versions/(?P<minor>3\.\d+)/"
-)
+_PYTHON_ORG_FRAMEWORK_RE = re.compile(r"/Library/Frameworks/Python\.framework/Versions/(?P<minor>3\.\d+)/")
 
 
 def detect_python_org_certificate_installer(python_exe: Path) -> Path | None:
@@ -233,60 +231,69 @@ def install_plan(
 
 
 def render_run_bat() -> str:
-    return "\n".join(
-        [
-            "@echo off",
-            "REM Launch Silentfrog from the local .venv when available.",
-            "REM Falls back to Poetry for developers.",
-            "",
-            "setlocal",
-            "pushd %~dp0",
-            'set "QT_API=pyside6"',
-            'set "LAUNCHER=%~dp0.venv\\Scripts\\silentfrog.exe"',
-            'if exist "%LAUNCHER%" (',
-            '  call "%LAUNCHER%" %*',
-            ") else (",
-            "  poetry run silentfrog %*",
-            ")",
-            "echo.",
-            "echo Silentfrog exited. Press any key to close this window.",
-            "pause >nul",
-            "popd",
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "@echo off",
+                "REM Launch Silentfrog from the local .venv when available.",
+                "REM Falls back to Poetry for developers.",
+                "",
+                "setlocal",
+                "pushd %~dp0",
+                'set "QT_API=pyside6"',
+                'set "LAUNCHER=%~dp0.venv\\Scripts\\silentfrog.exe"',
+                'if exist "%LAUNCHER%" (',
+                '  call "%LAUNCHER%" %*',
+                ") else (",
+                "  poetry run silentfrog %*",
+                ")",
+                "echo.",
+                "echo Silentfrog exited. Press any key to close this window.",
+                "pause >nul",
+                "popd",
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_run_sh() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "# Launch Silentfrog from the local .venv when available.",
-            "# Falls back to Poetry for developers.",
-            "",
-            "set -eu",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            'export QT_API="${QT_API:-pyside6}"',
-            "",
-            'launcher="$script_dir/.venv/bin/silentfrog"',
-            'if [ -x "$launcher" ]; then',
-            '  exec "$launcher" "$@"',
-            "fi",
-            "",
-            'exec poetry run silentfrog "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "# Launch Silentfrog from the local .venv when available.",
+                "# Falls back to Poetry for developers.",
+                "",
+                "set -eu",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                'export QT_API="${QT_API:-pyside6}"',
+                "",
+                'launcher="$script_dir/.venv/bin/silentfrog"',
+                'if [ -x "$launcher" ]; then',
+                '  exec "$launcher" "$@"',
+                "fi",
+                "",
+                'exec poetry run silentfrog "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_desktop_command_launcher(root: Path) -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            f'cd {json.dumps(str(root))}',
-            f'exec {json.dumps(str(root / "run_silentfrog.sh"))} "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                f"cd {json.dumps(str(root))}",
+                f'exec {json.dumps(str(root / "run_silentfrog.sh"))} "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 # macOS .app bundle scaffolding. A native bundle is the only way to
@@ -295,40 +302,41 @@ def render_desktop_command_launcher(root: Path) -> str:
 # falls back to the process name, which is the Python interpreter). The
 # bundle also removes the Terminal popup that a .command would open.
 
+
 def render_macos_app_info_plist(version: str) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
         '<plist version="1.0">\n'
-        '<dict>\n'
-        '    <key>CFBundleName</key>\n'
-        '    <string>Silentfrog</string>\n'
-        '    <key>CFBundleDisplayName</key>\n'
-        '    <string>Silentfrog</string>\n'
-        '    <key>CFBundleIdentifier</key>\n'
-        '    <string>com.silentfrog.app</string>\n'
-        f'    <key>CFBundleVersion</key>\n'
-        f'    <string>{version}</string>\n'
-        f'    <key>CFBundleShortVersionString</key>\n'
-        f'    <string>{version}</string>\n'
-        '    <key>CFBundleExecutable</key>\n'
-        '    <string>Silentfrog</string>\n'
-        '    <key>CFBundleIconFile</key>\n'
-        '    <string>icon.icns</string>\n'
-        '    <key>CFBundlePackageType</key>\n'
-        '    <string>APPL</string>\n'
-        '    <key>LSMinimumSystemVersion</key>\n'
-        '    <string>11.0</string>\n'
-        '    <key>NSHighResolutionCapable</key>\n'
-        '    <true/>\n'
-        '    <key>LSArchitecturePriority</key>\n'
-        '    <array>\n'
-        '        <string>arm64</string>\n'
-        '        <string>x86_64</string>\n'
-        '    </array>\n'
-        '</dict>\n'
-        '</plist>\n'
+        "<dict>\n"
+        "    <key>CFBundleName</key>\n"
+        "    <string>Silentfrog</string>\n"
+        "    <key>CFBundleDisplayName</key>\n"
+        "    <string>Silentfrog</string>\n"
+        "    <key>CFBundleIdentifier</key>\n"
+        "    <string>com.silentfrog.app</string>\n"
+        f"    <key>CFBundleVersion</key>\n"
+        f"    <string>{version}</string>\n"
+        f"    <key>CFBundleShortVersionString</key>\n"
+        f"    <string>{version}</string>\n"
+        "    <key>CFBundleExecutable</key>\n"
+        "    <string>Silentfrog</string>\n"
+        "    <key>CFBundleIconFile</key>\n"
+        "    <string>icon.icns</string>\n"
+        "    <key>CFBundlePackageType</key>\n"
+        "    <string>APPL</string>\n"
+        "    <key>LSMinimumSystemVersion</key>\n"
+        "    <string>11.0</string>\n"
+        "    <key>NSHighResolutionCapable</key>\n"
+        "    <true/>\n"
+        "    <key>LSArchitecturePriority</key>\n"
+        "    <array>\n"
+        "        <string>arm64</string>\n"
+        "        <string>x86_64</string>\n"
+        "    </array>\n"
+        "</dict>\n"
+        "</plist>\n"
     )
 
 
@@ -339,19 +347,22 @@ def render_macos_app_launcher() -> str:
     # Detect Apple Silicon hardware via sysctl — independent of the
     # Rosetta-masked uname output — and re-exec under `arch -arm64`.
     # Intel Macs (hw.optional.arm64 = 0) keep the native x86_64 path.
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            'DIR="$(cd "$(dirname "$0")" && pwd)"',
-            'ROOT="$(cd "$DIR/../../.." && pwd)"',
-            'export QT_API="${QT_API:-pyside6}"',
-            'if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then',
-            '    exec /usr/bin/arch -arm64 "$ROOT/.venv/bin/silentfrog" "$@"',
-            'fi',
-            'exec "$ROOT/.venv/bin/silentfrog" "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                'DIR="$(cd "$(dirname "$0")" && pwd)"',
+                'ROOT="$(cd "$DIR/../../.." && pwd)"',
+                'export QT_API="${QT_API:-pyside6}"',
+                'if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then',
+                '    exec /usr/bin/arch -arm64 "$ROOT/.venv/bin/silentfrog" "$@"',
+                "fi",
+                'exec "$ROOT/.venv/bin/silentfrog" "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def project_version(pyproject: Path | None = None) -> str:
@@ -419,144 +430,168 @@ def windows_shortcut_command(root: Path, shortcut_path: Path) -> list[str]:
 
 
 def render_install_bat() -> str:
-    return "\n".join(
-        [
-            "@echo off",
-            "setlocal",
-            "pushd %~dp0",
-            "where py >nul 2>nul",
-            "if %errorlevel%==0 (",
-            "  py -3 install_silentfrog.py %*",
-            ") else (",
-            "  python install_silentfrog.py %*",
-            ")",
-            "popd",
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "@echo off",
+                "setlocal",
+                "pushd %~dp0",
+                "where py >nul 2>nul",
+                "if %errorlevel%==0 (",
+                "  py -3 install_silentfrog.py %*",
+                ") else (",
+                "  python install_silentfrog.py %*",
+                ")",
+                "popd",
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_install_sh() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            *_macos_python_selector_lines(),
-            'exec "$silentfrog_python" install_silentfrog.py "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                *_macos_python_selector_lines(),
+                'exec "$silentfrog_python" install_silentfrog.py "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_install_command() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
-            'echo "Installing Silentfrog..."',
-            '"$script_dir/install_silentfrog.sh" "$@"',
-            "status=$?",
-            'echo ""',
-            'if [ "$status" -eq 0 ]; then',
-            '  echo "Silentfrog installed. You can now use the Desktop launcher or run_silentfrog.sh."',
-            "else",
-            '  echo "Silentfrog installation failed with exit code $status."',
-            "fi",
-            'echo "Press Return to close this window."',
-            "read -r _",
-            'exit "$status"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
+                'echo "Installing Silentfrog..."',
+                '"$script_dir/install_silentfrog.sh" "$@"',
+                "status=$?",
+                'echo ""',
+                'if [ "$status" -eq 0 ]; then',
+                '  echo "Silentfrog installed. You can now use the Desktop launcher or run_silentfrog.sh."',
+                "else",
+                '  echo "Silentfrog installation failed with exit code $status."',
+                "fi",
+                'echo "Press Return to close this window."',
+                "read -r _",
+                'exit "$status"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_reinstall_sh() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            *_macos_python_selector_lines(),
-            'exec "$silentfrog_python" install_silentfrog.py --recreate-venv "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                *_macos_python_selector_lines(),
+                'exec "$silentfrog_python" install_silentfrog.py --recreate-venv "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_reinstall_command() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
-            'echo "Reinstalling Silentfrog with a fresh local .venv..."',
-            '"$script_dir/reinstall_silentfrog.sh" "$@"',
-            "status=$?",
-            'echo ""',
-            'if [ "$status" -eq 0 ]; then',
-            '  echo "Silentfrog reinstalled. You can now use the Desktop launcher or run_silentfrog.sh."',
-            "else",
-            '  echo "Silentfrog reinstall failed with exit code $status."',
-            "fi",
-            'echo "Press Return to close this window."',
-            "read -r _",
-            'exit "$status"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                'xattr -dr com.apple.quarantine "$script_dir" >/dev/null 2>&1 || true',
+                'echo "Reinstalling Silentfrog with a fresh local .venv..."',
+                '"$script_dir/reinstall_silentfrog.sh" "$@"',
+                "status=$?",
+                'echo ""',
+                'if [ "$status" -eq 0 ]; then',
+                '  echo "Silentfrog reinstalled. You can now use the Desktop launcher or run_silentfrog.sh."',
+                "else",
+                '  echo "Silentfrog reinstall failed with exit code $status."',
+                "fi",
+                'echo "Press Return to close this window."',
+                "read -r _",
+                'exit "$status"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_uninstall_sh() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            *_macos_python_selector_lines(),
-            'exec "$silentfrog_python" -m tools.source_uninstall "$@"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                *_macos_python_selector_lines(),
+                'exec "$silentfrog_python" -m tools.source_uninstall "$@"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_uninstall_command() -> str:
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
-            'cd "$script_dir"',
-            'echo "Uninstalling Silentfrog..."',
-            '"$script_dir/uninstall_silentfrog.sh" "$@"',
-            "status=$?",
-            'echo ""',
-            'if [ "$status" -eq 0 ]; then',
-            '  echo "Silentfrog uninstalled. Local crawl history was preserved unless --purge was used."',
-            "else",
-            '  echo "Silentfrog uninstall failed with exit code $status."',
-            "fi",
-            'echo "Press Return to close this window."',
-            "read -r _",
-            'exit "$status"',
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "#!/bin/sh",
+                'script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)',
+                'cd "$script_dir"',
+                'echo "Uninstalling Silentfrog..."',
+                '"$script_dir/uninstall_silentfrog.sh" "$@"',
+                "status=$?",
+                'echo ""',
+                'if [ "$status" -eq 0 ]; then',
+                '  echo "Silentfrog uninstalled. Local crawl history was preserved unless --purge was used."',
+                "else",
+                '  echo "Silentfrog uninstall failed with exit code $status."',
+                "fi",
+                'echo "Press Return to close this window."',
+                "read -r _",
+                'exit "$status"',
+            ]
+        )
+        + "\n"
+    )
 
 
 def render_uninstall_bat() -> str:
-    return "\n".join(
-        [
-            "@echo off",
-            "setlocal",
-            "pushd %~dp0",
-            "where py >nul 2>nul",
-            "if %errorlevel%==0 (",
-            "  py -3 -m tools.source_uninstall %*",
-            ") else (",
-            "  python -m tools.source_uninstall %*",
-            ")",
-            "popd",
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "@echo off",
+                "setlocal",
+                "pushd %~dp0",
+                "where py >nul 2>nul",
+                "if %errorlevel%==0 (",
+                "  py -3 -m tools.source_uninstall %*",
+                ") else (",
+                "  python -m tools.source_uninstall %*",
+                ")",
+                "popd",
+            ]
+        )
+        + "\n"
+    )
 
 
 def _macos_python_selector_lines() -> list[str]:
@@ -674,7 +709,9 @@ def _print_dependency_wheel_failure() -> None:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Install Silentfrog from source into a local .venv")
-    parser.add_argument("--recreate-venv", action="store_true", help="Delete and recreate the local .venv before installing")
+    parser.add_argument(
+        "--recreate-venv", action="store_true", help="Delete and recreate the local .venv before installing"
+    )
     parser.add_argument(
         "--revision",
         default=None,

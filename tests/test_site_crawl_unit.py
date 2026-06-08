@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from aiohttp import web  # type: ignore[reportMissingImports]
 import pytest
+from aiohttp import web  # type: ignore[reportMissingImports]
 
+from silentfrog import site_crawler  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlConfig  # type: ignore[reportMissingImports]
-from silentfrog import site_crawler  # type: ignore[reportMissingImports]
 
 
 def _payload(url: str, title: str = "Example Title") -> CrawlPayload:
@@ -22,11 +22,26 @@ def _payload(url: str, title: str = "Example Title") -> CrawlPayload:
             "meta_robots": "index, follow",
             "hreflang": [],
             "ai_crawl": [],
-            "serp": {"title": title, "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp": {
+                "title": title,
+                "description": "",
+                "url": url,
+                "site_name": "",
+                "breadcrumb": "",
+                "favicon": "",
+            },
             "serp_audit": {},
             "keywords": [],
             "content_quality": {},
-            "ai_visibility": {"summary": {"verdict": "Needs work", "good_count": 1, "warning_count": 1, "critical_count": 0}, "checks": []},
+            "ai_visibility": {
+                "summary": {
+                    "verdict": "Needs work",
+                    "good_count": 1,
+                    "warning_count": 1,
+                    "critical_count": 0,
+                },
+                "checks": [],
+            },
             "performance": {"summary": {"verdict": "Good"}},
             "social": {},
         }
@@ -55,7 +70,7 @@ async def test_resolve_site_urls_parses_sitemap_index_filters_and_caps(aiohttp_s
     async def index(_):
         body = f"""<?xml version="1.0"?>
         <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <sitemap><loc>{server.make_url('/sitemap-products.xml')}</loc></sitemap>
+            <sitemap><loc>{server.make_url("/sitemap-products.xml")}</loc></sitemap>
         </sitemapindex>"""
         return web.Response(text=body, content_type="application/xml")
 
@@ -95,8 +110,8 @@ async def test_resolve_site_urls_discovers_sitemap_from_robots(aiohttp_server):
     async def sitemap(_):
         body = f"""<?xml version="1.0"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <url><loc>{server.make_url('/design/table/')}</loc></url>
-            <url><loc>{server.make_url('/news/story/')}</loc></url>
+            <url><loc>{server.make_url("/design/table/")}</loc></url>
+            <url><loc>{server.make_url("/news/story/")}</loc></url>
         </urlset>"""
         return web.Response(text=body, content_type="application/xml")
 
@@ -117,7 +132,7 @@ async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
     async def sitemap(_):
         body = f"""<?xml version="1.0"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <url><loc>{server.make_url('/page-one/')}</loc></url>
+            <url><loc>{server.make_url("/page-one/")}</loc></url>
         </urlset>"""
         return web.Response(text=body, content_type="application/xml")
 

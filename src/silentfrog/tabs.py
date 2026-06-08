@@ -1,39 +1,47 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast
-import sys
-
-from qtpy import QtCore, QtGui, QtWidgets
-from qtpy.QtCore import Qt
-from qtpy.QtGui import QPalette, QColor
-from .ai_visibility import ai_visibility_summary_tooltip
-from .content_quality import build_content_quality_rows
-from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_rows
-from .indexability import build_indexability_rows
-from .perf_metrics import performance_resource_tooltip, performance_summary_tooltip
-from .theme import current_theme
-from .crawl_types import AiVisibilityPayload, ContentQuality, KeywordEntry, StructuredDataPayload, PerformanceMetrics, SocialPayload
-from .models import (
-    AiVisibilityModel,
-    MetaModel,
-    ImagesModel,
-    RobotsModel,
-    CanonicalModel,
-    ContentQualityModel,
-    RedirectModel,
-    IndexabilityModel,
-    HreflangModel,
-    SerpAuditModel,
-    HeaderModel,
-    LinksModel,
-    GenericModel,
-    KeywordModel,
-    PerformanceIssueModel,
-    SocialIssuesModel,
-)
 
 import html as _html
 import json
+import sys
+from dataclasses import dataclass
+from typing import Any, cast
+
+from qtpy import QtCore, QtGui, QtWidgets
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette
+
+from .ai_visibility import ai_visibility_summary_tooltip
+from .content_quality import build_content_quality_rows
+from .crawl_types import (
+    AiVisibilityPayload,
+    ContentQuality,
+    KeywordEntry,
+    PerformanceMetrics,
+    SocialPayload,
+    StructuredDataPayload,
+)
+from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_rows
+from .indexability import build_indexability_rows
+from .models import (
+    AiVisibilityModel,
+    CanonicalModel,
+    ContentQualityModel,
+    GenericModel,
+    HeaderModel,
+    HreflangModel,
+    ImagesModel,
+    IndexabilityModel,
+    KeywordModel,
+    LinksModel,
+    MetaModel,
+    PerformanceIssueModel,
+    RedirectModel,
+    RobotsModel,
+    SerpAuditModel,
+    SocialIssuesModel,
+)
+from .perf_metrics import performance_resource_tooltip, performance_summary_tooltip
+from .theme import current_theme
 
 _AI_CRAWL_HEADERS = [
     "Agent",
@@ -130,7 +138,9 @@ class _TooltipHeaderView(QtWidgets.QHeaderView):
         help_event = cast(QtGui.QHelpEvent, event)
         section = self.logicalIndexAt(help_event.pos())
         model = self.model()
-        tooltip = model.headerData(section, self.orientation(), Qt.ItemDataRole.ToolTipRole) if model and section >= 0 else ""
+        tooltip = (
+            model.headerData(section, self.orientation(), Qt.ItemDataRole.ToolTipRole) if model and section >= 0 else ""
+        )
         if tooltip:
             rect = QtCore.QRect(self.sectionViewportPosition(section), 0, self.sectionSize(section), self.height())
             QtWidgets.QToolTip.showText(help_event.globalPos(), str(tooltip), self.viewport(), rect)
@@ -239,7 +249,7 @@ class SocialTab(QtWidgets.QWidget):
         )
         return (
             f"<div style='background:{bg};color:{fg};border:1px solid {border};padding:8px;"
-            f"font-family:\"Segoe UI\",sans-serif; font-size:12px;'>"
+            f'font-family:"Segoe UI",sans-serif; font-size:12px;\'>'
             f"<div style='display:flex;gap:8px;align-items:flex-start;'>"
             f"{img_html}"
             f"<div>"
@@ -249,7 +259,7 @@ class SocialTab(QtWidgets.QWidget):
             f"</div></div></div>"
         )
 
-    def update(self, data: Dict[str, object]) -> None:
+    def update(self, data: dict[str, object]) -> None:
         app = cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance())
         theme = current_theme(app)
         payload = SocialPayload.from_raw(data if isinstance(data, dict) else {})
@@ -263,7 +273,7 @@ class SocialTab(QtWidgets.QWidget):
         self._tw_preview.setHtml(
             self._card_html(tw.title, tw.description, tw.url, tw.site_name, tw_img, tw.image or tw.url, theme)
         )
-        rows: List[List[str]] = []
+        rows: list[list[str]] = []
         for source, issues in (("OpenGraph", og.issues), ("Twitter", tw.issues)):
             for issue in issues:
                 rows.append([source, issue])
@@ -278,7 +288,7 @@ class SocialTab(QtWidgets.QWidget):
 
 
 class MetaTab(TableTab):
-    def update(self, rows: List[List[str]]) -> None:
+    def update(self, rows: list[list[str]]) -> None:
         self.set_model(MetaModel(rows))
 
     def clear(self) -> None:
@@ -289,19 +299,19 @@ class HeadersTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
 
-    def update(self, rows: List[List[str]], title: str | None = None) -> None:
+    def update(self, rows: list[list[str]], title: str | None = None) -> None:
         self.set_model(HeaderModel(rows, title))
 
 
 class ImagesTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
-        self._rows: List[List[str]] = []
+        self._rows: list[list[str]] = []
 
-    def update(self, rows: List[List[str]]) -> None:
+    def update(self, rows: list[list[str]]) -> None:
         if rows and len(rows[0]) == 6 and self._rows:
             updates = {row[0]: row for row in rows}
-            merged: List[List[str]] = []
+            merged: list[list[str]] = []
             for current in self._rows:
                 merged.append(merge_image_row(current, updates.get(current[0], [])))
             rows = merged
@@ -317,21 +327,21 @@ class ImagesTab(TableTab):
         )
         self.view.setColumnWidth(0, 280)
 
-    def rows(self) -> List[List[str]]:
+    def rows(self) -> list[list[str]]:
         return [list(row) for row in self._rows]
 
 
 class LinksTab(TableTab):
-    def update(self, rows: List[List[str]]) -> None:
+    def update(self, rows: list[list[str]]) -> None:
         self.set_model(LinksModel(rows))
         self.view.setAlternatingRowColors(False)
         _set_header_modes(_header(self.view), (0, QtWidgets.QHeaderView.Stretch))
 
 
 class RedirectTab(TableTab):
-    def update(self, data: Dict[str, object]) -> None:
+    def update(self, data: dict[str, object]) -> None:
         chain_raw = data.get("chain", [])
-        chain_list: List[str] = []
+        chain_list: list[str] = []
         if isinstance(chain_raw, list):
             chain_list = [str(item) for item in chain_raw]
         elif chain_raw:
@@ -348,7 +358,7 @@ class RedirectTab(TableTab):
 
 
 class CanonicalTab(TableTab):
-    def update(self, data: Dict[str, object]) -> None:
+    def update(self, data: dict[str, object]) -> None:
         rows = [
             ["Canonical URL", data.get("target", "") or ""],
             ["Self-referencing", "Yes" if data.get("self") else "No"],
@@ -361,10 +371,10 @@ class CanonicalTab(TableTab):
 class IndexabilityTab(TableTab):
     def update(
         self,
-        redirect: Dict[str, object],
-        canonical: Dict[str, object],
+        redirect: dict[str, object],
+        canonical: dict[str, object],
         meta_robots: str,
-        robots_map: Dict[str, List[tuple[str, str]]],
+        robots_map: dict[str, list[tuple[str, str]]],
     ) -> None:
         rows = build_indexability_rows(redirect, canonical, meta_robots, robots_map)
         self.set_model(IndexabilityModel(["Check", "Value"], rows))
@@ -382,8 +392,8 @@ class ContentQualityTab(TableTab):
 
 
 class RobotsTab(TableTab):
-    def update(self, meta_robots: str, robots_map: Dict[str, List[tuple[str, str]]]) -> None:
-        rows: List[List[str]] = [["Meta / X-Robots-Tag", meta_robots or ""], ["", ""]]
+    def update(self, meta_robots: str, robots_map: dict[str, list[tuple[str, str]]]) -> None:
+        rows: list[list[str]] = [["Meta / X-Robots-Tag", meta_robots or ""], ["", ""]]
         for agent, directives in robots_map.items():
             rows.append([f"User-Agent: {agent}", ""])
             rows.extend([[verb, path] for verb, path in directives])
@@ -394,7 +404,7 @@ class RobotsTab(TableTab):
 
 
 class HreflangTab(TableTab):
-    def update(self, rows: List[List[str]]) -> None:
+    def update(self, rows: list[list[str]]) -> None:
         headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
         self.set_model(HreflangModel(headers, rows))
         _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
@@ -406,17 +416,15 @@ class AiTab(TableTab):
         self._summary = _rich_label()
         self._layout.insertWidget(0, self._summary)
 
-    def update(self, rows: List[List[str]]) -> None:
+    def update(self, rows: list[list[str]]) -> None:
         self.set_model(GenericModel(_AI_CRAWL_HEADERS, rows, _AI_CRAWL_HEADER_TOOLTIPS))
         verdicts = [str(row[5]).strip() for row in rows if len(row) > 5]
         counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
         self._summary.setText(
-            (
-                "<b>AI access summary:</b> "
-                f"Allowed {counts['Allowed']} &nbsp; "
-                f"Limited {counts['Limited']} &nbsp; "
-                f"Blocked {counts['Blocked']}"
-            )
+            "<b>AI access summary:</b> "
+            f"Allowed {counts['Allowed']} &nbsp; "
+            f"Limited {counts['Limited']} &nbsp; "
+            f"Blocked {counts['Blocked']}"
         )
         _set_header_modes(
             _header(self.view),
@@ -479,12 +487,10 @@ class AiVisibilityTab(TableTab):
         verdict = summary.verdict or "-"
         self._geo_score.setText(f"<b>GEO Score:</b> {summary.score} / 100")
         self._summary.setText(
-            (
-                f"<b>Verdict:</b> {verdict} &nbsp; "
-                f"<b>Good:</b> {summary.good_count} &nbsp; "
-                f"<b>Warnings:</b> {summary.warning_count} &nbsp; "
-                f"<b>Critical:</b> {summary.critical_count}"
-            )
+            f"<b>Verdict:</b> {verdict} &nbsp; "
+            f"<b>Good:</b> {summary.good_count} &nbsp; "
+            f"<b>Warnings:</b> {summary.warning_count} &nbsp; "
+            f"<b>Critical:</b> {summary.critical_count}"
         )
         rows = [
             [check.area, check.check, check.status.title(), check.details or "-", check.recommendation or "-"]
@@ -510,12 +516,12 @@ class KeywordsTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
         self._summary = _rich_label()
-        self._entries: List[KeywordEntry] = []
+        self._entries: list[KeywordEntry] = []
         self._applying_palette = False
         self._layout.insertWidget(0, self._summary)
 
-    def update(self, rows: List[object]) -> None:
-        entries: List[KeywordEntry] = []
+    def update(self, rows: list[object]) -> None:
+        entries: list[KeywordEntry] = []
         for item in rows:
             if isinstance(item, KeywordEntry):
                 entries.append(item)
@@ -583,7 +589,7 @@ class KeywordsTab(TableTab):
         finally:
             self._applying_palette = False
 
-    def _summary_text(self, entries: List[KeywordEntry]) -> str:
+    def _summary_text(self, entries: list[KeywordEntry]) -> str:
         if not entries:
             return "<span style='color:#c62828;font-weight:bold'>No keywords extracted.</span>"
         top_terms = [entry.term for entry in entries if entry.length == 1][:3]
@@ -600,15 +606,10 @@ class KeywordsTab(TableTab):
                 f"{flagged} ({len(high_density)} flagged)</span>"
             )
         return (
-            "<b>Top focus keywords:</b> {dominant}<br>"
-            "<b>Terms in title:</b> {title_hits} &nbsp; "
-            "<b>Heading coverage:</b> {heading_coverage}"
-            "{alerts}"
-        ).format(
-            dominant=_html.escape(dominant),
-            title_hits=title_hits,
-            heading_coverage=heading_coverage,
-            alerts=alerts,
+            f"<b>Top focus keywords:</b> {_html.escape(dominant)}<br>"
+            f"<b>Terms in title:</b> {title_hits} &nbsp; "
+            f"<b>Heading coverage:</b> {heading_coverage}"
+            f"{alerts}"
         )
 
 
@@ -685,7 +686,9 @@ class PerformanceTab(TableTab):
         total_bytes = summary.total_page_bytes or (
             metrics.transfer_size + sum(info.get("bytes", 0) for info in metrics.resource_summary.values())
         )
-        resource_count = summary.total_resource_count or sum(info.get("count", 0) for info in metrics.resource_summary.values())
+        resource_count = summary.total_resource_count or sum(
+            info.get("count", 0) for info in metrics.resource_summary.values()
+        )
         return (
             f"<b>Verdict:</b> {summary.verdict or 'Good'} &nbsp; "
             f"<b>Status:</b> {metrics.status or '-'} &nbsp; "
@@ -760,7 +763,7 @@ class PerformanceTab(TableTab):
         )
 
     @staticmethod
-    def _issue_table_data(metrics: PerformanceMetrics) -> tuple[List[List[str]], List[str]]:
+    def _issue_table_data(metrics: PerformanceMetrics) -> tuple[list[list[str]], list[str]]:
         rows = [
             [
                 issue.message or "-",
@@ -821,7 +824,7 @@ class PerformanceTab(TableTab):
             f"<span style='color:{ok_text}'>No issues detected.</span>"
         )
 
-    def _offender_rows(self, metrics: PerformanceMetrics) -> List[List[str]]:
+    def _offender_rows(self, metrics: PerformanceMetrics) -> list[list[str]]:
         rows = [
             [
                 offender.resource_type.upper() or "-",
@@ -904,7 +907,7 @@ class PerformanceTab(TableTab):
 @dataclass
 class _SchemaBlock:
     label: str
-    errors: List[str]
+    errors: list[str]
     text: str
 
 
@@ -912,12 +915,12 @@ class SchemaTab(QtWidgets.QTextEdit):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
-        self._state: Dict[str, Any] | None = None
+        self._state: dict[str, Any] | None = None
         self._is_rendering = False
 
     def update(self, payload: Any) -> None:
         report = StructuredDataPayload.from_raw(payload)
-        blocks: List[Any] = list(report.blocks)
+        blocks: list[Any] = list(report.blocks)
         if not blocks and report.fallback_raw:
             blocks = [{"@raw": raw, "_extracted_via": "json-ld-raw"} for raw in report.fallback_raw]
         if not blocks:
@@ -926,8 +929,12 @@ class SchemaTab(QtWidgets.QTextEdit):
             return
 
         summary = report.summary
-        syntax_counts = {name: count for name, count in summary.by_syntax.items() if count} or self._fallback_syntax_counts(blocks)
-        type_counts = {name: count for name, count in summary.by_type.items() if count} or self._fallback_type_counts(blocks)
+        syntax_counts = {
+            name: count for name, count in summary.by_syntax.items() if count
+        } or self._fallback_syntax_counts(blocks)
+        type_counts = {name: count for name, count in summary.by_type.items() if count} or self._fallback_type_counts(
+            blocks
+        )
 
         total = summary.total or sum(syntax_counts.values()) or len(blocks)
         block_models = [self._build_schema_block(idx, item) for idx, item in enumerate(blocks, start=1)]
@@ -951,7 +958,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             self._render()
         super().changeEvent(event)
 
-    def _theme(self) -> Dict[str, str]:
+    def _theme(self) -> dict[str, str]:
         is_dark = _is_dark(self)
         if is_dark:
             return {
@@ -983,7 +990,6 @@ class SchemaTab(QtWidgets.QTextEdit):
             theme = self._theme()
             self.setStyleSheet(f"background:{theme['background']}; color:{theme['foreground']};")
 
-            summary = self._state["summary"]
             syntax_counts = self._state["syntax_counts"]
             type_counts = self._state["type_counts"]
             eligibility = self._state["eligibility"]
@@ -998,9 +1004,10 @@ class SchemaTab(QtWidgets.QTextEdit):
                 "opengraph": "OpenGraph",
                 "rdfa": "RDFa",
             }
-            syntax_text = ", ".join(
-                f"{syntax_labels.get(name, name)} {syntax_counts[name]}" for name in sorted(syntax_counts)
-            ) or "none"
+            syntax_text = (
+                ", ".join(f"{syntax_labels.get(name, name)} {syntax_counts[name]}" for name in sorted(syntax_counts))
+                or "none"
+            )
             type_text = (
                 " &nbsp; Types: "
                 + ", ".join(f"{schema_type} {type_counts[schema_type]}" for schema_type in sorted(type_counts))
@@ -1021,7 +1028,9 @@ class SchemaTab(QtWidgets.QTextEdit):
 
             if issues:
                 items_html = "".join(f"<li>{_html.escape(item)}</li>" for item in issues)
-                issue_html = f"<div style='color:{theme['issue']};margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
+                issue_html = (
+                    f"<div style='color:{theme['issue']};margin:6px 0'><b>Issues</b><ul>{items_html}</ul></div>"
+                )
             else:
                 issue_html = ""
 
@@ -1031,7 +1040,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             self._is_rendering = False
 
     @staticmethod
-    def _render_eligibility(rows: List[Any], theme: Dict[str, str]) -> str:
+    def _render_eligibility(rows: list[Any], theme: dict[str, str]) -> str:
         if not rows:
             return ""
         status_colors = {
@@ -1071,8 +1080,8 @@ class SchemaTab(QtWidgets.QTextEdit):
         return header + "".join(body) + "</table>"
 
     @staticmethod
-    def _fallback_syntax_counts(blocks: List[Any]) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
+    def _fallback_syntax_counts(blocks: list[Any]) -> dict[str, int]:
+        counts: dict[str, int] = {}
         for item in blocks:
             if isinstance(item, dict):
                 via = str(item.get("_extracted_via", "")).strip()
@@ -1081,8 +1090,8 @@ class SchemaTab(QtWidgets.QTextEdit):
         return counts
 
     @staticmethod
-    def _fallback_type_counts(blocks: List[Any]) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
+    def _fallback_type_counts(blocks: list[Any]) -> dict[str, int]:
+        counts: dict[str, int] = {}
         for item in blocks:
             if isinstance(item, dict):
                 type_hint = SchemaTab._extract_type(item.get("@type"))
@@ -1138,7 +1147,7 @@ class SchemaTab(QtWidgets.QTextEdit):
         return text.strip()
 
     @staticmethod
-    def _render_block(block: _SchemaBlock, theme: Dict[str, str]) -> str:
+    def _render_block(block: _SchemaBlock, theme: dict[str, str]) -> str:
         label_color = theme["issue"] if block.errors else theme["foreground"]
         error_section = ""
         if block.errors:
@@ -1153,6 +1162,8 @@ class SchemaTab(QtWidgets.QTextEdit):
             f"{_html.escape(block.text)}</pre>"
             "</div>"
         )
+
+
 class SerpTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1167,14 +1178,14 @@ class SerpTab(QtWidgets.QWidget):
         layout.addWidget(self.table)
         self._model: QtCore.QAbstractTableModel | None = None
 
-    def update(self, serp: Dict[str, str], audit: Dict[str, str]) -> None:
-        description = serp.get('description', '')
+    def update(self, serp: dict[str, str], audit: dict[str, str]) -> None:
+        description = serp.get("description", "")
         if len(description) > 160:
-            description = description[:157].rstrip() + ''
+            description = description[:157].rstrip() + ""
 
-        self.preview.setStyleSheet('background:#ffffff;color:#202124;border:1px solid #d0d0d0;')
-        favicon_html = ''
-        if serp.get('favicon'):
+        self.preview.setStyleSheet("background:#ffffff;color:#202124;border:1px solid #d0d0d0;")
+        favicon_html = ""
+        if serp.get("favicon"):
             favicon_html = f"<img src=\"{serp['favicon']}\" width='30' height='30' alt='icon'/>"
         serp_html = f"""
         <div style='font-family:Roboto,Arial,sans-serif;font-size:14px;line-height:1.3;background:#ffffff;color:#202124;padding:8px'>
@@ -1184,19 +1195,19 @@ class SerpTab(QtWidgets.QWidget):
                   {favicon_html}
                 </td>
                 <td style='font-size:14px;color:#202124;font-weight:500;vertical-align:bottom'>
-                  {serp.get('site_name', '')}
+                  {serp.get("site_name", "")}
                 </td>
               </tr>
               <tr>
                 <td style='font-size:12px;color:#4d5156;vertical-align:top'>
-                  {serp.get('breadcrumb', '')}
+                  {serp.get("breadcrumb", "")}
                 </td>
               </tr>
             </table>
             <div>
-                <a href='{serp.get('url', '')}'
+                <a href='{serp.get("url", "")}'
                 style='font-size:18px;font-weight:400;color:#1a0dab;text-decoration:none;display:inline-block;max-width:600px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>
-                    {serp.get('title', '')}
+                    {serp.get("title", "")}
                 </a>
             </div>
             <div style='font-size:14px;color:#4d5156;margin-top:3px;max-width:600px'>
@@ -1222,6 +1233,7 @@ class SerpTab(QtWidgets.QWidget):
         header = self.table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+
 
 __all__ = [
     "TableTab",

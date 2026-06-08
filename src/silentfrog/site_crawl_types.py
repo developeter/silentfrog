@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 from urllib.parse import urlparse, urlunparse
 
 from .crawl_options import CrawlOptions
@@ -96,7 +96,7 @@ class SiteCrawlConfig:
         url_list_text: str = "",
         limit: int = DEFAULT_SITE_CRAWL_LIMIT,
         crawl_options: CrawlOptions | None = None,
-    ) -> "SiteCrawlConfig":
+    ) -> SiteCrawlConfig:
         return cls(
             base_url=normalize_site_url(base_url),
             sitemap_url=normalize_site_url(sitemap_url) if sitemap_url.strip() else "",
@@ -134,7 +134,7 @@ class SiteCrawlResult:
     payload: CrawlPayload | None = None
 
     @classmethod
-    def from_payload(cls, url: str, payload: CrawlPayload) -> "SiteCrawlResult":
+    def from_payload(cls, url: str, payload: CrawlPayload) -> SiteCrawlResult:
         return cls(
             url=url,
             status=_payload_status(payload),
@@ -156,7 +156,7 @@ class SiteCrawlResult:
         )
 
     @classmethod
-    def failed(cls, url: str, error: str) -> "SiteCrawlResult":
+    def failed(cls, url: str, error: str) -> SiteCrawlResult:
         return cls(
             url=url,
             status="error",
@@ -178,7 +178,7 @@ class SiteCrawlResult:
         )
 
     @classmethod
-    def skipped(cls, url: str, reason: str) -> "SiteCrawlResult":
+    def skipped(cls, url: str, reason: str) -> SiteCrawlResult:
         return cls(
             url=url,
             status="skipped",
@@ -256,7 +256,7 @@ class SiteCrawlReport:
     warning: str = ""
 
     @classmethod
-    def from_results(cls, results: Iterable[SiteCrawlResult], discovered_count: int) -> "SiteCrawlReport":
+    def from_results(cls, results: Iterable[SiteCrawlResult], discovered_count: int) -> SiteCrawlReport:
         rows = tuple(results)
         failed = sum(1 for result in rows if result.status == "error")
         skipped = sum(1 for result in rows if result.status == "skipped")

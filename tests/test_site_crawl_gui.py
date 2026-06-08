@@ -1,16 +1,29 @@
 from __future__ import annotations
 
-from pathlib import Path
 import threading
+from pathlib import Path
 
 from qtpy import QtCore, QtWidgets
 
 import silentfrog.site_crawl_gui as site_crawl_gui  # type: ignore[reportMissingImports]
 from silentfrog.crawl_history import CrawlHistoryStore  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
-from silentfrog.image_diagnostics import ACTUAL_WIDTH_COL, CACHE_COL, SIZE_COL, normalize_image_row  # type: ignore[reportMissingImports]
-from silentfrog.site_crawl_gui import SiteCrawlDetailDialog, SiteCrawlTableModel, SiteCrawlWindow  # type: ignore[reportMissingImports]
-from silentfrog.site_crawl_types import DEFAULT_SITE_CRAWL_LIMIT, SiteCrawlReport, SiteCrawlResult  # type: ignore[reportMissingImports]
+from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
+    ACTUAL_WIDTH_COL,
+    CACHE_COL,
+    SIZE_COL,
+    normalize_image_row,
+)
+from silentfrog.site_crawl_gui import (  # type: ignore[reportMissingImports]
+    SiteCrawlDetailDialog,
+    SiteCrawlTableModel,
+    SiteCrawlWindow,
+)
+from silentfrog.site_crawl_types import (  # type: ignore[reportMissingImports]
+    DEFAULT_SITE_CRAWL_LIMIT,
+    SiteCrawlReport,
+    SiteCrawlResult,
+)
 
 
 def _payload(url: str = "https://example.com/page", images: list[list[str]] | None = None) -> CrawlPayload:
@@ -27,11 +40,21 @@ def _payload(url: str = "https://example.com/page", images: list[list[str]] | No
             "meta_robots": "index, follow",
             "hreflang": [],
             "ai_crawl": [],
-            "serp": {"title": "Example Title", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp": {
+                "title": "Example Title",
+                "description": "",
+                "url": url,
+                "site_name": "",
+                "breadcrumb": "",
+                "favicon": "",
+            },
             "serp_audit": {},
             "keywords": [],
             "content_quality": {},
-            "ai_visibility": {"summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0}, "checks": []},
+            "ai_visibility": {
+                "summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0},
+                "checks": [],
+            },
             "performance": {"summary": {"verdict": "Good"}},
             "social": {},
         }
@@ -71,14 +94,8 @@ def test_site_crawl_setup_form_grows_fields_to_row_width(qtbot) -> None:
     forms = win.setup_page.findChildren(QtWidgets.QFormLayout)
     assert forms, "setup page must own at least one QFormLayout"
     form = forms[0]
-    assert (
-        form.fieldGrowthPolicy()
-        == QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
-    )
-    assert (
-        form.rowWrapPolicy()
-        == QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows
-    )
+    assert form.fieldGrowthPolicy() == QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+    assert form.rowWrapPolicy() == QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows
 
 
 def test_site_crawl_window_opens_history_browser(monkeypatch, qtbot, tmp_path: Path) -> None:
@@ -199,10 +216,12 @@ def test_site_crawl_history_label_compares_previous_run(qtbot, tmp_path: Path) -
 
 def test_site_crawl_coloring_keeps_skipped_neutral_and_errors_readable() -> None:
     model = SiteCrawlTableModel()
-    model.set_results([
-        SiteCrawlResult.skipped("https://example.com/skipped", "Cancelled"),
-        SiteCrawlResult.failed("https://example.com/error", "boom"),
-    ])
+    model.set_results(
+        [
+            SiteCrawlResult.skipped("https://example.com/skipped", "Cancelled"),
+            SiteCrawlResult.failed("https://example.com/error", "boom"),
+        ]
+    )
 
     skipped = model.index(0, 0)
     error = model.index(1, 0)
@@ -218,7 +237,19 @@ def test_site_crawl_table_uses_crawler_overview_columns() -> None:
         {
             **raw,
             "headers": [["h1", "First"], ["h1", "Second"]],
-            "links": [["https://example.com/missing", "Missing", "Interno", "follow", "404", "Client error", "Body", "", "com"]],
+            "links": [
+                [
+                    "https://example.com/missing",
+                    "Missing",
+                    "Interno",
+                    "follow",
+                    "404",
+                    "Client error",
+                    "Body",
+                    "",
+                    "com",
+                ]
+            ],
             "content_quality": {"word_count": 240},
         }
     )
@@ -274,7 +305,9 @@ def test_row_detail_uses_cached_payload(qtbot) -> None:
 
 
 def test_site_crawl_detail_can_analyze_images(monkeypatch, qtbot) -> None:
-    image_row = normalize_image_row(["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "Lazy", "High"])
+    image_row = normalize_image_row(
+        ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "Lazy", "High"]
+    )
     updates: list[CrawlPayload] = []
 
     def fake_run_image_analysis(base, rows, timeout, on_success, on_error):
@@ -306,7 +339,10 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
 
     monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
     monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: None)
-    monkeypatch.setattr("silentfrog.site_crawl_gui.export_site_crawl_report", lambda value, path: called.update(report=value, path=path))
+    monkeypatch.setattr(
+        "silentfrog.site_crawl_gui.export_site_crawl_report",
+        lambda value, path: called.update(report=value, path=path),
+    )
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
