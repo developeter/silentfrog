@@ -1,0 +1,50 @@
+name: Code Review (quality gates)
+
+# v1.1 N3c — runs tools/quality_gates.py on every PR. Keeps the
+# python-compat workflow focused on cross-version smoke; this one
+# focuses on lint / format / coverage drift.
+#
+# diff-cover compares against origin/dev so the PR base must be dev.
+# Coverage threshold: 85% on touched files.
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    name: quality_gates.py
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          # diff-cover needs the full history to resolve origin/dev.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry==2.1.4
+
+      - name: Install dev deps
+        run: poetry install --with dev
+
+      - name: Quality gates
+        # mypy is opt-in during the gradual ramp (plan §N3b). Drop the
+        # --skip-mypy flag once the codebase is fully typed.
+        run: poetry run python tools/quality_gates.py --skip-mypy
+
+      - name: Upload coverage.xml
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
