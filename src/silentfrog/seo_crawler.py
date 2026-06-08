@@ -6,6 +6,7 @@ and keyword extraction into the public `analyse` / `analyse_images` API.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from typing import Any, cast
 from urllib.parse import urljoin
@@ -15,6 +16,7 @@ from bs4 import BeautifulSoup, Comment
 
 import silentfrog.crawl_http as crawl_http
 
+from .ai_citations import fetch_ai_citations
 from .ai_visibility import build_ai_visibility_payload
 from .citation_advanced import extract_citation_advanced_signals
 from .citation_readiness_content import extract_citation_content_signals
@@ -283,6 +285,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     seo_basics = extract_seo_basics(soup, response.url)
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options)
     crux_payload = await _collect_crux(response.url)
+    ai_citations_payload = await _collect_ai_citations(response.url)
     raw_payload = {
         "schema": structured_data,
         "performance": performance_metrics,
@@ -295,9 +298,23 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "render": render_payload,
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
+        "ai_citations": ai_citations_payload,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+async def _collect_ai_citations(url: str) -> dict[str, Any]:
+    """Optional cross-engine citation tracking.
+
+    Gated on ``SILENTFROG_AI_CITATIONS_ENABLE`` so a stock audit never
+    leaves Silentfrog. When enabled, the Brave path additionally
+    requires ``SILENTFROG_BRAVE_API_KEY``; Common Crawl runs without
+    a key.
+    """
+    api_key = os.environ.get("SILENTFROG_BRAVE_API_KEY", "").strip() or None
+    payload = await fetch_ai_citations(url, brave_api_key=api_key)
+    return payload.to_dict()
 
 
 def _top_keyword_density(keywords: Any) -> float | None:

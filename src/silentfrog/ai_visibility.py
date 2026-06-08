@@ -5,6 +5,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .ai_citations import AiCitationsPayload, build_ai_citations_checks
 from .citation_advanced import AdvancedCitationPayload, build_advanced_citation_checks
 from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .crawl_types import (
@@ -323,6 +324,27 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Per Addy Osmani's web-quality SEO checklist, descriptive URLs sit in the 'high' tier of "
         "technical SEO. Non-descriptive slugs (UUIDs, long digit IDs) make URLs less quotable. "
         "Bad shape => info; good shape => good."
+    ),
+    # v1.1 N4a — cross-engine AI citation tracking (optional 8th area).
+    "ai_citations_brave": (
+        "Probes Brave Search to see whether the URL is indexed AND whether Brave's AI summary mentions "
+        "the netloc.\n\n"
+        "Brave is Claude's primary search index. If a URL isn't in Brave it's effectively invisible to "
+        "Claude regardless of other SEO work. Gated behind SILENTFROG_AI_CITATIONS_ENABLE + "
+        "SILENTFROG_BRAVE_API_KEY env vars. Brave free tier: 2,000 queries/month per key. "
+        "Not measured => info; indexed => good; absent from Brave => warning."
+    ),
+    "ai_citations_common_crawl": (
+        "Probes Common Crawl's CDX index to see whether the URL has been seen in the most recent crawl.\n\n"
+        "Common Crawl powers the training and citation paths of many open AI engines (GPT-3.5 era, "
+        "Anthropic's older Claude, Together, etc.). Index lags by ~3 months — positioned as a "
+        "'historical' signal alongside Brave's fresh signal. Free and public, no API key required."
+    ),
+    "ai_citations_perplexity": (
+        "Heuristic — whether Perplexity likely indexes the URL.\n\n"
+        "Perplexity composes from Brave + Bing-shaped indexes; we don't have a public API to query "
+        "Perplexity directly, so this signal is currently inferred from Brave presence. "
+        "Not measured => info; likely indexed => good."
     ),
 }
 
@@ -698,6 +720,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     citation_content = CitationContentPayload.from_raw(data.get("citation_content", {}))
     citation_advanced = AdvancedCitationPayload.from_raw(data.get("citation_advanced", {}))
     seo_basics = SeoBasicsPayload.from_raw(data.get("seo_basics", {}))
+    ai_citations = AiCitationsPayload.from_raw(data.get("ai_citations", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -722,6 +745,10 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_eeat_checks(eeat),
         *build_performance_checks(vitals, crux),
     ]
+    # AI Citations area (N4a): only emitted when actually measured, so
+    # the optional 8th area stays invisible on stock audits.
+    if ai_citations.measured:
+        checks.extend(build_ai_citations_checks(ai_citations))
     return checks
 
 
