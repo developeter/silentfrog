@@ -70,3 +70,31 @@ Before closing a non-trivial code task, run the review questions in `docs/code_r
   - macOS: `Silentfrog.command`
 - If install behavior changes, update `README.md` in the same task.
 - Treat Python 3.12 as the tested baseline unless the dependency matrix is intentionally expanded.
+
+## 7) Claude Code routing conventions
+
+This repo ships a project-level `.claude/settings.json` that wires
+three hooks (full schema lives in that file; smoke tests in
+`tests/test_claude_hooks_smoke.py`):
+
+- **PreToolUse on `Bash(git commit*)`** — denies a bare `git commit`
+  call (no `-m "..."`, no `-F file`, no `--amend`) so the
+  `caveman-commit` skill drafts the message first. Quoted-message
+  forms pass through unchanged.
+- **UserPromptSubmit** — when a prompt mentions a commit, PR
+  description, or review (English or Italian), the hook injects a
+  one-line system note routing to `caveman-commit` or
+  `caveman-review`. It never blocks; it only enriches context.
+- **Stop** — on session exit, if `git diff --cached --quiet` returns
+  1, emit a one-line reminder to run `caveman-commit` before
+  leaving.
+
+Authoring rules:
+
+- The user's verbatim commit message ALWAYS wins. `caveman-commit`
+  only drafts when the user hasn't supplied one.
+- Never bypass the PreToolUse deny by re-running the same bare
+  command — re-draft via the skill instead.
+- Hooks ship Python scripts (cross-platform). Keep them dependency-
+  free (stdlib only) so a contributor's bare Python install runs
+  them.
