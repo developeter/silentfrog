@@ -218,7 +218,14 @@ def install_plan(
             "pip",
             "install",
             "--upgrade",
-            "--only-binary=:all:",
+            # Prefer wheels for heavy desktop deps (PyQt / numpy / lxml /
+            # Pillow) but allow source builds for pure-Python transitive
+            # deps that don't ship wheels (jstyleson + friends, pulled in
+            # by extruct from M0 onward). `--only-binary=:all:` aborted
+            # the entire install on those, blocking CI across the matrix.
+            "--prefer-binary",
+            # Belt-and-braces: heavy compiled deps must stay wheel-only.
+            "--only-binary=pyside6,qtpy,numpy,pandas,lxml,pillow,aiohttp",
             *requirements.pip_args,
         ],
         [str(paths.python), "-m", "pip", "install", "--upgrade", "--no-deps", "--no-build-isolation", "."],
@@ -697,7 +704,10 @@ def _run(command: Iterable[str], cwd: Path) -> None:
 
 
 def _is_dependency_wheel_preflight(command: list[str]) -> bool:
-    return "--only-binary=:all:" in command
+    # Matches both the legacy `--only-binary=:all:` form and the v1.1
+    # `--prefer-binary` + targeted `--only-binary=<heavy-deps>` form
+    # introduced after extruct's pure-Python transitives broke CI.
+    return "--prefer-binary" in command or "--only-binary=:all:" in command
 
 
 def _print_dependency_wheel_failure() -> None:

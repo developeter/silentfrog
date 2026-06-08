@@ -105,7 +105,16 @@ def test_install_plan_targets_local_venv(tmp_path: Path) -> None:
     assert plan[0] == ["python3", "-m", "venv", str(tmp_path / ".venv")]
     assert plan[1][:5] == [str(tmp_path / ".venv" / "bin" / "python"), "-m", "pip", "install", "--upgrade"]
     assert "poetry-core" in plan[1]
-    assert "--only-binary=:all:" in plan[2]
+    # v1.1: switched from `--only-binary=:all:` (which broke on
+    # extruct's pure-Python transitive deps like jstyleson that have
+    # no wheels) to `--prefer-binary` + a targeted `--only-binary=`
+    # allowlist for the heavy desktop deps. See tools/source_install.py.
+    assert "--prefer-binary" in plan[2]
+    targeted_only_binary = [arg for arg in plan[2] if arg.startswith("--only-binary=")]
+    assert targeted_only_binary, "expected a targeted --only-binary list for heavy deps"
+    # Heavy desktop deps stay wheel-only.
+    for required in ("pyside6", "numpy", "lxml", "pillow"):
+        assert required in targeted_only_binary[0]
     assert "pyside6>=6.8,<7.0" in plan[2]
     assert "numpy>=2.2.6,<3.0.0" in plan[2]
     assert not any("pyqt5" in arg.lower() for arg in plan[2])
