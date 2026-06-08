@@ -14,7 +14,7 @@ to cover the verdict logic without ever installing Chromium.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from bs4 import BeautifulSoup
 
@@ -31,6 +31,11 @@ class RenderResult:
     url: str
     rendered_html: str
     error: str = ""
+    # v1.1 N1: when collect_vitals=True was passed, this carries the
+    # raw CDP-derived CWV payload (a dict suitable for
+    # ``perf_vitals.WebVitals.from_raw``). ``None`` means CWV were
+    # not requested.
+    vitals_payload: dict[str, Any] | None = None
 
 
 RenderStatus = Literal["good", "warning", "critical", "not_measured"]
@@ -45,13 +50,23 @@ class RenderDiff:
     reason: str = ""
 
 
-def render_with_playwright(url: str, timeout_seconds: int = 15) -> RenderResult | None:
+def render_with_playwright(
+    url: str,
+    timeout_seconds: int = 15,
+    collect_vitals: bool = False,
+) -> RenderResult | None:
     """Render *url* with Chromium and return the post-JS DOM.
 
     Returns ``None`` when Playwright is not installed (gated on the
     optional ``geo-render`` extra). Returns a ``RenderResult`` whose
     ``error`` field is populated on any other failure (network,
     timeout, browser launch). Never raises.
+
+    When ``collect_vitals`` is True, the same browser session also
+    drives a CDP ``Performance.getMetrics`` call after navigation and
+    stores the parsed CWV payload on ``RenderResult.vitals_payload``.
+    Sharing the session keeps the per-URL cost flat at one browser
+    launch.
     """
     if sync_playwright is None:
         return None
@@ -61,11 +76,74 @@ def render_with_playwright(url: str, timeout_seconds: int = 15) -> RenderResult 
             try:
                 page = browser.new_page()
                 page.goto(url, timeout=timeout_seconds * 1000, wait_until="networkidle")
-                return RenderResult(url=url, rendered_html=page.content())
+                vitals_payload = _collect_cdp_vitals(page) if collect_vitals else None
+                return RenderResult(
+                    url=url,
+                    rendered_html=page.content(),
+                    vitals_payload=vitals_payload,
+                )
             finally:
                 browser.close()
     except Exception as exc:  # pragma: no cover - real Chromium failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
+
+
+def _collect_cdp_vitals(page: Any) -> dict[str, Any]:
+    """Drive CDP to capture lab Core Web Vitals from the open page.
+
+    Returns the raw payload (a dict suitable for
+    ``WebVitals.from_raw``). Any failure mode produces a dict with a
+    populated ``reason`` and otherwise ``None`` metric fields.
+    """
+    try:
+        cdp = page.context.new_cdp_session(page)
+    except Exception as exc:  # pragma: no cover - real CDP failures
+        return {"reason": f"CDP unavailable: {type(exc).__name__}: {exc}"}
+    try:
+        cdp.send("Performance.enable")
+    except Exception as exc:  # pragma: no cover - real CDP failures
+        return {"reason": f"Performance.enable failed: {type(exc).__name__}: {exc}"}
+    try:
+        page.keyboard.press("Tab", timeout=2000)
+    except Exception:
+        # Non-fatal: some pages don't accept keyboard input; LCP/CLS
+        # still measurable.
+        pass
+    try:
+        metrics_response = cdp.send("Performance.getMetrics")
+    except Exception as exc:  # pragma: no cover - real CDP failures
+        return {"reason": f"Performance.getMetrics failed: {type(exc).__name__}: {exc}"}
+    return _vitals_dict_from_cdp(metrics_response)
+
+
+_CDP_VITALS_NAME_MAP = {
+    "LargestContentfulPaint": "lcp_ms",
+    "FirstContentfulPaint": "fcp_ms",
+    "CumulativeLayoutShift": "cls",
+    "InteractionToNextPaint": "inp_ms",
+    "TotalBlockingTime": "tbt_ms",
+    "SpeedIndex": "speed_index_ms",
+}
+
+
+def _vitals_dict_from_cdp(response: Any) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        return {"reason": "getMetrics returned non-dict"}
+    metrics = response.get("metrics") or []
+    if not isinstance(metrics, list):
+        return {"reason": "metrics field not a list"}
+    parsed: dict[str, Any] = {}
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            continue
+        name = str(metric.get("name", ""))
+        if name not in _CDP_VITALS_NAME_MAP:
+            continue
+        try:
+            parsed[_CDP_VITALS_NAME_MAP[name]] = float(metric.get("value"))
+        except (TypeError, ValueError):
+            parsed[_CDP_VITALS_NAME_MAP[name]] = None
+    return parsed
 
 
 def _normalised_text(html: str) -> str:

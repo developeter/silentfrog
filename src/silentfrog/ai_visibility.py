@@ -19,6 +19,8 @@ from .crawl_types import (
 )
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
+from .perf_crux import CruxData
+from .perf_vitals import WebVitals, build_performance_checks
 from .render_diff import RenderDiff, build_render_diff_check
 from .structure_signals import StructurePayload, build_structure_checks
 
@@ -29,6 +31,7 @@ AI_VISIBILITY_AREAS = (
     "Citation readiness",
     "Entity clarity",
     "E-E-A-T",
+    "Performance",
 )
 
 _STATUS_ALIASES = {
@@ -221,6 +224,52 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Best practice: render critical content server-side; AI crawlers commonly fetch without executing JS. "
         "When Playwright is not installed this check reports 'not measured' (status=info) and does not "
         "affect the verdict. Enable in Crawl settings after installing silentfrog[geo-render]."
+    ),
+    "perf_lcp": (
+        "Largest Contentful Paint — lab measurement via Playwright CDP. Google's threshold: <2.5s good, "
+        "<4s warn, >=4s critical. Bing also weights <2s for AI Answer eligibility (Princeton seo-geo signal).\n\n"
+        "Best practice: preload the LCP image, inline critical CSS, defer non-critical JS."
+    ),
+    "perf_inp": (
+        "Interaction to Next Paint — lab measurement of how responsive the page is to the first interaction. "
+        "Google's threshold: <200ms good, <500ms warn, >=500ms critical.\n\n"
+        "Best practice: break up long main-thread tasks; defer non-essential third-party scripts."
+    ),
+    "perf_cls": (
+        "Cumulative Layout Shift — lab measurement of unexpected layout movement during page load. "
+        "Google's threshold: <0.1 good, <0.25 warn, >=0.25 critical.\n\n"
+        "Best practice: reserve dimensions on images and ads; avoid inserting content above existing content."
+    ),
+    "perf_fcp": (
+        "First Contentful Paint — lab measurement of when the first text or image renders. Google's "
+        "threshold: <1.8s good, <3s warn, >=3s critical.\n\n"
+        "Best practice: inline critical CSS, eliminate render-blocking resources, edge-cache HTML."
+    ),
+    "perf_tbt": (
+        "Total Blocking Time — lab measurement of main-thread blocking time between FCP and TTI. "
+        "Google's threshold: <200ms good, <600ms warn, >=600ms critical.\n\n"
+        "Best practice: code-split bundles; defer non-essential third-party scripts; remove unused JS."
+    ),
+    "perf_speed_index": (
+        "Speed Index — how quickly content visually populates during page load. Google's threshold: "
+        "<3.4s good, <5.8s warn, >=5.8s critical.\n\n"
+        "Best practice: optimise the above-the-fold critical path; lazy-load below-the-fold media."
+    ),
+    "perf_crux_lcp": (
+        "Field LCP — Google's CrUX dataset P75 from real Chrome users in the last 28 days. Same thresholds "
+        "as lab LCP (2.5s/4s). Field data is the source of truth for ranking; lab data is the debugging tool.\n\n"
+        "Best practice: prioritise improvements to field LCP; lab improvements should reflect in field within ~28 days. "
+        "When CrUX has no field data for the URL (low traffic), this check reports 'not measured' and does not affect the GEO Score."
+    ),
+    "perf_crux_inp": (
+        "Field INP — CrUX P75 from real Chrome users. Same thresholds as lab INP (200ms/500ms). Reflects the "
+        "actual interaction profile of real users; lab INP only measures one synthetic interaction.\n\n"
+        "Best practice: triage real-user interactions; replays from Chrome User Experience Report are the gold standard."
+    ),
+    "perf_crux_cls": (
+        "Field CLS — CrUX P75 from real Chrome users. Same thresholds as lab CLS (0.1/0.25). Field CLS often "
+        "differs from lab when the page injects layout-shifting content on user scroll or interaction.\n\n"
+        "Best practice: monitor field CLS as the canonical signal; lab CLS misses scroll-triggered shifts."
     ),
 }
 
@@ -595,6 +644,8 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     structure = StructurePayload.from_raw(data.get("structure", {}))
     citation_content = CitationContentPayload.from_raw(data.get("citation_content", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
+    vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
+    crux = CruxData.from_raw(data.get("perf_crux", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
@@ -612,6 +663,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_citation_content_checks(citation_content),
         *_build_entity_checks(title, h1, schema, social),
         *build_eeat_checks(eeat),
+        *build_performance_checks(vitals, crux),
     ]
     return checks
 

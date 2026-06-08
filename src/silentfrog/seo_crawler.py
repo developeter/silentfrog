@@ -216,22 +216,38 @@ async def _collect_analysis_sections(
     }
 
 
-async def _collect_render_diff(response: Any, crawl_options: CrawlOptions) -> dict[str, Any]:
+async def _collect_render_diff_and_vitals(
+    response: Any, crawl_options: CrawlOptions
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Single Playwright launch produces both SSR parity AND CWV.
+
+    Returns ``(render_payload, vitals_payload)``. Both are ``{}`` when
+    the SSR parity flag is off so the rest of the analyse pipeline
+    sees the same defaults M4 documented.
+    """
     if not crawl_options.ssr_parity_check:
-        return {}
-    rendered = await asyncio.to_thread(render_with_playwright, response.url)
+        return {}, {}
+    rendered = await asyncio.to_thread(render_with_playwright, response.url, 15, True)
     if rendered is None:
-        return {"status": "not_measured", "reason": "Playwright not installed"}
+        return (
+            {"status": "not_measured", "reason": "Playwright not installed"},
+            {"reason": "Playwright not installed"},
+        )
     if rendered.error:
-        return {"status": "warning", "reason": f"Render failed: {rendered.error}"}
+        return (
+            {"status": "warning", "reason": f"Render failed: {rendered.error}"},
+            {"reason": f"Render failed: {rendered.error}"},
+        )
     diff = compute_render_diff(response.body, rendered.rendered_html)
-    return {
+    render_payload = {
         "status": diff.status,
         "missing_headings": list(diff.missing_headings),
         "missing_main_text_chars": diff.missing_main_text_chars,
         "missing_links": diff.missing_links,
         "reason": diff.reason,
     }
+    vitals_payload = rendered.vitals_payload or {}
+    return render_payload, vitals_payload
 
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
@@ -254,7 +270,8 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     quality_payload = section_payload.get("content_quality", {})
     language_hint = str(quality_payload.get("language", "")) if isinstance(quality_payload, dict) else ""
     citation_content = extract_citation_content_signals(soup, language_hint)
-    render_payload = await _collect_render_diff(response, crawl_options)
+    render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options)
+    crux_payload = await _collect_crux(response.url)
     raw_payload = {
         "schema": structured_data,
         "performance": performance_metrics,
@@ -263,9 +280,32 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "structure": structure.to_dict(),
         "citation_content": citation_content.to_dict(),
         "render": render_payload,
+        "perf_vitals": vitals_payload,
+        "perf_crux": crux_payload,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+async def _collect_crux(url: str) -> dict[str, Any]:
+    """Pull CrUX field data when the env knob enables it.
+
+    Disabled by default so a stock single-page audit doesn't depend
+    on PSI being reachable. Set ``SILENTFROG_PSI_ENABLE=1`` to fetch
+    CrUX in the background; optional ``SILENTFROG_PSI_API_KEY`` lifts
+    the anonymous rate limit.
+    """
+    import os
+
+    if os.environ.get("SILENTFROG_PSI_ENABLE", "").strip().lower() not in {"1", "true", "yes"}:
+        return {}
+    api_key = os.environ.get("SILENTFROG_PSI_API_KEY", "").strip() or None
+    try:
+        from .perf_crux import fetch_crux
+    except ImportError:
+        return {"reason": "perf_crux module unavailable"}
+    crux = await fetch_crux(url, api_key=api_key)
+    return crux.to_dict()
 
 
 async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) -> list[list[str]]:

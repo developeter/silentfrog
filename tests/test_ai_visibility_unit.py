@@ -580,3 +580,46 @@ def test_ai_visibility_propagates_render_diff_when_present() -> None:
     checks = build_ai_visibility_checks(payload)
     ssr = next(item for item in checks if item.key == "access_ssr_parity")
     assert ssr.status == "critical"
+
+
+def test_ai_visibility_areas_include_performance_seventh() -> None:
+    assert AI_VISIBILITY_AREAS[6] == "Performance"
+
+
+def test_ai_visibility_emits_six_lab_cwv_rows_in_performance_area() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    perf_keys = {check.key for check in checks if check.area == "Performance"}
+    for key in ("perf_lcp", "perf_inp", "perf_cls", "perf_fcp", "perf_tbt", "perf_speed_index"):
+        assert key in perf_keys
+
+
+def test_ai_visibility_emits_three_crux_info_rows_when_field_data_absent() -> None:
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    crux_rows = [c for c in checks if c.key.startswith("perf_crux_")]
+    assert {r.key for r in crux_rows} == {"perf_crux_lcp", "perf_crux_inp", "perf_crux_cls"}
+    # All info => never down-weights GEO Score.
+    assert all(r.status == "info" for r in crux_rows)
+
+
+def test_ai_visibility_uses_perf_vitals_payload_when_present() -> None:
+    payload = _payload_with_discovery({})
+    payload["perf_vitals"] = {"lcp_ms": 5000, "cls": 0.05}
+    checks = build_ai_visibility_checks(payload)
+    by_key = {c.key: c for c in checks}
+    assert by_key["perf_lcp"].status == "critical"
+    assert by_key["perf_cls"].status == "good"
+
+
+def test_ai_visibility_uses_perf_crux_payload_when_present() -> None:
+    payload = _payload_with_discovery({})
+    payload["perf_crux"] = {
+        "lcp_p75_ms": 1800,
+        "inp_p75_ms": 150,
+        "cls_p75": 0.04,
+        "has_field_data": True,
+    }
+    checks = build_ai_visibility_checks(payload)
+    by_key = {c.key: c for c in checks}
+    assert by_key["perf_crux_lcp"].status == "good"
+    assert by_key["perf_crux_inp"].status == "good"
+    assert by_key["perf_crux_cls"].status == "good"
