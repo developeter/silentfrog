@@ -73,6 +73,7 @@ ruff = ">=0.6,<1.0"
 mypy = ">=1.10,<2.0"
 coverage = ">=7.0,<8.0"
 diff-cover = ">=9.0,<10.0"
+pytest-cov = ">=6.0,<8.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

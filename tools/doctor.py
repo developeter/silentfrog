@@ -143,6 +143,19 @@ def _run_tests(quick: bool) -> None:
     _run(pytest_cmd, "Test run")
 
 
+def _run_ruff_quick() -> None:
+    """v1.1 N3b: --quick mode runs ruff check only (no format, no mypy)."""
+    _run([sys.executable, "-m", "ruff", "check", "--quiet", "src/", "tests/", "tools/"], "Ruff quick")
+
+
+def _run_quality_gates(skip_diff_cover: bool) -> None:
+    """v1.1 N3b: full mode runs the whole gate orchestrator after tests."""
+    cmd = [sys.executable, "tools/quality_gates.py", "--skip-mypy"]
+    if skip_diff_cover:
+        cmd.append("--skip-diff-cover")
+    _run(cmd, "Quality gates")
+
+
 def doctor_targets_for_mode(mode: str, repo_root: Path) -> tuple[DoctorTarget, ...]:
     poetry = DoctorTarget(
         label="poetry",
@@ -184,6 +197,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default="poetry",
         help="Where to look for runtime dependencies. 'venv' validates the installer-produced .venv.",
     )
+    parser.add_argument(
+        "--skip-gates",
+        action="store_true",
+        help="Skip the v1.1 N3b quality_gates step (ruff/mypy/coverage). Used by venv-only doctor flows.",
+    )
+    parser.add_argument(
+        "--skip-diff-cover",
+        action="store_true",
+        help="Skip the per-touched-file coverage gate (useful on fresh clones without origin/dev).",
+    )
     return parser
 
 
@@ -208,6 +231,12 @@ def main() -> int:
             return 0
         if any(target.run_tests for target in targets):
             _run_tests(quick=args.quick)
+        # v1.1 N3b — quality gates after the existing test run.
+        if not args.skip_gates and args.mode != "venv":
+            if args.quick:
+                _run_ruff_quick()
+            else:
+                _run_quality_gates(skip_diff_cover=args.skip_diff_cover)
     except DoctorError as exc:
         print(f"[doctor] FAIL: {exc}", file=sys.stderr)
         return 1
