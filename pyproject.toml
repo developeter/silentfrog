@@ -69,6 +69,10 @@ nltk = "^3.9.1"
 pytest-asyncio = "^1.0.0"
 pytest-aiohttp = "^1.1.0"
 pytest-qt = "^4.4.0"
+ruff = ">=0.6,<1.0"
+mypy = ">=1.10,<2.0"
+coverage = ">=7.0,<8.0"
+diff-cover = ">=9.0,<10.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -80,3 +84,86 @@ asyncio_default_fixture_loop_scope = "function"
 # Scope discovery to the supported tests/ tree so archived modules
 # under experimental/ (kept for historical reference) aren't picked up.
 testpaths = ["tests"]
+
+# v1.1 N3b — quality gates.
+# Ramp policy (see AGENTS.md §8 and docs/geo_roadmap.md v1.1 §N3b):
+# ruff is strict from day one (auto-fix lands in a dedicated commit
+# before the gate wires into doctor). mypy starts with strict_optional
+# only and tightens per folder over time. Coverage threshold is
+# enforced per touched file via diff-cover, not as a global percent.
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [
+    "experimental",
+    ".venv",
+    "build",
+    "deploy",
+    ".claude/worktrees",
+]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear,
+# UP = pyupgrade, C4 = comprehensions.
+select = ["E", "F", "W", "I", "B", "UP", "C4"]
+# AGENTS.md §1 rule "no destructive shortcuts" preserved; we keep
+# E501 (line length) enforced and a small set of pragmatic ignores.
+ignore = [
+    "B008",   # function calls in argument defaults are intentional in some helpers
+    "UP007",  # prefer Union over | in mixed pre-3.10 type hints in shared code paths
+    "UP045",  # same — Optional vs | None mixed-style allowed during gradual ramp
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use pytest fixtures whose names shadow imports by design.
+"tests/**" = ["B011", "B017", "E501"]
+# Tools / hooks: legacy shell-style scripts, longer lines allowed.
+"tools/**" = ["E501"]
+".claude/hooks/**" = ["E501"]
+
+[tool.ruff.format]
+# Mirrors black's defaults; explicit so contributors don't need to
+# look it up.
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+# Gradual ramp: strict on optional handling only. Tightening per
+# folder lives in follow-up PRs (see AGENTS.md §8 for the policy).
+strict_optional = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+# Permissive everywhere else for now.
+disallow_untyped_defs = false
+disallow_any_generics = false
+check_untyped_defs = true
+# Exclude experimental archive and generated dirs.
+exclude = [
+    "^experimental/",
+    "^build/",
+    "^deploy/",
+    "^\\.venv/",
+    "^\\.claude/worktrees/",
+]
+
+[tool.coverage.run]
+source = ["src/silentfrog"]
+branch = true
+omit = [
+    "src/silentfrog/__main__.py",
+    "src/silentfrog/gui.py",  # GUI bootstrapping: covered by manual smoke
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+skip_covered = false
+show_missing = true
