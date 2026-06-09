@@ -24,6 +24,7 @@ from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_
 from .indexability import build_indexability_rows
 from .models import (
     AiVisibilityModel,
+    BotMatrixModel,
     CanonicalModel,
     ContentQualityModel,
     GenericModel,
@@ -436,6 +437,67 @@ class AiTab(TableTab):
             (5, QtWidgets.QHeaderView.ResizeToContents),
             (6, QtWidgets.QHeaderView.Stretch),
         )
+
+
+class BotMatrixTab(TableTab):
+    """v1.1 N5a — heatmap-style view of the 19-bot M1 matrix.
+
+    Same underlying data as ``AiTab`` (``CrawlPayload.ai_crawl``), but
+    the Verdict column is painted by status and clicking a row pops a
+    drill-down dialog with the per-bot reasoning. Surfaces the data we
+    already collect in a form competitors don't ship.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(sorting=True)
+        self._summary = _rich_label(
+            "v1.1 N5a — Bot Matrix heatmap.\n\n"
+            "Rows are the 19 AI / search bots audited via robots.txt. The Verdict column is painted "
+            "green / yellow / red. Click any row for the per-bot reasoning."
+        )
+        self._layout.insertWidget(0, self._summary)
+        self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.view.doubleClicked.connect(self._on_row_activated)
+        self._rows: list[list[str]] = []
+
+    def update(self, rows: list[list[str]]) -> None:
+        self._rows = [list(row) for row in rows]
+        self.set_model(BotMatrixModel(_AI_CRAWL_HEADERS, self._rows, _AI_CRAWL_HEADER_TOOLTIPS))
+        verdicts = [str(row[5]).strip() for row in self._rows if len(row) > 5]
+        counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
+        self._summary.setText(
+            "<b>Bot Matrix</b> &nbsp; "
+            f"Allowed {counts['Allowed']} &nbsp; "
+            f"Limited {counts['Limited']} &nbsp; "
+            f"Blocked {counts['Blocked']} &nbsp; "
+            "<i>(double-click a row for per-bot reasoning)</i>"
+        )
+        _set_header_modes(
+            _header(self.view),
+            (0, QtWidgets.QHeaderView.ResizeToContents),
+            (1, QtWidgets.QHeaderView.ResizeToContents),
+            (2, QtWidgets.QHeaderView.ResizeToContents),
+            (3, QtWidgets.QHeaderView.ResizeToContents),
+            (4, QtWidgets.QHeaderView.ResizeToContents),
+            (5, QtWidgets.QHeaderView.ResizeToContents),
+            (6, QtWidgets.QHeaderView.Stretch),
+        )
+
+    def _on_row_activated(self, index: QtCore.QModelIndex) -> None:
+        row_idx = index.row()
+        if row_idx < 0 or row_idx >= len(self._rows):
+            return
+        row = self._rows[row_idx]
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"{row[0]} — bot details")
+        layout = QtWidgets.QFormLayout(dialog)
+        for header_idx, header in enumerate(_AI_CRAWL_HEADERS):
+            value = row[header_idx] if header_idx < len(row) else ""
+            layout.addRow(f"<b>{header}</b>", QtWidgets.QLabel(str(value)))
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        layout.addRow(close)
+        dialog.exec()
 
 
 _GEO_SCORE_TOOLTIP = (

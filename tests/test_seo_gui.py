@@ -563,7 +563,8 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    assert win.tabs.count() == 18
+    # v1.1 N5a: new "Bot Matrix" tab inserted between AI crawl and AI Visibility.
+    assert win.tabs.count() == 19
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
         "Recap",
@@ -581,6 +582,7 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Content quality",
         "Keywords",
         "AI crawl",
+        "Bot Matrix",
         "AI Visibility",
         "Performance",
         "SERP",
