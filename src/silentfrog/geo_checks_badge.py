@@ -9,7 +9,7 @@ Status per group:
 
 - ``measured`` (✓ green): at least one check_key from the group is
   present in ``payload.ai_visibility.checks`` AND is non-``info``.
-- ``gated`` (⏻ grey): every check_key from the group is present but
+- ``gated`` (○ grey): every check_key from the group is present but
   all are ``info`` — code path exists, user hasn't enabled the
   feature (env var, Settings checkbox, missing API key, …).
 - ``missing`` (✗ dim red): no check_key from the group is present
@@ -67,7 +67,7 @@ GROUP_ORDER: tuple[str, ...] = ("Lab CWV", "CrUX field", "SSR parity", "AI Citat
 class GroupBadge:
     group: str
     state: str  # "measured" | "gated" | "missing"
-    glyph: str  # "✓" | "⏻" | "✗"
+    glyph: str  # "✓" | "○" | "✗"
     hint: str
 
 
@@ -88,7 +88,7 @@ def evaluate_group(group: str, checks: Iterable[Mapping[str, Any]]) -> GroupBadg
     if not present_keys:
         return GroupBadge(group=group, state="missing", glyph="✗", hint=hint)
     if not measured_keys:
-        return GroupBadge(group=group, state="gated", glyph="⏻", hint=hint)
+        return GroupBadge(group=group, state="gated", glyph="○", hint=hint)
     return GroupBadge(group=group, state="measured", glyph="✓", hint=hint)
 
 

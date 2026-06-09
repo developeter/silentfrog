@@ -571,6 +571,25 @@ _GEO_SCORE_TOOLTIP = (
 )
 
 
+def _collect_badge_checks(raw: object, payload: AiVisibilityPayload) -> list[dict[str, str]]:
+    """Return a list of {key, status} dicts preserving the original `info`
+    status (which AiVisibilityPayload.from_raw folds into `good`)."""
+    if isinstance(raw, dict):
+        raw_checks = raw.get("checks", [])
+        if isinstance(raw_checks, list):
+            return [
+                {
+                    "key": str(item.get("key", "")),
+                    "status": str(item.get("status", "")).strip().lower(),
+                }
+                for item in raw_checks
+                if isinstance(item, dict)
+            ]
+    # Fallback: caller passed an AiVisibilityPayload directly. We can't
+    # recover the pre-normalised status; treat everything as measured.
+    return [{"key": c.key or "", "status": c.status or ""} for c in payload.checks]
+
+
 class AiVisibilityTab(TableTab):
     def __init__(self) -> None:
         super().__init__(sorting=True)
@@ -644,8 +663,11 @@ class AiVisibilityTab(TableTab):
         payload = data if isinstance(data, AiVisibilityPayload) else AiVisibilityPayload.from_raw(data)
         summary = payload.summary
         verdict = summary.verdict or "-"
-        # Refresh the GEO checks enablement badges from the current payload.
-        check_dicts = [{"key": check.key or "", "status": check.status or "info"} for check in payload.checks]
+        # Refresh the GEO checks enablement badges. Read from the RAW dict
+        # when available — AiVisibilityPayload.from_raw normalizes `info` →
+        # `good` (per §1.5 myth rule, treating not-measured as a positive
+        # signal), which would hide gated-off features from the badge logic.
+        check_dicts = _collect_badge_checks(data, payload)
         badges = self._badge_build(check_dicts)
         self._badges_label.setText(self._badge_render_label(badges))
         self._badges_label.setToolTip(self._badge_render_tooltip(badges))

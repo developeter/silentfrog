@@ -45,3 +45,4 @@ secrets.local.json
 .claude/transcripts/
 .claude/projects/
 .claude/agents/
+tmp_smoke_render/

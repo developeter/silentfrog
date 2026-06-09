@@ -26,7 +26,7 @@ def test_group_gated_when_every_check_key_is_info() -> None:
     ]
     badge = evaluate_group("Lab CWV", checks)
     assert badge.state == "gated"
-    assert badge.glyph == "⏻"
+    assert badge.glyph == "○"
 
 
 def test_group_measured_when_any_check_key_has_non_info_status() -> None:
