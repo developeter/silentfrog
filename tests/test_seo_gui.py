@@ -26,7 +26,6 @@ from silentfrog.image_diagnostics import (
 from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImports]
 from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
 from silentfrog.tabs import (  # type: ignore[reportMissingImports]
-    AiTab,
     AiVisibilityTab,
     CanonicalTab,
     ContentQualityTab,
@@ -468,15 +467,6 @@ TABLE_TAB_CASES: tuple[
         {1: QtWidgets.QHeaderView.Stretch},
     ),
     (
-        AiTab,
-        ([["Crawler", "crawler", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"]],),
-        {
-            0: QtWidgets.QHeaderView.ResizeToContents,
-            5: QtWidgets.QHeaderView.ResizeToContents,
-            6: QtWidgets.QHeaderView.Stretch,
-        },
-    ),
-    (
         AiVisibilityTab,
         (
             {
@@ -563,8 +553,8 @@ def test_seo_window_exposes_expected_tabs(qtbot):
     qtbot.addWidget(win)
     win.show()
 
-    # v1.1 N5a: new "Bot Matrix" tab inserted between AI crawl and AI Visibility.
-    assert win.tabs.count() == 19
+    # v1.1 N5a-fix: AI crawl tab dropped; Bot Matrix takes its slot.
+    assert win.tabs.count() == 18
     labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
     assert labels == [
         "Recap",
@@ -581,7 +571,6 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Structured data",
         "Content quality",
         "Keywords",
-        "AI crawl",
         "Bot Matrix",
         "AI Visibility",
         "Performance",
@@ -740,95 +729,6 @@ def test_content_quality_tab_shows_strong_page(qtbot) -> None:
     assert isinstance(tooltip, str)
     assert "Best practice" in tooltip
     assert "<html lang>" in tooltip
-
-
-def test_ai_tab_shows_access_summary(qtbot) -> None:
-    tab = AiTab()
-    qtbot.addWidget(tab)
-    tab.update(
-        [
-            ["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"],
-            [
-                "Google-Extended",
-                "google-extended",
-                "No",
-                "-",
-                "-",
-                "Blocked",
-                "Blocked by robots.txt: /private",
-            ],
-            [
-                "Googlebot",
-                "googlebot",
-                "Yes",
-                "-",
-                "nosnippet",
-                "Limited",
-                "Google search controls: nosnippet",
-            ],
-        ]
-    )
-
-    assert "Allowed 1" in tab._summary.text()
-    assert "Limited 1" in tab._summary.text()
-    assert "Blocked 1" in tab._summary.text()
-    model = tab.view.model()
-    assert model is not None
-    tooltip = model.headerData(3, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
-    assert isinstance(tooltip, str)
-    assert "Nonstandard AI directives" in tooltip
-
-
-def test_ai_tab_headers_and_empty_state_are_stable(qtbot) -> None:
-    tab = AiTab()
-    qtbot.addWidget(tab)
-    tab.update([])
-
-    assert "Allowed 0" in tab._summary.text()
-    assert "Limited 0" in tab._summary.text()
-    assert "Blocked 0" in tab._summary.text()
-    model = tab.view.model()
-    assert model is not None
-    headers = [
-        model.headerData(column, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.DisplayRole)
-        for column in range(model.columnCount())
-    ]
-    assert headers == [
-        "Agent",
-        "Token",
-        "Robots.txt OK",
-        "Nonstandard directive",
-        "Google controls",
-        "Verdict",
-        "Notes",
-    ]
-    assert model.rowCount() == 0
-
-
-def test_ai_tab_header_tooltip_event(qtbot, monkeypatch) -> None:
-    tab = AiTab()
-    qtbot.addWidget(tab)
-    tab.update([["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "No explicit AI restrictions detected"]])
-    tab.show()
-    qtbot.waitExposed(tab)
-
-    header = tab.view.horizontalHeader()
-    shown: dict[str, str] = {}
-
-    def _fake_show_text(pos, text, widget=None, rect=None, msec_display_time=-1):
-        shown["text"] = text
-
-    monkeypatch.setattr(QtWidgets.QToolTip, "showText", _fake_show_text)
-    section = 3
-    position = QtCore.QPoint(header.sectionViewportPosition(section) + 8, max(header.height() // 2, 1))
-    event = QtGui.QHelpEvent(
-        QtCore.QEvent.Type.ToolTip,
-        position,
-        header.viewport().mapToGlobal(position),
-    )
-
-    assert header.event(event) is True
-    assert "noai" in shown["text"]
 
 
 def test_ai_visibility_tab_renders_summary_and_rows(qtbot) -> None:

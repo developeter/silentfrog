@@ -26,8 +26,8 @@ from .site_crawl_types import (
     SiteCrawlResult,
 )
 from .tabs import (
-    AiTab,
     AiVisibilityTab,
+    BotMatrixTab,
     CanonicalTab,
     ContentQualityTab,
     HeadersTab,
@@ -693,7 +693,7 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
             ("Hreflang", HreflangTab(), data.get("hreflang", [])),
             ("Content quality", ContentQualityTab(), data.get("content_quality", {})),
             ("Keywords", KeywordsTab(), data.get("keywords", [])),
-            ("AI crawl", AiTab(), data.get("ai_crawl", [])),
+            ("Bot Matrix", BotMatrixTab(), data),
             ("AI Visibility", AiVisibilityTab(), data.get("ai_visibility", {})),
             ("Performance", PerformanceTab(), data.get("performance", {})),
             ("Structured data", SchemaTab(), data.get("schema", {})),

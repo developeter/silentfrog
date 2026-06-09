@@ -40,6 +40,7 @@ from .models import (
     RobotsModel,
     SerpAuditModel,
     SocialIssuesModel,
+    build_bot_rows,
 )
 from .perf_metrics import performance_resource_tooltip, performance_summary_tooltip
 from .theme import current_theme
@@ -411,93 +412,155 @@ class HreflangTab(TableTab):
         _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
-class AiTab(TableTab):
-    def __init__(self) -> None:
-        super().__init__(sorting=True)
-        self._summary = _rich_label()
-        self._layout.insertWidget(0, self._summary)
-
-    def update(self, rows: list[list[str]]) -> None:
-        self.set_model(GenericModel(_AI_CRAWL_HEADERS, rows, _AI_CRAWL_HEADER_TOOLTIPS))
-        verdicts = [str(row[5]).strip() for row in rows if len(row) > 5]
-        counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
-        self._summary.setText(
-            "<b>AI access summary:</b> "
-            f"Allowed {counts['Allowed']} &nbsp; "
-            f"Limited {counts['Limited']} &nbsp; "
-            f"Blocked {counts['Blocked']}"
-        )
-        _set_header_modes(
-            _header(self.view),
-            (0, QtWidgets.QHeaderView.ResizeToContents),
-            (1, QtWidgets.QHeaderView.ResizeToContents),
-            (2, QtWidgets.QHeaderView.ResizeToContents),
-            (3, QtWidgets.QHeaderView.ResizeToContents),
-            (4, QtWidgets.QHeaderView.ResizeToContents),
-            (5, QtWidgets.QHeaderView.ResizeToContents),
-            (6, QtWidgets.QHeaderView.Stretch),
-        )
-
-
 class BotMatrixTab(TableTab):
-    """v1.1 N5a — heatmap-style view of the 19-bot M1 matrix.
+    """v1.1 N5a-fix — true per-signal × per-bot heatmap.
 
-    Same underlying data as ``AiTab`` (``CrawlPayload.ai_crawl``), but
-    the Verdict column is painted by status and clicking a row pops a
-    drill-down dialog with the per-bot reasoning. Surfaces the data we
-    already collect in a form competitors don't ship.
+    Replaces the original "AI crawl" flat table AND the first
+    cut of "Bot Matrix" (which was only AI crawl with paint).
+    Rows are the 19 bots; columns are 5 signals (Robots.txt /
+    Meta robots / llms.txt / SSR parity / Verdict) plus a text
+    Bot label column. Cells render as coloured chips; double-
+    click pops the 7-column drill-down dialog that surfaces
+    everything the dropped AI crawl tab used to show.
     """
 
+    _CHIP_SIZE = 14
+    _CHIP_RADIUS = 3
+
     def __init__(self) -> None:
-        super().__init__(sorting=True)
+        super().__init__(sorting=False)  # heatmap order = _AI_AGENTS order; sorting confuses chip cells
         self._summary = _rich_label(
-            "v1.1 N5a — Bot Matrix heatmap.\n\n"
-            "Rows are the 19 AI / search bots audited via robots.txt. The Verdict column is painted "
-            "green / yellow / red. Click any row for the per-bot reasoning."
+            "<b>Bot Matrix</b> — 19 AI / search bots × 5 access signals. "
+            "Cells render as coloured chips: green = good, yellow = warning, red = critical, grey = "
+            "not measured / not applicable. Site-wide columns (Meta robots / llms.txt / SSR parity) "
+            "show the same chip across every row by design. Double-click any row for the full "
+            "per-bot reasoning."
         )
         self._layout.insertWidget(0, self._summary)
         self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.view.doubleClicked.connect(self._on_row_activated)
-        self._rows: list[list[str]] = []
+        self.view.setItemDelegate(_ChipDelegate(self.view))
+        self._model: BotMatrixModel | None = None
 
-    def update(self, rows: list[list[str]]) -> None:
-        self._rows = [list(row) for row in rows]
-        self.set_model(BotMatrixModel(_AI_CRAWL_HEADERS, self._rows, _AI_CRAWL_HEADER_TOOLTIPS))
-        verdicts = [str(row[5]).strip() for row in self._rows if len(row) > 5]
+    def update(self, data: object) -> None:
+        """Accept the full crawl payload dict OR just the ``ai_crawl`` rows.
+
+        Bridging both shapes keeps the test suite (which feeds the
+        raw list) and the production wiring (which now passes the
+        full payload to pick up the discovery + render keys) on
+        the same code path.
+        """
+        ai_crawl_rows, discovery, render = self._unpack(data)
+        bots = build_bot_rows(ai_crawl_rows, discovery, render)
+        model = BotMatrixModel(bots)
+        self._model = model
+        self.set_model(model)
+        verdicts = [bot.detail[5].strip() for bot in bots]
         counts = {label: verdicts.count(label) for label in ("Allowed", "Limited", "Blocked")}
         self._summary.setText(
             "<b>Bot Matrix</b> &nbsp; "
             f"Allowed {counts['Allowed']} &nbsp; "
             f"Limited {counts['Limited']} &nbsp; "
-            f"Blocked {counts['Blocked']} &nbsp; "
-            "<i>(double-click a row for per-bot reasoning)</i>"
+            f"Blocked {counts['Blocked']} &nbsp;&nbsp; "
+            "<i>(double-click a row for the full 7-column bot detail)</i>"
         )
         _set_header_modes(
             _header(self.view),
             (0, QtWidgets.QHeaderView.ResizeToContents),
-            (1, QtWidgets.QHeaderView.ResizeToContents),
-            (2, QtWidgets.QHeaderView.ResizeToContents),
-            (3, QtWidgets.QHeaderView.ResizeToContents),
-            (4, QtWidgets.QHeaderView.ResizeToContents),
-            (5, QtWidgets.QHeaderView.ResizeToContents),
-            (6, QtWidgets.QHeaderView.Stretch),
+            (1, QtWidgets.QHeaderView.Fixed),
+            (2, QtWidgets.QHeaderView.Fixed),
+            (3, QtWidgets.QHeaderView.Fixed),
+            (4, QtWidgets.QHeaderView.Fixed),
+            (5, QtWidgets.QHeaderView.Stretch),
         )
+        header = _header(self.view)
+        for col in (1, 2, 3, 4):
+            header.resizeSection(col, 90)
+
+    @staticmethod
+    def _unpack(data: object) -> tuple[list[list[str]], dict | None, dict | None]:
+        if isinstance(data, list):
+            return [list(row) for row in data if isinstance(row, (list, tuple))], None, None
+        if isinstance(data, dict):
+            raw_rows = data.get("ai_crawl", []) or []
+            rows = [list(row) for row in raw_rows if isinstance(row, (list, tuple))]
+            discovery = data.get("discovery") if isinstance(data.get("discovery"), dict) else None
+            render = data.get("render") if isinstance(data.get("render"), dict) else None
+            return rows, discovery, render
+        return [], None, None
 
     def _on_row_activated(self, index: QtCore.QModelIndex) -> None:
-        row_idx = index.row()
-        if row_idx < 0 or row_idx >= len(self._rows):
+        if self._model is None:
             return
-        row = self._rows[row_idx]
+        detail = self._model.bot_detail(index.row())
+        if detail is None:
+            return
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle(f"{row[0]} — bot details")
+        dialog.setWindowTitle(f"{detail[0]} — bot details")
         layout = QtWidgets.QFormLayout(dialog)
         for header_idx, header in enumerate(_AI_CRAWL_HEADERS):
-            value = row[header_idx] if header_idx < len(row) else ""
-            layout.addRow(f"<b>{header}</b>", QtWidgets.QLabel(str(value)))
+            value = detail[header_idx] if header_idx < len(detail) else ""
+            label = QtWidgets.QLabel(str(value))
+            label.setWordWrap(True)
+            layout.addRow(f"<b>{header}</b>", label)
         close = QtWidgets.QPushButton("Close")
         close.clicked.connect(dialog.accept)
         layout.addRow(close)
         dialog.exec()
+
+
+class _ChipDelegate(QtWidgets.QStyledItemDelegate):
+    """Paints a centred 14×14 rounded-rect chip using the cell's
+    BackgroundRole brush. Column 0 falls through to the default text
+    delegate so the bot name renders normally."""
+
+    _CHIP_SIZE = 14
+    _CHIP_RADIUS = 3
+
+    def paint(  # noqa: D401
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex,
+    ) -> None:
+        if index.column() == 0:
+            super().paint(painter, option, index)
+            return
+        # Manual fill — but defer selection highlight to the base style first.
+        widget = option.widget
+        style = widget.style() if widget is not None else QtWidgets.QApplication.style()
+        # Draw the cell background (handles selection highlight, alternate row, etc.).
+        painter.save()
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""  # we render the chip; suppress any DisplayRole text
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, widget)
+        brush_data = index.data(QtCore.Qt.ItemDataRole.BackgroundRole)
+        if isinstance(brush_data, QtGui.QBrush):
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            painter.setBrush(brush_data)
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            rect = option.rect
+            cx = rect.center().x()
+            cy = rect.center().y()
+            chip = QtCore.QRectF(
+                cx - self._CHIP_SIZE / 2,
+                cy - self._CHIP_SIZE / 2,
+                self._CHIP_SIZE,
+                self._CHIP_SIZE,
+            )
+            painter.drawRoundedRect(chip, self._CHIP_RADIUS, self._CHIP_RADIUS)
+        painter.restore()
+
+    def sizeHint(  # noqa: N802, D401
+        self,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex,
+    ) -> QtCore.QSize:
+        base = super().sizeHint(option, index)
+        if index.column() == 0:
+            return base
+        return QtCore.QSize(max(base.width(), 90), max(base.height(), 24))
 
 
 _GEO_SCORE_TOOLTIP = (
@@ -513,6 +576,19 @@ class AiVisibilityTab(TableTab):
         super().__init__(sorting=True)
         self._geo_score = _rich_label(_GEO_SCORE_TOOLTIP)
         self._summary = _rich_label(ai_visibility_summary_tooltip())
+        # v1.1 N5a-fix — "GEO checks enabled" badge row at the top
+        # surfaces which v1.1 measurement groups are actually
+        # producing data vs which are gated off (env var / Settings).
+        # Refreshed on every update() call with the new payload's
+        # check list.
+        from .geo_checks_badge import build_badges, render_label, render_tooltip
+
+        self._badge_build = build_badges
+        self._badge_render_label = render_label
+        self._badge_render_tooltip = render_tooltip
+        initial_badges = build_badges([])
+        self._badges_label = _rich_label(render_tooltip(initial_badges))
+        self._badges_label.setText(render_label(initial_badges))
         # v1.1 N5c — pure-Qt sparkline (no QChart dep). Sits on the
         # same row as the GEO Score label and updates whenever the
         # caller pushes a new history list via set_score_history.
@@ -534,8 +610,9 @@ class AiVisibilityTab(TableTab):
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
         self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         _header(self.view).sectionResized.connect(self._schedule_row_resize)
-        self._layout.insertWidget(0, header_row)
-        self._layout.insertWidget(1, self._summary)
+        self._layout.insertWidget(0, self._badges_label)
+        self._layout.insertWidget(1, header_row)
+        self._layout.insertWidget(2, self._summary)
 
     def set_score_history(self, scores: list[int]) -> None:
         """Push a new GEO Score history series into the sparkline."""
@@ -567,6 +644,11 @@ class AiVisibilityTab(TableTab):
         payload = data if isinstance(data, AiVisibilityPayload) else AiVisibilityPayload.from_raw(data)
         summary = payload.summary
         verdict = summary.verdict or "-"
+        # Refresh the GEO checks enablement badges from the current payload.
+        check_dicts = [{"key": check.key or "", "status": check.status or "info"} for check in payload.checks]
+        badges = self._badge_build(check_dicts)
+        self._badges_label.setText(self._badge_render_label(badges))
+        self._badges_label.setToolTip(self._badge_render_tooltip(badges))
         self._geo_score.setText(f"<b>GEO Score:</b> {summary.score} / 100")
         self._summary.setText(
             f"<b>Verdict:</b> {verdict} &nbsp; "
@@ -1328,7 +1410,7 @@ __all__ = [
     "ContentQualityTab",
     "RobotsTab",
     "HreflangTab",
-    "AiTab",
+    "BotMatrixTab",
     "AiVisibilityTab",
     "KeywordsTab",
     "PerformanceTab",

@@ -1,6 +1,6 @@
 from .ai_visibility import AiVisibilityModel
 from .base import GenericModel, _BaseModel
-from .bot_matrix import BotMatrixModel
+from .bot_matrix import BotMatrixModel, build_bot_rows
 from .canonical import CanonicalModel
 from .content_quality import ContentQualityModel
 from .headers import HeaderModel
@@ -26,6 +26,7 @@ __all__ = [
     "ContentQualityModel",
     "AiVisibilityModel",
     "BotMatrixModel",
+    "build_bot_rows",
     "RedirectModel",
     "IndexabilityModel",
     "HreflangModel",

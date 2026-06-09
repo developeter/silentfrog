@@ -19,7 +19,6 @@ from .crawl_types import CrawlPayload
 from .exporters import export_page_analysis
 from .settings_dialog import CrawlSettingsDialog
 from .tabs import (
-    AiTab,
     AiVisibilityTab,
     BotMatrixTab,
     CanonicalTab,
@@ -294,11 +293,11 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.tabs.addTab(self.content_quality_tab, "Content quality")
         self.keywords_tab = KeywordsTab()
         self.tabs.addTab(self.keywords_tab, "Keywords")
-        self.ai_tab = AiTab()
+        # v1.1 N5a-fix: AI crawl tab dropped; Bot Matrix is the sole
+        # per-bot view (heatmap + drill-down preserves all 7 columns).
         self.bot_matrix_tab = BotMatrixTab()
         self.ai_visibility_tab = AiVisibilityTab()
         self.performance_tab = PerformanceTab()
-        self.tabs.addTab(self.ai_tab, "AI crawl")
         self.tabs.addTab(self.bot_matrix_tab, "Bot Matrix")
         self.tabs.addTab(self.ai_visibility_tab, "AI Visibility")
         self.tabs.addTab(self.performance_tab, "Performance")
@@ -539,7 +538,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.social_tab.update({})
         self.content_quality_tab.update({})
         self.keywords_tab.update([])
-        self.ai_tab.update([])
         self.bot_matrix_tab.update([])
         self.ai_visibility_tab.update({})
         self.performance_tab.update({})
@@ -639,8 +637,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.hreflang_tab.update, data.get("hreflang", [])),
             (self.content_quality_tab.update, data.get("content_quality", {})),
             (self.keywords_tab.update, data.get("keywords", [])),
-            (self.ai_tab.update, data.get("ai_crawl", [])),
-            (self.bot_matrix_tab.update, data.get("ai_crawl", [])),
+            (self.bot_matrix_tab.update, data),
             (self.ai_visibility_tab.update, data.get("ai_visibility", {})),
             (self.performance_tab.update, data.get("performance", {})),
             (self.schema_tab.update, data.get("schema", {})),
