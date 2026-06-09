@@ -513,13 +513,33 @@ class AiVisibilityTab(TableTab):
         super().__init__(sorting=True)
         self._geo_score = _rich_label(_GEO_SCORE_TOOLTIP)
         self._summary = _rich_label(ai_visibility_summary_tooltip())
+        # v1.1 N5c — pure-Qt sparkline (no QChart dep). Sits on the
+        # same row as the GEO Score label and updates whenever the
+        # caller pushes a new history list via set_score_history.
+        from .sparkline import Sparkline as _Sparkline  # local import keeps tabs.py optional-free
+
+        self._score_history = _Sparkline()
+        self._score_history.setToolTip(
+            "GEO Score history. The line auto-scales to the range of the recorded runs; "
+            "feed it via AiVisibilityTab.set_score_history([int, ...])."
+        )
+        header_row = QtWidgets.QWidget()
+        header_layout = QtWidgets.QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.addWidget(self._geo_score)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self._score_history)
         self._row_resize_pending = False
         self.view.setWordWrap(True)
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideNone)
         self.view.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         _header(self.view).sectionResized.connect(self._schedule_row_resize)
-        self._layout.insertWidget(0, self._geo_score)
+        self._layout.insertWidget(0, header_row)
         self._layout.insertWidget(1, self._summary)
+
+    def set_score_history(self, scores: list[int]) -> None:
+        """Push a new GEO Score history series into the sparkline."""
+        self._score_history.set_values(scores)
 
     def _schedule_row_resize(self, *_args: object) -> None:
         if self._row_resize_pending:
