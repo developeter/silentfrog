@@ -632,6 +632,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         return ""
 
     def _update_content_tabs(self, data: dict[str, Any], span: tuple[int, int]) -> None:
+        self._record_geo_score_history(data)
         list_tabs = [
             (self.images_tab.update, data.get("images", [])),
             (self.links_tab.update, data.get("links", [])),
@@ -664,6 +665,29 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.robots_tab.update(data.get("meta_robots", ""), data.get("robots", {}))
         self.serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
         self._set_progress(end)
+
+    def _record_geo_score_history(self, data: dict[str, Any]) -> None:
+        """v1.1 N5d — capture this audit's GEO Score and feed the sparkline.
+
+        Uses ``score_history`` (a tiny per-URL JSON store) so the
+        sparkline shows real history across sessions, not just the
+        current run.
+        """
+        url = self.url_edit.currentText().strip()
+        ai_visibility = data.get("ai_visibility", {}) if isinstance(data, dict) else {}
+        summary = ai_visibility.get("summary", {}) if isinstance(ai_visibility, dict) else {}
+        score_raw = summary.get("score", 0) if isinstance(summary, dict) else 0
+        try:
+            score = int(score_raw)
+        except (TypeError, ValueError):
+            score = 0
+        from . import score_history
+
+        if url and score > 0:
+            score_history.record(url, score)
+        # Always push whatever's known so the sparkline updates even when
+        # we couldn't record (e.g. empty URL on a re-run from history).
+        self.ai_visibility_tab.set_score_history(score_history.recent(url, limit=20))
 
     def _finalise_population(self) -> None:
         self._stop_progress_drift()
