@@ -44,6 +44,12 @@ dependencies = [
 # briefly flashes a `cmd` window on every double-click.
 silentfrog = "silentfrog.gui:main"
 
+# v1.1 N4 — headless CLI for the sitemap-aggregate + watch-mode
+# capabilities. Console-script (not gui-script) so it talks to a
+# terminal cleanly.
+[project.scripts]
+silentfrog-cli = "silentfrog.cli:main"
+
 [project.optional-dependencies]
 pyqt5-backend = [
     "pyqt5 (==5.15.11)",
