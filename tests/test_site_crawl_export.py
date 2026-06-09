@@ -218,6 +218,7 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
             "Meta issues",
             "Structured data",
             "Images",
+            "GEO Aggregate",
             "GEO Score",
             "AI Visibility",
             "Errors",

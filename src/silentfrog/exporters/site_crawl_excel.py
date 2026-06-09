@@ -55,6 +55,13 @@ def _write_summary_sheets(
     _write_rows(workbook, "Images", ["URL", "Images", "Image issues"], _image_rows(results), formats)
     _write_rows(
         workbook,
+        "GEO Aggregate",
+        ["Metric", "Value"],
+        _geo_aggregate_rows(results),
+        formats,
+    )
+    _write_rows(
+        workbook,
         "GEO Score",
         ["URL", "Score", "Verdict", "Good", "Warning", "Critical"],
         _geo_score_rows(results),
@@ -235,6 +242,53 @@ def _ai_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
             ]
         )
     return rows or [["-", "-", 0, 0, 0]]
+
+
+def _geo_aggregate_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
+    """v1.1 N4b — percentile summary across every audited URL in the crawl.
+
+    Mirrors the SitemapGeoReport shape so a Site Crawl Excel and a
+    sitemap-aggregate CLI output line up on the same metric vocabulary.
+    """
+    import statistics
+
+    scores: list[int] = []
+    per_area_warnings: dict[str, list[int]] = {}
+    for result in results:
+        if not result.payload:
+            continue
+        scores.append(result.payload.ai_visibility.summary.score)
+        per_area_counts: dict[str, int] = {}
+        for check in result.payload.ai_visibility.checks:
+            if check.status in {"warning", "critical"}:
+                per_area_counts[check.area] = per_area_counts.get(check.area, 0) + 1
+        for area, count in per_area_counts.items():
+            per_area_warnings.setdefault(area, []).append(count)
+    if not scores:
+        return [
+            ["URLs audited", 0],
+            ["No GEO Score data available", "-"],
+        ]
+    sorted_scores = sorted(scores)
+
+    def _p(q: float) -> int:
+        idx = max(0, min(len(sorted_scores) - 1, int(round(q * (len(sorted_scores) - 1)))))
+        return sorted_scores[idx]
+
+    rows: list[list[object]] = [
+        ["URLs audited", len(scores)],
+        ["Min score", min(scores)],
+        ["P50 (median)", round(statistics.median(scores), 1)],
+        ["P75", _p(0.75)],
+        ["P95", _p(0.95)],
+        ["Max score", max(scores)],
+        ["", ""],
+        ["Mean warning+critical per area", "(higher = more rework)"],
+    ]
+    for area in sorted(per_area_warnings):
+        counts = per_area_warnings[area]
+        rows.append([area, round(sum(counts) / len(counts), 2)])
+    return rows
 
 
 def _geo_score_rows(results: Iterable[SiteCrawlResult]) -> list[list[object]]:
