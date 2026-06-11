@@ -407,12 +407,19 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             "Diff this crawl against the previous one in this session: new / removed URLs, "
             "status changes, and GEO Score regressions / improvements."
         )
+        self.btn_graph = QtWidgets.QPushButton("Link graph")
+        self.btn_graph.setToolTip(
+            "Visualise the crawl tree: nodes coloured by GEO Score, edges from the page that "
+            "first linked to each URL. Orphan pages (reached via sitemap, not internal links) "
+            "are listed."
+        )
         self.btn_history = QtWidgets.QPushButton("View past scans")
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
         row.addWidget(self.btn_export)
         row.addWidget(self.btn_export_ai)
         row.addWidget(self.btn_diff)
+        row.addWidget(self.btn_graph)
         row.addWidget(self.btn_history)
         row.addWidget(self.btn_new_crawl)
         row.addStretch()
@@ -433,6 +440,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.clicked.connect(self._export_excel)
         self.btn_export_ai.clicked.connect(self._export_ai)
         self.btn_diff.clicked.connect(self._show_diff)
+        self.btn_graph.clicked.connect(self._show_graph)
         self.btn_new_crawl.clicked.connect(self._show_setup)
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
@@ -452,6 +460,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
         self.btn_diff.setEnabled(False)
+        self.btn_graph.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
         self.recap_widget.reset("Start a crawl to build the site action recap.")
         self.lbl_history.setText("History: no completed crawl yet.")
@@ -585,6 +594,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(bool(report.results))
         self.btn_export_ai.setEnabled(bool(report.results))
         self.btn_diff.setEnabled(bool(report.results) and self._previous_report is not None)
+        self.btn_graph.setEnabled(bool(report.results) and bool(self._crawl_store_path))
         self._update_recap_from_report(report)
         self._update_history_from_report(report)
         summary = self._report_summary(report)
@@ -609,6 +619,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False if running else has_results)
         self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
+        self.btn_graph.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
         self.btn_new_crawl.setEnabled(not running)
         if running:
             self._eta_timer.start()
@@ -707,6 +718,48 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         )
         self._detail_windows.append(dialog)
         dialog.show()
+
+    def _show_graph(self) -> None:
+        from .link_graph import GraphInput, build_link_graph
+        from .link_graph.graph_view import LinkGraphView
+
+        rows = self._graph_inputs_from_store()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "No graph data", "No crawl data to graph yet.")
+            return
+        root = self._latest_report.results[0].url if self._latest_report and self._latest_report.results else ""
+        graph = build_link_graph([GraphInput(*r) for r in rows], root_url=root)
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Link graph — crawl tree")
+        dialog.resize(900, 680)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        caption = QtWidgets.QLabel(
+            f"{graph.node_count} nodes"
+            + (" (sampled to top centrality)" if graph.sampled else "")
+            + f" · {len(graph.orphans)} orphan page(s)"
+        )
+        layout.addWidget(caption)
+        view = LinkGraphView()
+        view.set_graph(graph)
+        layout.addWidget(view)
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        self._detail_windows.append(dialog)
+        dialog.show()
+
+    def _graph_inputs_from_store(self) -> list[tuple[str, str, int]]:
+        if not self._crawl_store_path or not self._crawl_run_id:
+            return []
+        try:
+            store = CrawlStore(self._crawl_store_path)
+            try:
+                rows = store.iter_lightweight(self._crawl_run_id, offset=0, limit=1_000_000)
+            finally:
+                store.close()
+        except Exception:
+            return []
+        return [(r.url, r.discovered_from, r.geo_score) for r in rows]
 
     def _show_diff(self) -> None:
         if self._latest_report is None or self._previous_report is None:
