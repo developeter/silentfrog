@@ -16,7 +16,7 @@ from .audit_issues import AuditIssue, issues_for_payload
 from .audit_recap import AuditRecapWidget
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
-from .exporters import export_page_analysis
+from .exporters import export_page_analysis, export_page_for_llm, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
 from .tabs import (
     AiVisibilityTab,
@@ -311,6 +311,14 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._register_dimmed_button(self.btn_export)
         self.btn_export.clicked.connect(self._export_excel)
         controls.addWidget(self.btn_export)
+        self.btn_export_ai = QtWidgets.QPushButton("Export for AI analysis")
+        self.btn_export_ai.setEnabled(False)
+        self.btn_export_ai.setToolTip(
+            "Write a Markdown + JSON audit you can paste into a Claude chat for a prioritised fix list."
+        )
+        self._register_dimmed_button(self.btn_export_ai)
+        self.btn_export_ai.clicked.connect(self._export_ai)
+        controls.addWidget(self.btn_export_ai)
         self.btn_img_dl = QtWidgets.QPushButton("Analyze images")
         self.btn_img_dl.setEnabled(False)
         self._register_dimmed_button(self.btn_img_dl)
@@ -545,6 +553,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.serp_tab.update({}, {})
         self.recap_tab.reset()
         self.btn_export.setEnabled(False)
+        self.btn_export_ai.setEnabled(False)
         self.btn_img_dl.setEnabled(False)
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
@@ -604,6 +613,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._start_progress_drift(60)
         self.bar.setVisible(True)
         self.btn_export.setEnabled(False)
+        self.btn_export_ai.setEnabled(False)
 
     def _handle_image_update(self, data: dict[str, Any]) -> bool:
         update = data.get("img_update")
@@ -690,6 +700,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._stop_progress_drift()
         self._set_progress(100)
         self.btn_export.setEnabled(self._latest_payload is not None)
+        self.btn_export_ai.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
         self._update_recap_from_payload()
         self._reset_ui()
@@ -799,6 +810,28 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             )
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _export_ai(self) -> None:
+        if not self._latest_payload:
+            QtWidgets.QMessageBox.information(self, "No data", "Run an analysis before exporting.")
+            return
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export for AI analysis",
+            str(Path.home() / "silentfrog_audit_for_ai.md"),
+            "Markdown (*.md)",
+        )
+        if not file_path:
+            return
+        url = self.url_edit.currentText().strip()
+        export = export_page_for_llm(self._latest_payload, url, mode="compact")
+        written = write_llm_export(export, Path(file_path).with_suffix(""), fmt="both")
+        names = ", ".join(p.name for p in written)
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export completed",
+            f"Wrote {names}. Paste the .md into a Claude chat for a prioritised fix list.",
+        )
 
 
 if __name__ == "__main__":

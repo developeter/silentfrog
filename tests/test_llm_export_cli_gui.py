@@ -95,3 +95,22 @@ def test_site_crawl_ai_export_writes_files(qtbot, monkeypatch, tmp_path) -> None
     win._export_ai()
     assert (tmp_path / "crawl_ai.md").exists()
     assert (tmp_path / "crawl_ai.json").exists()
+
+
+def test_single_page_ai_export_writes_files(qtbot, monkeypatch, tmp_path) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = _payload("https://e.com/page", 60)
+    win.url_edit.setEditText("https://e.com/page")
+
+    monkeypatch.setattr(
+        "qtpy.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(tmp_path / "page_ai.md"), "Markdown (*.md)"),
+    )
+    monkeypatch.setattr("qtpy.QtWidgets.QMessageBox.information", lambda *a, **k: None)
+    win._export_ai()
+    assert (tmp_path / "page_ai.md").exists()
+    assert (tmp_path / "page_ai.json").exists()
+    assert "https://e.com/page" in (tmp_path / "page_ai.md").read_text(encoding="utf-8")
