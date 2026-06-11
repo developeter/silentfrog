@@ -4,7 +4,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree
@@ -26,6 +26,11 @@ from .site_crawl_types import (
 ProgressCallback = Callable[[dict[str, Any]], None]
 _MAX_SITEMAP_DEPTH = 3
 _COMMON_SITEMAP_PATHS = ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml")
+# v2.0 V3.2: when streaming to a store, keep full payloads in memory only
+# for the first N results (rich history + instant detail on small crawls).
+# Beyond N the payload lives on disk and the in-memory result carries
+# lightweight fields only — bounding RAM at ~1M URLs.
+_PAYLOAD_MEMORY_LIMIT = 2000
 
 
 @dataclass(frozen=True)
@@ -117,7 +122,7 @@ async def crawl_site(
     results = await _drive_frontier(ctx)
     if store is not None:
         store.finish_run(run_id)
-    return SiteCrawlReport.from_results(results, discovered_count=frontier.seen_count)
+    return SiteCrawlReport.from_results(results, discovered_count=frontier.seen_count, run_id=run_id)
 
 
 def _build_frontier(config: SiteCrawlConfig) -> CrawlFrontier:
@@ -194,12 +199,26 @@ async def _process_url(
 ) -> None:
     await ctx.politeness.wait(url)
     result = await _crawl_one(url, ctx.config, ctx.timeout, ctx.on_event, ctx.cancel_event)
-    results.append(result)
     if ctx.store is not None:
         ctx.store.save_audit(ctx.run_id, _to_stored_audit(result, depth))
-    _emit(ctx.on_event, "row", result=result, completed=len(results))
+    # Follow links from the FULL payload before any stripping.
     if ctx.follows_links and result.payload is not None:
         await _enqueue_links(ctx, result.payload, depth + 1, queue)
+    kept = _bounded_result(ctx, result, len(results))
+    results.append(kept)
+    _emit(ctx.on_event, "row", result=kept, completed=len(results))
+
+
+def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, current_count: int) -> SiteCrawlResult:
+    """Keep the full payload in memory only below the threshold (and only
+    when streaming to a store that holds the payload durably). Beyond it,
+    strip the payload so the in-memory list + live table model stay flat
+    at ~1M URLs; the GUI reloads it from the store on demand."""
+    if ctx.store is None or current_count < _PAYLOAD_MEMORY_LIMIT:
+        return result
+    if result.payload is None:
+        return result
+    return replace(result, payload=None)
 
 
 async def _enqueue_links(

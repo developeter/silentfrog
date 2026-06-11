@@ -18,6 +18,7 @@ Public surface (all typed):
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import statistics
 import uuid
@@ -31,6 +32,23 @@ from typing import Any
 from .crawl_store_schema import apply_schema
 
 _BATCH_SIZE = 200
+
+
+def crawls_dir() -> Path:
+    override = os.environ.get("SILENTFROG_DATA_DIR", "").strip()
+    if override:
+        base = Path(override)
+    elif os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Silentfrog"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "silentfrog"
+    return base / "crawls"
+
+
+def new_crawl_db_path() -> Path:
+    directory = crawls_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"crawl_{uuid.uuid4().hex}.db"
 
 
 @dataclass(frozen=True)
@@ -228,4 +246,6 @@ __all__ = [
     "LightweightAudit",
     "RunSummary",
     "StoredAudit",
+    "crawls_dir",
+    "new_crawl_db_path",
 ]

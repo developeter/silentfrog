@@ -290,9 +290,18 @@ class SiteCrawlReport:
     skipped_count: int
     failed_count: int
     warning: str = ""
+    # v2.0 V3.2: the store run this crawl streamed to, so the GUI can
+    # load full payloads on demand for results whose in-memory payload
+    # was stripped to bound RAM at ~1M URLs.
+    run_id: str = ""
 
     @classmethod
-    def from_results(cls, results: Iterable[SiteCrawlResult], discovered_count: int) -> SiteCrawlReport:
+    def from_results(
+        cls,
+        results: Iterable[SiteCrawlResult],
+        discovered_count: int,
+        run_id: str = "",
+    ) -> SiteCrawlReport:
         rows = tuple(results)
         failed = sum(1 for result in rows if result.status == "error")
         skipped = sum(1 for result in rows if result.status == "skipped")
@@ -304,6 +313,7 @@ class SiteCrawlReport:
             skipped_count=skipped,
             failed_count=failed,
             warning=warning,
+            run_id=run_id,
         )
 
 

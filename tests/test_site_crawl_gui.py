@@ -127,7 +127,7 @@ def test_start_crawl_button_populates_rows(monkeypatch, qtbot, tmp_path: Path) -
     result = SiteCrawlResult.from_payload("https://example.com/page", payload)
     report = SiteCrawlReport.from_results([result], discovered_count=1)
 
-    def fake_run_site_crawl(config, timeout, on_progress, on_success, on_error):
+    def fake_run_site_crawl(config, timeout, on_progress, on_success, on_error, store_path=None):
         on_progress({"event": "discovered", "total": 1})
         on_progress({"event": "row", "result": result, "completed": 1})
         on_success(report)

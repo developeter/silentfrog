@@ -14,6 +14,7 @@ from .audit_recap import AuditRecapWidget
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
+from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
 from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
@@ -200,6 +201,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
+        # v2.0 V3.2: streaming store for the live crawl (payloads on disk,
+        # loaded on demand for the detail dialog so RAM stays flat at ~1M).
+        self._crawl_store_path: str = ""
+        self._crawl_run_id: str = ""
         self._discovered_total = 0
         self._completed_count = 0
         self._crawl_started_at: float | None = None
@@ -473,12 +478,16 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.progress.setValue(0)
         self.progress.setFormat("Discovering URLs...")
         self._set_running(True)
+        self._discard_previous_store()
+        self._crawl_store_path = str(new_crawl_db_path())
+        self._crawl_run_id = ""
         _, self._active_cancel = run_site_crawl(
             config,
             timeout=15,
             on_progress=lambda event: self.progressSig.emit(event),
             on_success=lambda report: self.reportSig.emit(report),
             on_error=lambda error: self.errorSig.emit(error),
+            store_path=self._crawl_store_path,
         )
 
     def _config_from_ui(self) -> SiteCrawlConfig:
@@ -555,6 +564,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _handle_report(self, report: SiteCrawlReport) -> None:
         self._latest_report = report
+        self._crawl_run_id = report.run_id
         self._discovered_total = report.discovered_count
         self._completed_count = report.crawled_count + report.skipped_count
         self.model.set_results(list(report.results))
@@ -668,17 +678,48 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _open_result_detail(self, index: QtCore.QModelIndex) -> None:
         source_index = self.proxy.mapToSource(index)
         result = self.model.result_at(source_index.row())
-        if result is None or result.payload is None:
+        if result is None:
+            return
+        payload = result.payload or self._load_payload_from_store(result.url)
+        if payload is None:
             return
         base_url = result.final_url or result.url
         dialog = SiteCrawlDetailDialog(
-            result.payload,
+            payload,
             base_url,
-            on_payload_updated=lambda payload, row=source_index.row(): self.model.update_payload(row, payload),
+            on_payload_updated=lambda updated, row=source_index.row(): self.model.update_payload(row, updated),
             parent=self,
         )
         self._detail_windows.append(dialog)
         dialog.show()
+
+    def _discard_previous_store(self) -> None:
+        """v2.0 V3.2 — drop the prior crawl's on-disk store so the data dir
+        doesn't accumulate one .db per crawl. Best-effort; ignores WAL/SHM
+        siblings and any in-use file."""
+        previous = self._crawl_store_path
+        if not previous:
+            return
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                Path(previous + suffix).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _load_payload_from_store(self, url: str) -> CrawlPayload | None:
+        """v2.0 V3.2 — reload a stripped payload from the crawl store on
+        demand (opens a read connection on the GUI thread)."""
+        if not self._crawl_store_path or not self._crawl_run_id:
+            return None
+        try:
+            store = CrawlStore(self._crawl_store_path)
+            try:
+                raw = store.load_payload(self._crawl_run_id, url)
+            finally:
+                store.close()
+        except Exception:
+            return None
+        return CrawlPayload.from_raw(raw) if raw else None
 
     def _export_excel(self) -> None:
         if not self._latest_report:
@@ -718,6 +759,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self._active_cancel:
             self._active_cancel.set()
+        self._discard_previous_store()
         super().closeEvent(event)
 
 

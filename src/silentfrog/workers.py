@@ -57,10 +57,15 @@ def run_site_crawl(
     on_progress: Callable[[dict[str, Any]], None],
     on_success: Callable[[SiteCrawlReport], None],
     on_error: Callable[[str], None],
+    store_path: str | None = None,
 ) -> tuple[threading.Thread, threading.Event]:
     cancel_event = threading.Event()
 
     def _target() -> None:
+        # The SQLite store must be created AND used on this worker thread
+        # (sqlite3 connections are thread-bound). The GUI later opens its
+        # own read connection to the same file to load payloads on demand.
+        store = _open_store(store_path)
         try:
             report = asyncio.run(
                 crawl_site(
@@ -68,12 +73,27 @@ def run_site_crawl(
                     timeout=timeout,
                     on_event=on_progress,
                     cancel_event=cancel_event,
+                    store=store,
                 )
             )
             on_success(report)
         except Exception as exc:  # noqa: BLE001
             on_error(str(exc))
+        finally:
+            if store is not None:
+                store.close()
 
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()
     return thread, cancel_event
+
+
+def _open_store(store_path: str | None) -> Any:
+    if not store_path:
+        return None
+    from .crawl_store import CrawlStore
+
+    try:
+        return CrawlStore(store_path)
+    except Exception:
+        return None
