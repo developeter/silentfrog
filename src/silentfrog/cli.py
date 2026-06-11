@@ -73,6 +73,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stop after N cycles (default: run forever).",
     )
 
+    export = subparsers.add_parser(
+        "export",
+        help="Audit a URL and write an LLM-friendly Markdown + JSON bundle for Claude.",
+    )
+    export.add_argument("url", help="The page URL to audit and export.")
+    export.add_argument(
+        "--format",
+        dest="fmt",
+        choices=["llm"],
+        default="llm",
+        help="Export format (only 'llm' for now).",
+    )
+    export.add_argument(
+        "--mode",
+        choices=["compact", "full"],
+        default="compact",
+        help="compact = warnings/criticals only (default); full = every check.",
+    )
+    export.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output path stem (writes .md and .json). Default: ./silentfrog_audit.",
+    )
+
     return parser
 
 
@@ -119,9 +144,28 @@ async def _watch_cmd(
     return 0
 
 
+async def _export_cmd(
+    args: argparse.Namespace,
+    analyser: Callable[[str], Any] | None = None,
+) -> int:
+    from .exporters import export_page_for_llm, write_llm_export
+    from .seo_crawler import analyse as default_analyser
+
+    analyser = analyser or default_analyser
+    payload = await analyser(args.url)
+    export = export_page_for_llm(payload, args.url, mode=args.mode)
+    out = args.out or Path("silentfrog_audit")
+    written = write_llm_export(export, out, fmt="both")
+    for path in written:
+        print(f"[export] wrote {path}")
+    print("[export] paste the .md into a Claude chat for a prioritised fix list")
+    return 0
+
+
 _DISPATCH: dict[str, Callable[..., Any]] = {
     "aggregate": _aggregate_cmd,
     "watch": _watch_cmd,
+    "export": _export_cmd,
 }
 
 

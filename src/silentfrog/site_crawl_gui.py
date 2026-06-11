@@ -15,7 +15,7 @@ from .crawl_history import CrawlHistoryStore, format_history_status, save_report
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
-from .exporters import export_site_crawl_report
+from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
 from .site_crawl_history_gui import CrawlHistoryDialog
 from .site_crawl_types import (
@@ -388,10 +388,16 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_export = QtWidgets.QPushButton("Export Excel")
+        self.btn_export_ai = QtWidgets.QPushButton("Export for AI analysis")
+        self.btn_export_ai.setToolTip(
+            "Write a Markdown + JSON bundle you can paste into a Claude chat for a "
+            "prioritised fix list. Compact by default (worst pages + recurring issues)."
+        )
         self.btn_history = QtWidgets.QPushButton("View past scans")
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
         row.addWidget(self.btn_export)
+        row.addWidget(self.btn_export_ai)
         row.addWidget(self.btn_history)
         row.addWidget(self.btn_new_crawl)
         row.addStretch()
@@ -410,6 +416,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_start.clicked.connect(self._start_crawl)
         self.btn_stop.clicked.connect(self._stop_crawl)
         self.btn_export.clicked.connect(self._export_excel)
+        self.btn_export_ai.clicked.connect(self._export_ai)
         self.btn_new_crawl.clicked.connect(self._show_setup)
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
@@ -427,6 +434,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.setEnabled(False)
         self.btn_stop.setVisible(False)
         self.btn_export.setEnabled(False)
+        self.btn_export_ai.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
         self.recap_widget.reset("Start a crawl to build the site action recap.")
         self.lbl_history.setText("History: no completed crawl yet.")
@@ -552,6 +560,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.model.set_results(list(report.results))
         self._set_running(False)
         self.btn_export.setEnabled(bool(report.results))
+        self.btn_export_ai.setEnabled(bool(report.results))
         self._update_recap_from_report(report)
         self._update_history_from_report(report)
         summary = self._report_summary(report)
@@ -572,7 +581,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_settings.setEnabled(not running)
         self.btn_stop.setVisible(running)
         self.btn_stop.setEnabled(running)
-        self.btn_export.setEnabled(False if running else bool(self._latest_report and self._latest_report.results))
+        has_results = bool(self._latest_report and self._latest_report.results)
+        self.btn_export.setEnabled(False if running else has_results)
+        self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_new_crawl.setEnabled(not running)
         if running:
             self._eta_timer.start()
@@ -683,6 +694,26 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         target = Path(file_path if file_path.lower().endswith(".xlsx") else f"{file_path}.xlsx")
         export_site_crawl_report(self._latest_report, target)
         QtWidgets.QMessageBox.information(self, "Export completed", "Site crawl report exported successfully.")
+
+    def _export_ai(self) -> None:
+        if not self._latest_report or not self._latest_report.results:
+            return
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export for AI analysis",
+            str(Path.home() / "silentfrog_audit_for_ai.md"),
+            "Markdown (*.md)",
+        )
+        if not file_path:
+            return
+        export = export_crawl_for_llm(list(self._latest_report.results))
+        written = write_llm_export(export, Path(file_path).with_suffix(""), fmt="both")
+        names = ", ".join(p.name for p in written)
+        QtWidgets.QMessageBox.information(
+            self,
+            "Export completed",
+            f"Wrote {names}. Paste the .md into a Claude chat for a prioritised fix list.",
+        )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self._active_cancel:
