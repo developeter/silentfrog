@@ -21,6 +21,8 @@ from .crawl_types import (
 )
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
+from .integrations.google.checks import build_real_performance_checks
+from .integrations.google.types import Ga4Metrics, GscMetrics
 from .perf_crux import CruxData
 from .perf_vitals import WebVitals, build_performance_checks
 from .render_diff import RenderDiff, build_render_diff_check
@@ -35,6 +37,9 @@ AI_VISIBILITY_AREAS = (
     "Entity clarity",
     "E-E-A-T",
     "Performance",
+    # v2.0 V7 — only populated when Google Search Console / GA4 are connected.
+    "Real performance",
+    "Engagement",
 )
 
 _STATUS_ALIASES = {
@@ -345,6 +350,35 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Perplexity composes from Brave + Bing-shaped indexes; we don't have a public API to query "
         "Perplexity directly, so this signal is currently inferred from Brave presence. "
         "Not measured => info; likely indexed => good."
+    ),
+    # v2.0 V7 — Google Search Console + GA4 (optional `silentfrog[google]`).
+    "gsc_impressions_present": (
+        "Real Search Console impressions + clicks for this URL over the last 28 days.\n\n"
+        "Connect via Settings -> Connect Google Search Console (or set SILENTFROG_GOOGLE_ENABLE=1 + "
+        "SILENTFROG_GSC_SITE_URL). Not connected => info; never penalises the score."
+    ),
+    "gsc_ctr_above_average": (
+        "Click-through rate from Search Console.\n\n"
+        "CTR at/above ~2% is a good signal; below average suggests the title/meta description "
+        "isn't earning the click despite impressions. Not connected => info."
+    ),
+    "gsc_position_in_top_10": (
+        "Average Search Console position for this URL.\n\n"
+        "Position <= 10 means page-one presence. Good when in the top 10; otherwise informational."
+    ),
+    "gsc_query_count": (
+        "The top queries Search Console attributes to this URL — useful for confirming the page "
+        "ranks for the topic you intended. Info-only."
+    ),
+    "ga4_engagement_above_median": (
+        "Average GA4 engagement time for this URL.\n\n"
+        "Higher engagement time indicates the content holds visitors. Connect via Settings -> "
+        "Connect Google Analytics 4 (or SILENTFROG_GA4_PROPERTY_ID). Not connected => info."
+    ),
+    "ga4_bounce_below_threshold": (
+        "GA4 bounce rate for this URL.\n\n"
+        "Bounce above ~70% is a warning — visitors leave without engaging, often an above-the-fold "
+        "relevance or intent-match problem. Below the threshold => good."
     ),
 }
 
@@ -721,6 +755,8 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     citation_advanced = AdvancedCitationPayload.from_raw(data.get("citation_advanced", {}))
     seo_basics = SeoBasicsPayload.from_raw(data.get("seo_basics", {}))
     ai_citations = AiCitationsPayload.from_raw(data.get("ai_citations", {}))
+    gsc = GscMetrics.from_dict(data.get("gsc", {}))
+    ga4 = Ga4Metrics.from_dict(data.get("ga4", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -749,6 +785,9 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     # the optional 8th area stays invisible on stock audits.
     if ai_citations.measured:
         checks.extend(build_ai_citations_checks(ai_citations))
+    # Real performance / Engagement (V7): only when GSC/GA4 connected.
+    if gsc.measured or ga4.measured:
+        checks.extend(build_real_performance_checks(gsc, ga4))
     return checks
 
 

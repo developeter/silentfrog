@@ -73,6 +73,16 @@ stealth = [
     "scrapling (>=0.4.9,<0.5)",
     "curl_cffi (>=0.15,<0.16)",
 ]
+# v2.0 V7 — Google Search Console + GA4 integration. System-browser
+# loopback OAuth (RFC 8252), tokens in the OS keychain. All google
+# imports are lazy; off by default (SILENTFROG_GOOGLE_ENABLE). Versions
+# pinned + release-age-verified (>=48h).
+google = [
+    "google-auth (>=2.53,<3)",
+    "google-auth-oauthlib (>=1.4,<2)",
+    "google-api-python-client (>=2.197,<3)",
+    "keyring (>=25.7,<26)",
+]
 
 [tool.poetry]
 packages = [{include = "silentfrog", from = "src"}]

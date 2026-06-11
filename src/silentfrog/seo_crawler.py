@@ -316,6 +316,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options)
     crux_payload = await _collect_crux(response.url)
     ai_citations_payload = await _collect_ai_citations(response.url)
+    google_metrics = await _collect_google_metrics(response.url)
     raw_payload = {
         "schema": structured_data,
         "performance": performance_metrics,
@@ -329,9 +330,24 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
         "ai_citations": ai_citations_payload,
+        **google_metrics,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+async def _collect_google_metrics(url: str) -> dict[str, Any]:
+    """v2.0 V7 — GSC + GA4 metrics, gated on SILENTFROG_GOOGLE_ENABLE +
+    a connected account. Returns {} (unmeasured) on a stock audit."""
+    from .integrations.google.connection import from_env
+
+    connection = from_env()
+    if connection is None:
+        return {}
+    try:
+        return await asyncio.to_thread(connection.metrics_for, url)
+    except Exception:  # noqa: BLE001 — integration failure degrades silently
+        return {}
 
 
 async def _collect_ai_citations(url: str) -> dict[str, Any]:
