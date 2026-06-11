@@ -412,16 +412,15 @@ async def test_gentle_mode_toggles_backoff_behavior(monkeypatch, aiohttp_server)
 
 @pytest.mark.asyncio
 async def test_fetch_analysis_response_raises_helpful_error_on_fetch_failure(monkeypatch):
-    class DummyResponse:
-        status = 0
-        body = ""
-        url = "https://example.com"
-        headers: dict[str, str] = {}
+    # v2.0 V1: the fetch now flows through the fetcher strategy
+    # (_strategy_fetch). A status-0 / empty-body result must still raise
+    # the helpful error.
+    from silentfrog.http_client import HttpResponse
 
-    async def fake_fetch_page(url, timeout, headers=None):
-        return DummyResponse()
+    async def fake_strategy_fetch(url, timeout, headers, crawl_options):
+        return HttpResponse(body="", status=0, url=url, headers={}, ttfb_ms=0.0, total_ms=0.0)
 
-    monkeypatch.setattr(crawler, "fetch_page", fake_fetch_page)
+    monkeypatch.setattr(crawler, "_strategy_fetch", fake_strategy_fetch)
 
     with pytest.raises(RuntimeError, match="Unable to fetch https://example.com"):
         await crawler._fetch_analysis_response(

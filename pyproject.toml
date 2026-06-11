@@ -63,6 +63,16 @@ pyqt5-backend = [
 geo-render = [
     "playwright (>=1.43,<2.0)",
 ]
+# v2.0 V1 — opt-in stealth fetcher. `scrapling.Fetcher` (curl_cffi TLS
+# impersonation) + `StealthyFetcher` (browser, solves Cloudflare
+# Turnstile) let Silentfrog audit sites behind modern WAFs. Off by
+# default; the fetcher strategy stays on the aiohttp base path until the
+# user enables stealth AND this extra is installed. Versions pinned +
+# release-age-verified (>=48h) per the supply-chain rule.
+stealth = [
+    "scrapling (>=0.4.9,<0.5)",
+    "curl_cffi (>=0.15,<0.16)",
+]
 
 [tool.poetry]
 packages = [{include = "silentfrog", from = "src"}]

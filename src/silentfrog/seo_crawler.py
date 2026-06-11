@@ -38,7 +38,8 @@ from .crawl_types import CrawlPayload
 from .crawler_utils import _hr_size
 from .discovery_files import fetch_discovery_files
 from .eeat_signals import extract_eeat_signals
-from .http_client import fetch_page
+from .fetchers import FetchOptions, FetchRequest, FetchStrategy
+from .http_client import HttpResponse
 from .keywords import _extract_keywords
 from .parsers_meta import (
     _ai_crawl_matrix,
@@ -96,7 +97,7 @@ async def _fetch_analysis_response(
         attempts = 2 if crawl_options.gentle_mode else 1
         resp: Any = None
         for attempt in range(attempts):
-            resp = await fetch_page(url, timeout, headers=headers)
+            resp = await _strategy_fetch(url, timeout, headers, crawl_options)
             should_retry = resp.status in _BACKOFF_STATUSES and attempt < attempts - 1
             if not should_retry:
                 break
@@ -105,6 +106,35 @@ async def _fetch_analysis_response(
         if resp.status == 0 and not resp.body:
             raise RuntimeError(_fetch_failure_message(url))
     return resp, robots_snapshot
+
+
+def _stealth_enabled(crawl_options: CrawlOptions) -> bool:
+    if crawl_options.use_stealth:
+        return True
+    return os.environ.get("SILENTFROG_STEALTH_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _strategy_fetch(
+    url: str,
+    timeout: int,
+    headers: dict[str, str],
+    crawl_options: CrawlOptions,
+) -> HttpResponse:
+    """Fetch via the v2.0 fetcher strategy and adapt back to HttpResponse.
+
+    With stealth off (default) this is exactly the aiohttp base path —
+    identical behaviour to the previous direct ``fetch_page`` call.
+    """
+    strategy = FetchStrategy(FetchOptions(use_stealth=_stealth_enabled(crawl_options)))
+    result = await strategy.fetch(FetchRequest(url=url, timeout=timeout, headers=headers))
+    return HttpResponse(
+        body=result.body,
+        status=result.status,
+        url=result.final_url,
+        headers=result.headers,
+        ttfb_ms=result.ttfb_ms,
+        total_ms=result.total_ms,
+    )
 
 
 def _extract_plain_text(soup: BeautifulSoup) -> str:

@@ -13,6 +13,11 @@ class CrawlOptions:
     user_agent: str
     extra_headers: dict[str, str]
     ssr_parity_check: bool = False
+    # v2.0 V1: opt-in stealth fetcher (Scrapling TLS + browser escalation
+    # past WAF blocks). Off by default — needs the `silentfrog[stealth]`
+    # extra installed to actually escalate; otherwise the strategy stays
+    # on the aiohttp base path.
+    use_stealth: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -23,6 +28,7 @@ class CrawlOptions:
             user_agent=DEFAULT_USER_AGENT,
             extra_headers={},
             ssr_parity_check=False,
+            use_stealth=False,
         )
 
     @classmethod
@@ -36,6 +42,7 @@ class CrawlOptions:
         header_text: str | None = None,
         cookie_text: str | None = None,
         ssr_parity_check: bool = False,
+        use_stealth: bool | None = None,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -52,6 +59,7 @@ class CrawlOptions:
             user_agent=ua,
             extra_headers=extras,
             ssr_parity_check=bool(ssr_parity_check),
+            use_stealth=bool(use_stealth),
         )
 
 
