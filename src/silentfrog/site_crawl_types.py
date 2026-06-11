@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse, urlunparse
 
+from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL
@@ -75,6 +76,34 @@ def normalize_site_url(url: str) -> str:
 
 
 @dataclass(frozen=True)
+class SpiderConfig:
+    """v2.0 V3 spider tuning, grouped so SiteCrawlConfig / from_text stay
+    free of boolean-flag soup."""
+
+    mode: CrawlMode = CrawlMode.HYBRID
+    max_depth: int = 10
+    max_urls: int = 100_000
+    respect_robots: bool = True
+    politeness_delay_ms: int = 200
+    follow_subdomains: bool = False
+    crawl_concurrency: int = 4
+
+
+def _auto_mode(url_list: tuple[str, ...], sitemap_url: str) -> CrawlMode:
+    """Pick a sensible default mode from the inputs the user supplied.
+
+    An explicit URL list means "audit exactly these" (LIST). A sitemap
+    means "crawl that sitemap" (SITEMAP). Pointing only at a base URL
+    means "crawl the whole site" — HYBRID (sitemap ∪ spider).
+    """
+    if url_list:
+        return CrawlMode.LIST
+    if sitemap_url.strip():
+        return CrawlMode.SITEMAP
+    return CrawlMode.HYBRID
+
+
+@dataclass(frozen=True)
 class SiteCrawlConfig:
     base_url: str
     sitemap_url: str
@@ -84,6 +113,7 @@ class SiteCrawlConfig:
     limit: int
     crawl_options: CrawlOptions
     same_host_only: bool = True
+    spider: SpiderConfig = field(default_factory=SpiderConfig)
 
     @classmethod
     def from_text(
@@ -96,15 +126,20 @@ class SiteCrawlConfig:
         url_list_text: str = "",
         limit: int = DEFAULT_SITE_CRAWL_LIMIT,
         crawl_options: CrawlOptions | None = None,
+        spider: SpiderConfig | None = None,
     ) -> SiteCrawlConfig:
+        url_list = tuple(normalize_site_url(url) for url in _split_lines(url_list_text))
+        sitemap_clean = normalize_site_url(sitemap_url) if sitemap_url.strip() else ""
+        resolved_spider = spider or SpiderConfig(mode=_auto_mode(url_list, sitemap_clean))
         return cls(
             base_url=normalize_site_url(base_url),
-            sitemap_url=normalize_site_url(sitemap_url) if sitemap_url.strip() else "",
+            sitemap_url=sitemap_clean,
             include_patterns=tuple(_split_lines(include_text)),
             exclude_patterns=tuple(_split_lines(exclude_text)),
-            url_list=tuple(normalize_site_url(url) for url in _split_lines(url_list_text)),
+            url_list=url_list,
             limit=max(1, min(10000, int(limit))),
             crawl_options=crawl_options or CrawlOptions.from_ui(gentle_mode=True, max_parallel=2),
+            spider=resolved_spider,
         )
 
     @property
@@ -402,5 +437,6 @@ __all__ = [
     "SiteCrawlConfig",
     "SiteCrawlReport",
     "SiteCrawlResult",
+    "SpiderConfig",
     "normalize_site_url",
 ]
