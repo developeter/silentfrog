@@ -11,6 +11,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 
 from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
 from .audit_recap import AuditRecapWidget
+from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
@@ -201,6 +202,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
+        # v2.0 V8: previous crawl kept in memory so "Compare with previous"
+        # can diff the current run against it.
+        self._previous_report: SiteCrawlReport | None = None
         # v2.0 V3.2: streaming store for the live crawl (payloads on disk,
         # loaded on demand for the detail dialog so RAM stays flat at ~1M).
         self._crawl_store_path: str = ""
@@ -398,11 +402,17 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             "Write a Markdown + JSON bundle you can paste into a Claude chat for a "
             "prioritised fix list. Compact by default (worst pages + recurring issues)."
         )
+        self.btn_diff = QtWidgets.QPushButton("Compare with previous")
+        self.btn_diff.setToolTip(
+            "Diff this crawl against the previous one in this session: new / removed URLs, "
+            "status changes, and GEO Score regressions / improvements."
+        )
         self.btn_history = QtWidgets.QPushButton("View past scans")
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
         row.addWidget(self.btn_export)
         row.addWidget(self.btn_export_ai)
+        row.addWidget(self.btn_diff)
         row.addWidget(self.btn_history)
         row.addWidget(self.btn_new_crawl)
         row.addStretch()
@@ -422,6 +432,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.clicked.connect(self._stop_crawl)
         self.btn_export.clicked.connect(self._export_excel)
         self.btn_export_ai.clicked.connect(self._export_ai)
+        self.btn_diff.clicked.connect(self._show_diff)
         self.btn_new_crawl.clicked.connect(self._show_setup)
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
@@ -440,6 +451,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.setVisible(False)
         self.btn_export.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
+        self.btn_diff.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
         self.recap_widget.reset("Start a crawl to build the site action recap.")
         self.lbl_history.setText("History: no completed crawl yet.")
@@ -563,6 +575,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._update_eta_label()
 
     def _handle_report(self, report: SiteCrawlReport) -> None:
+        self._previous_report = self._latest_report
         self._latest_report = report
         self._crawl_run_id = report.run_id
         self._discovered_total = report.discovered_count
@@ -571,6 +584,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._set_running(False)
         self.btn_export.setEnabled(bool(report.results))
         self.btn_export_ai.setEnabled(bool(report.results))
+        self.btn_diff.setEnabled(bool(report.results) and self._previous_report is not None)
         self._update_recap_from_report(report)
         self._update_history_from_report(report)
         summary = self._report_summary(report)
@@ -594,6 +608,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         has_results = bool(self._latest_report and self._latest_report.results)
         self.btn_export.setEnabled(False if running else has_results)
         self.btn_export_ai.setEnabled(False if running else has_results)
+        self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
         self.btn_new_crawl.setEnabled(not running)
         if running:
             self._eta_timer.start()
@@ -690,6 +705,24 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             on_payload_updated=lambda updated, row=source_index.row(): self.model.update_payload(row, updated),
             parent=self,
         )
+        self._detail_windows.append(dialog)
+        dialog.show()
+
+    def _show_diff(self) -> None:
+        if self._latest_report is None or self._previous_report is None:
+            return
+        diff = diff_reports(self._previous_report, self._latest_report)
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Crawl comparison — previous vs current")
+        dialog.resize(720, 560)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        view = QtWidgets.QPlainTextEdit()
+        view.setReadOnly(True)
+        view.setPlainText(diff_to_markdown(diff))
+        layout.addWidget(view)
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
         self._detail_windows.append(dialog)
         dialog.show()
 

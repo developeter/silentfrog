@@ -166,6 +166,9 @@ class SiteCrawlResult:
     link_issue_count: int
     performance_verdict: str
     ai_visibility_verdict: str
+    # v2.0 V8: numeric GEO Score kept as a lightweight field so crawl diffs
+    # can compare scores even after the payload is stripped (V3.2).
+    geo_score: int = 0
     error: str = ""
     payload: CrawlPayload | None = None
 
@@ -188,6 +191,7 @@ class SiteCrawlResult:
             link_issue_count=_link_issue_count(payload.links),
             performance_verdict=payload.performance.summary.verdict or "-",
             ai_visibility_verdict=payload.ai_visibility.summary.verdict or "-",
+            geo_score=payload.ai_visibility.summary.score,
             payload=payload,
         )
 
