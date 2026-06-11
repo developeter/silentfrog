@@ -12,6 +12,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
 from .audit_recap import AuditRecapWidget
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
+from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .exporters import export_site_crawl_report
@@ -24,6 +25,7 @@ from .site_crawl_types import (
     SiteCrawlConfig,
     SiteCrawlReport,
     SiteCrawlResult,
+    SpiderConfig,
 )
 from .tabs import (
     AiVisibilityTab,
@@ -276,15 +278,52 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             field.setMaximumHeight(58)
         self.url_list.setMaximumHeight(90)
         self.limit_spin = QtWidgets.QSpinBox()
-        self.limit_spin.setRange(1, 10000)
+        # v2.0 V3: store-backed, so the cap is far higher than the old 10k.
+        self.limit_spin.setRange(1, 1_000_000)
         self.limit_spin.setValue(DEFAULT_SITE_CRAWL_LIMIT)
+        self._build_spider_controls()
         form.addRow("Base URL", self.base_url)
         form.addRow("Sitemap URL", self.sitemap_url)
         form.addRow("Include prefixes", self.include_text)
         form.addRow("Exclude patterns", self.exclude_text)
         form.addRow("URL list", self.url_list)
-        form.addRow("URL limit", self.limit_spin)
+        form.addRow("Crawl mode", self.crawl_mode_combo)
+        form.addRow("Max depth", self.depth_spin)
+        form.addRow("Max URLs", self.limit_spin)
+        form.addRow("Politeness (ms/host)", self.politeness_spin)
+        form.addRow("", self.respect_robots_check)
+        form.addRow("", self.follow_subdomains_check)
         return form
+
+    def _build_spider_controls(self) -> None:
+        # v2.0 V3 — drive the hybrid spider from the GUI.
+        self.crawl_mode_combo = QtWidgets.QComboBox()
+        # Store the mode's string value (or None for Auto) — Qt coerces a
+        # str-subclass enum on retrieval, so we round-trip via CrawlMode.
+        modes: list[tuple[str, str | None]] = [
+            ("Auto (recommended)", None),
+            ("Hybrid: sitemap + spider", CrawlMode.HYBRID.value),
+            ("Spider: follow links", CrawlMode.SPIDER.value),
+            ("Sitemap only", CrawlMode.SITEMAP.value),
+            ("URL list only", CrawlMode.LIST.value),
+        ]
+        for label, mode in modes:
+            self.crawl_mode_combo.addItem(label, mode)
+        self.crawl_mode_combo.setToolTip(
+            "Auto picks Hybrid when you give only a base URL (crawl the whole site by "
+            "following links), LIST for an explicit URL list, SITEMAP for a sitemap."
+        )
+        self.depth_spin = QtWidgets.QSpinBox()
+        self.depth_spin.setRange(0, 50)
+        self.depth_spin.setValue(10)
+        self.politeness_spin = QtWidgets.QSpinBox()
+        self.politeness_spin.setRange(0, 5000)
+        self.politeness_spin.setSingleStep(50)
+        self.politeness_spin.setValue(200)
+        self.respect_robots_check = QtWidgets.QCheckBox("Respect robots.txt disallow rules")
+        self.respect_robots_check.setChecked(True)
+        self.follow_subdomains_check = QtWidgets.QCheckBox("Follow subdomains")
+        self.follow_subdomains_check.setChecked(False)
 
     def _build_filter_row(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
@@ -443,7 +482,27 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             url_list_text=self.url_list.toPlainText(),
             limit=self.limit_spin.value(),
             crawl_options=self._crawl_options,
+            spider=self._spider_from_ui(),
         )
+
+    def _spider_from_ui(self) -> SpiderConfig:
+        raw = self.crawl_mode_combo.currentData()
+        mode = self._auto_mode_from_ui() if raw is None else CrawlMode.from_value(raw)
+        return SpiderConfig(
+            mode=mode,
+            max_depth=self.depth_spin.value(),
+            max_urls=self.limit_spin.value(),
+            respect_robots=self.respect_robots_check.isChecked(),
+            politeness_delay_ms=self.politeness_spin.value(),
+            follow_subdomains=self.follow_subdomains_check.isChecked(),
+        )
+
+    def _auto_mode_from_ui(self) -> CrawlMode:
+        if self.url_list.toPlainText().strip():
+            return CrawlMode.LIST
+        if self.sitemap_url.text().strip():
+            return CrawlMode.SITEMAP
+        return CrawlMode.HYBRID
 
     def _valid_config(self, config: SiteCrawlConfig) -> bool:
         parsed = urlparse(config.base_url)
