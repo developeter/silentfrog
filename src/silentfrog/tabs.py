@@ -1095,6 +1095,11 @@ class _SchemaBlock:
     label: str
     errors: list[str]
     text: str
+    # v2.0 hotfix follow-up: group nested component types (PostalAddress,
+    # ListItem, Offer…) under their parent instead of as independent blocks.
+    role: str = "primary"
+    nested_in: str = ""
+    type_hint: str = ""
 
 
 class SchemaTab(QtWidgets.QTextEdit):
@@ -1206,8 +1211,14 @@ class SchemaTab(QtWidgets.QTextEdit):
                 header_color = theme["warn"]
             else:
                 header_color = theme["ok"]
+            block_models = self._state["blocks"]
+            nested_count = sum(1 for b in block_models if getattr(b, "role", "primary") == "nested")
+            primary_count = max(0, len(block_models) - nested_count)
+            count_text = f"{primary_count} item{'s' if primary_count != 1 else ''}"
+            if nested_count:
+                count_text += f" (+{nested_count} nested component{'s' if nested_count != 1 else ''})"
             header = (
-                f"<div style='font-weight:bold;color:{header_color}'>Structured data: {total} items &nbsp; "
+                f"<div style='font-weight:bold;color:{header_color}'>Structured data: {count_text} &nbsp; "
                 f"(Syntax: {syntax_text}){type_text}</div>"
             )
             eligibility_html = self._render_eligibility(eligibility, theme)
@@ -1220,7 +1231,7 @@ class SchemaTab(QtWidgets.QTextEdit):
             else:
                 issue_html = ""
 
-            block_html = "".join(self._render_block(block, theme) for block in self._state["blocks"])
+            block_html = self._render_blocks_grouped(self._state["blocks"], theme)
             self.setHtml(header + eligibility_html + issue_html + block_html)
         finally:
             self._is_rendering = False
@@ -1293,11 +1304,14 @@ class SchemaTab(QtWidgets.QTextEdit):
             type_hint = SchemaTab._extract_type(item.get("@type"))
             label = SchemaTab._compose_label(label, type_hint, via)
             errors = [str(err).strip() for err in item.get("_schema_errors", []) if str(err).strip()]
-            cleaned = {key: value for key, value in item.items() if key not in {"_schema_errors"}}
+            internal = {"_schema_errors", "_schema_role", "_schema_nested_in"}
+            cleaned = {key: value for key, value in item.items() if key not in internal}
             text = json.dumps(cleaned, indent=2, ensure_ascii=False)
             if "@raw" in cleaned and isinstance(cleaned["@raw"], str):
                 label = f"{label} (JSON-LD raw)"
-            return _SchemaBlock(label, errors, text)
+            role = str(item.get("_schema_role", "primary")).strip() or "primary"
+            nested_in = str(item.get("_schema_nested_in", "")).strip()
+            return _SchemaBlock(label, errors, text, role=role, nested_in=nested_in, type_hint=type_hint)
         if isinstance(item, list):
             text = json.dumps(item, indent=2, ensure_ascii=False)
             return _SchemaBlock(f"{label} (list)", [], text)
@@ -1333,15 +1347,49 @@ class SchemaTab(QtWidgets.QTextEdit):
         return text.strip()
 
     @staticmethod
-    def _render_block(block: _SchemaBlock, theme: dict[str, str]) -> str:
+    def _render_blocks_grouped(blocks: list[_SchemaBlock], theme: dict[str, str]) -> str:
+        """Render top-level (primary) blocks, with each block's nested
+        component types grouped + labelled directly beneath it instead of
+        as independent blocks."""
+        primary = [b for b in blocks if b.role != "nested"]
+        nested = [b for b in blocks if b.role == "nested"]
+        parts: list[str] = []
+        used: set[int] = set()
+        for block in primary:
+            parts.append(SchemaTab._render_block(block, theme))
+            for child in nested:
+                if id(child) not in used and child.nested_in and child.nested_in == block.type_hint:
+                    used.add(id(child))
+                    parts.append(SchemaTab._render_block(child, theme, nested=True))
+        leftover = [b for b in nested if id(b) not in used]
+        if leftover:
+            parts.append(
+                f"<div style='margin-top:14px;font-weight:bold;color:{theme['foreground']}'>"
+                "Other nested components</div>"
+            )
+            parts.extend(SchemaTab._render_block(child, theme, nested=True) for child in leftover)
+        return "".join(parts)
+
+    @staticmethod
+    def _render_block(block: _SchemaBlock, theme: dict[str, str], nested: bool = False) -> str:
         label_color = theme["issue"] if block.errors else theme["foreground"]
         error_section = ""
         if block.errors:
             error_items = "".join(f"<li>{_html.escape(err)}</li>" for err in block.errors)
             error_section = f"<ul style='margin:4px 0 8px 18px;color:{theme['issue']}'>{error_items}</ul>"
+        if nested:
+            tag = f"&#8627; nested component &middot; in {_html.escape(block.nested_in or 'parent')}"
+            badge = f"<span style='color:{theme['warn']};font-size:11px;font-weight:bold'>{tag}</span>"
+            wrapper_open = (
+                f"<div style='margin:6px 0 6px 22px;border-left:2px solid {theme['block_border']};padding-left:10px'>"
+            )
+            label_html = f"<div style='color:{label_color}'>{_html.escape(block.label)} &nbsp; {badge}</div>"
+        else:
+            wrapper_open = "<div style='margin-top:10px'>"
+            label_html = f"<div style='font-weight:bold;color:{label_color}'>{_html.escape(block.label)}</div>"
         return (
-            "<div style='margin-top:10px'>"
-            f"<div style='font-weight:bold;color:{label_color}'>{_html.escape(block.label)}</div>"
+            f"{wrapper_open}"
+            f"{label_html}"
             f"{error_section}"
             f"<pre style='background:{theme['block_bg']};color:{theme['block_fg']};"
             f"border:1px solid {theme['block_border']};padding:6px;white-space:pre-wrap'>"

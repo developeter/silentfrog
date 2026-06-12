@@ -9,6 +9,7 @@ from silentfrog.ai_visibility import (  # type: ignore[reportMissingImports]
     _RICH_SCHEMA_TYPES,
 )
 from silentfrog.schema_extractor import (  # type: ignore[reportMissingImports]  # type: ignore[reportMissingImports]
+    _classify_schema_nesting,
     _extract_schema_all,
     _schema_primary_type,
     _schema_validate_article,
@@ -266,3 +267,40 @@ def test_schema_extract_person_fixture_parity_between_extruct_and_fallback(
     assert fallback_person["detected"] is True
     assert extruct_person["missing_fields"] == fallback_person["missing_fields"]
     assert extruct_person["missing_fields"] == ["missing name"]
+
+
+def test_classify_schema_nesting_marks_component_types() -> None:
+    # PostalAddress inside LocalBusiness + ListItems inside a Breadcrumb are
+    # surfaced but classified as nested components of their parent.
+    blocks = [
+        {
+            "@type": "LocalBusiness",
+            "name": "Acme",
+            "address": {"@type": "PostalAddress", "streetAddress": "Via Roma 1", "addressLocality": "Milano"},
+        },
+        {"@type": "PostalAddress", "streetAddress": "Via Roma 1", "addressLocality": "Milano"},
+        {"@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home"}]},
+        {"@type": "ListItem", "position": 1, "name": "Home"},
+    ]
+    _classify_schema_nesting(blocks)
+    by_type = {b["@type"]: b for b in blocks}
+    assert by_type["LocalBusiness"]["_schema_role"] == "primary"
+    assert by_type["BreadcrumbList"]["_schema_role"] == "primary"
+    assert by_type["PostalAddress"]["_schema_role"] == "nested"
+    assert by_type["PostalAddress"]["_schema_nested_in"] == "LocalBusiness"
+    assert by_type["ListItem"]["_schema_role"] == "nested"
+    assert by_type["ListItem"]["_schema_nested_in"] == "BreadcrumbList"
+
+
+def test_extract_schema_all_classifies_nested_components() -> None:
+    html = (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"LocalBusiness","name":"Acme",'
+        '"address":{"@type":"PostalAddress","streetAddress":"Via Roma 1","addressLocality":"Milano"}}'
+        "</script></head><body>x</body></html>"
+    )
+    blocks = _extract_schema_all(html, "https://e.com/p")["blocks"]
+    roles = {b.get("@type"): b.get("_schema_role") for b in blocks if isinstance(b, dict)}
+    assert roles["LocalBusiness"] == "primary"
+    assert roles["PostalAddress"] == "nested"

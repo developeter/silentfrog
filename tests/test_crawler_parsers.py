@@ -312,5 +312,8 @@ def test_serp_schema_snapshot_combined(sample_html: str, soup: BeautifulSoup) ->
             "name": "Sample",
             "url": "https://example.com/canonical/page",
             "_extracted_via": "json-ld",
+            # Schema blocks now carry a nesting role (hotfix follow-up):
+            # top-level WebPage is "primary".
+            "_schema_role": "primary",
         },
     }

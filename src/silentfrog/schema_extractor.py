@@ -593,6 +593,51 @@ def _collect_raw_jsonld_fallback(state: _SchemaState, html_text: str) -> None:
     _log_schema(f"fallback: raw json-ld captured={len(fallback_blocks)}")
 
 
+_SCHEMA_INJECTED_KEYS = {"_extracted_via", "_schema_errors", "_schema_role", "_schema_nested_in"}
+
+
+def _schema_clean_signature(obj: dict[str, Any]) -> str:
+    clean = {key: value for key, value in obj.items() if key not in _SCHEMA_INJECTED_KEYS}
+    return json.dumps(clean, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _schema_nested_signatures(obj: dict[str, Any]) -> set[str]:
+    """Content signatures of every @type-bearing dict STRICTLY inside obj's
+    property values (i.e. its nested component objects)."""
+    found: set[str] = set()
+    stack: list[Any] = [value for key, value in obj.items() if key not in _SCHEMA_INJECTED_KEYS]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            if "@type" in current:
+                found.add(_schema_clean_signature(current))
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+    return found
+
+
+def _classify_schema_nesting(blocks: list[dict[str, Any]]) -> None:
+    """Mark each block ``_schema_role`` = primary | nested. A block is nested
+    when its content appears inside another collected block — e.g. a
+    PostalAddress inside a LocalBusiness, or the ListItems of a Breadcrumb.
+    They stay surfaced (the user wants to see them) but the UI groups them
+    under their parent instead of treating them as independent blocks."""
+    nested_parent: dict[str, str] = {}
+    for parent in blocks:
+        parent_label = _schema_primary_type(parent.get("@type")) or "block"
+        for child_sig in _schema_nested_signatures(parent):
+            nested_parent.setdefault(child_sig, parent_label)
+    for block in blocks:
+        signature = _schema_clean_signature(block)
+        parent_label = nested_parent.get(signature)
+        if parent_label and parent_label != _schema_primary_type(block.get("@type")):
+            block["_schema_role"] = "nested"
+            block["_schema_nested_in"] = parent_label
+        else:
+            block["_schema_role"] = "primary"
+
+
 def _schema_block_issues(obj: dict[str, Any]) -> list[str]:
     via_lower = str(obj.get("_extracted_via", "")).strip().lower()
     issues: list[str] = []
@@ -652,8 +697,10 @@ def _extract_schema_all(html_text: str, response_url: str) -> dict[str, Any]:
     _collect_bs_fallbacks(state, html_text)
     _collect_raw_jsonld_fallback(state, html_text)
 
-    aggregate = _annotate_schema_blocks([obj for obj in state.collected if isinstance(obj, dict)])
-    eligibility = _schema_build_eligibility([obj for obj in state.collected if isinstance(obj, dict)])
+    dict_blocks = [obj for obj in state.collected if isinstance(obj, dict)]
+    _classify_schema_nesting(dict_blocks)
+    aggregate = _annotate_schema_blocks(dict_blocks)
+    eligibility = _schema_build_eligibility(dict_blocks)
     summary = _schema_summary(state, aggregate)
     return {
         "blocks": state.collected,
