@@ -75,6 +75,27 @@ def test_schema_validator_breadcrumb_errors() -> None:
     assert any("missing name" in e for e in errors)
 
 
+def test_schema_validator_breadcrumb_nested_item_name_is_valid() -> None:
+    # Regression: Google's recommended nested form puts the name INSIDE the
+    # item object. This is valid (Google Rich Results + schema.org both pass
+    # it) and must NOT be flagged as "missing name".
+    valid_nested = {
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "item": {"@id": "https://e.com/", "name": "Home"}},
+            {"@type": "ListItem", "position": 2, "item": {"@id": "https://e.com/cat", "name": "Category"}},
+        ]
+    }
+    assert _schema_validate_breadcrumb(valid_nested) == []
+
+
+def test_schema_validator_breadcrumb_nested_item_missing_name_still_errors() -> None:
+    # The nested form WITHOUT a name is genuinely incomplete -> still flagged.
+    missing = {"itemListElement": [{"@type": "ListItem", "position": 1, "item": {"@id": "https://e.com/"}}]}
+    errors = _schema_validate_breadcrumb(missing)
+    assert any("missing name" in e for e in errors)
+    assert not any("missing item url" in e for e in errors)  # @id present
+
+
 def test_schema_validator_product_errors() -> None:
     # Product validator flags missing name/description/image/offers and price/currency in offers.
     errors = _schema_validate_product({})

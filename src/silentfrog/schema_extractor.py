@@ -99,11 +99,17 @@ def _schema_validate_breadcrumb(obj: dict[str, Any]) -> list[str]:
             errors.append(f"itemListElement[{idx}] is not an object")
             continue
         target = entry.get("item") or entry.get("itemId") or entry.get("url")
+        # Google allows the nested form `item: {"@id": ..., "name": ...}`
+        # where the name lives INSIDE the item object. Read name from there
+        # too, otherwise valid (Google-recommended) breadcrumbs are wrongly
+        # flagged as "missing name".
+        name = entry.get("name")
         if isinstance(target, dict):
+            name = name or target.get("name")
             target = target.get("@id") or target.get("url")
         if "position" not in entry:
             errors.append(f"itemListElement[{idx}] missing position")
-        if not entry.get("name"):
+        if not name:
             errors.append(f"itemListElement[{idx}] missing name")
         if not target:
             errors.append(f"itemListElement[{idx}] missing item url")
