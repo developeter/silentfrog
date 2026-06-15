@@ -323,9 +323,59 @@ def build_discovery_checks(payload: DiscoveryPayload) -> list[AiVisibilityCheck]
     ]
 
 
+# v2.0 V11 — per-agent .well-known/ai.json policy parsing.
+_ALLOW_WORDS = {"allow", "allowed", "yes", "true", "permit"}
+_DENY_WORDS = {"disallow", "deny", "denied", "blocked", "no", "false", "forbid"}
+
+
+def _normalize_agent_policy(value: Any) -> str:
+    if isinstance(value, bool):
+        return "allow" if value else "disallow"
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _ALLOW_WORDS:
+            return "allow"
+        if word in _DENY_WORDS:
+            return "disallow"
+        return "unknown"
+    if isinstance(value, Mapping):
+        for key in ("policy", "access", "default"):
+            if key in value:
+                return _normalize_agent_policy(value[key])
+        if value.get("disallow"):
+            return "disallow"
+        if value.get("allow"):
+            return "allow"
+    return "unknown"
+
+
+def ai_json_agent_policies(discovery: Mapping[str, Any] | None) -> dict[str, str]:
+    """Per-agent policies declared in .well-known/ai.json.
+
+    Returns ``{bot_token_lowercased: "allow" | "disallow"}`` for the
+    agents the file names explicitly. Tokens with an unknown/unparseable
+    policy are omitted. ``discovery`` is the payload's ``discovery`` dict
+    (``DiscoveryPayload.to_dict()``). Never raises.
+    """
+    if not isinstance(discovery, Mapping):
+        return {}
+    entry = discovery.get("well_known_ai_json")
+    parsed = entry.get("parsed") if isinstance(entry, Mapping) else None
+    agents = parsed.get("agents") if isinstance(parsed, Mapping) else None
+    if not isinstance(agents, Mapping):
+        return {}
+    policies: dict[str, str] = {}
+    for token, raw_policy in agents.items():
+        policy = _normalize_agent_policy(raw_policy)
+        if policy in {"allow", "disallow"}:
+            policies[str(token).strip().lower()] = policy
+    return policies
+
+
 __all__ = [
     "DiscoveryEntry",
     "DiscoveryPayload",
-    "fetch_discovery_files",
+    "ai_json_agent_policies",
     "build_discovery_checks",
+    "fetch_discovery_files",
 ]

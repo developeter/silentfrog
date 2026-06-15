@@ -39,6 +39,7 @@ from typing import Any
 from qtpy import QtCore, QtGui
 from qtpy.QtCore import Qt
 
+from ..discovery_files import ai_json_agent_policies
 from ..theme import StatusBrushPalette, status_brushes
 
 HEATMAP_HEADERS: list[str] = [
@@ -200,10 +201,10 @@ class BotMatrixModel(QtCore.QAbstractTableModel):
 
 
 def _llms_status(discovery: Mapping[str, Any] | None) -> tuple[str, str]:
-    """llms.txt is a positive signal — present ⇒ good, absent ⇒ info.
-
-    `.well-known/ai.json` counts too. Per the §1.5 myth rule we never
-    return ``warning`` or ``critical`` for absence.
+    """Site-wide llms.txt / ai.json presence — present ⇒ good, absent ⇒
+    info. Per the §1.5 myth rule we never return ``warning``/``critical``
+    for absence. This is the fallback when ai.json has no explicit policy
+    for a given bot.
     """
     if not isinstance(discovery, Mapping):
         return "info", "llms.txt / ai.json: discovery payload absent."
@@ -223,6 +224,26 @@ def _llms_status(discovery: Mapping[str, Any] | None) -> tuple[str, str]:
         "info",
         "Site publishes neither llms.txt nor .well-known/ai.json — site-wide signal absent for every bot.",
     )
+
+
+def _llms_status_for_bot(
+    token: str,
+    policies: Mapping[str, str],
+    site_status: tuple[str, str],
+) -> tuple[str, str]:
+    """Per-bot llms.txt/ai.json status (v2.0 V11).
+
+    When .well-known/ai.json names an explicit policy for this bot, the
+    cell reflects it (allow ⇒ good, disallow ⇒ warning — a deliberate
+    per-agent limit, not an absence). Otherwise we fall back to the
+    site-wide presence signal.
+    """
+    policy = policies.get((token or "").strip().lower())
+    if policy == "allow":
+        return "good", "ai.json: this bot is explicitly allowed (per-agent policy)."
+    if policy == "disallow":
+        return "warning", "ai.json: this bot is explicitly disallowed (per-agent policy)."
+    return site_status
 
 
 def _ssr_status(render: Mapping[str, Any] | None) -> tuple[str, str]:
@@ -297,7 +318,8 @@ def build_bot_rows(
     Site-wide signals (llms.txt, SSR parity) are computed once and
     replicated across every row.
     """
-    llms_status, llms_tip = _llms_status(discovery)
+    site_llms = _llms_status(discovery)
+    policies = ai_json_agent_policies(discovery)  # V11: per-agent ai.json
     ssr_status, ssr_tip = _ssr_status(render)
     rows: list[BotRow] = []
     for raw in ai_crawl_rows:
@@ -308,6 +330,7 @@ def build_bot_rows(
         bot, token, robots_ok, nonstandard, controls, verdict, notes = (str(value) for value in raw[:7])
         robots_status, robots_tip = _robots_status(robots_ok)
         meta_status, meta_tip = _meta_status(nonstandard)
+        llms_status, llms_tip = _llms_status_for_bot(token, policies, site_llms)
         verdict_status, verdict_tip = _verdict_status(verdict, notes)
         rows.append(
             BotRow(

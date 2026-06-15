@@ -289,3 +289,43 @@ def test_discovery_payload_roundtrips_through_dict() -> None:
     assert restored.llms_txt.url == entry.url
     assert restored.llms_txt.parsed["title"] == "Example"
     assert restored.llms_txt.present is True
+
+
+def test_ai_json_agent_policies_string_form() -> None:
+    from silentfrog.discovery_files import ai_json_agent_policies
+
+    discovery = {
+        "well_known_ai_json": {
+            "present": True,
+            "parsed": {"agents": {"GPTBot": "allow", "ClaudeBot": "disallow", "Foo": "maybe"}},
+        }
+    }
+    policies = ai_json_agent_policies(discovery)
+    assert policies == {"gptbot": "allow", "claudebot": "disallow"}  # unknown "maybe" dropped
+
+
+def test_ai_json_agent_policies_dict_and_bool_forms() -> None:
+    from silentfrog.discovery_files import ai_json_agent_policies
+
+    discovery = {
+        "well_known_ai_json": {
+            "parsed": {
+                "agents": {
+                    "A": {"policy": "allow"},
+                    "B": {"disallow": "/"},
+                    "C": True,
+                    "D": False,
+                }
+            }
+        }
+    }
+    policies = ai_json_agent_policies(discovery)
+    assert policies == {"a": "allow", "b": "disallow", "c": "allow", "d": "disallow"}
+
+
+def test_ai_json_agent_policies_absent_returns_empty() -> None:
+    from silentfrog.discovery_files import ai_json_agent_policies
+
+    assert ai_json_agent_policies(None) == {}
+    assert ai_json_agent_policies({}) == {}
+    assert ai_json_agent_policies({"well_known_ai_json": {"present": False, "parsed": {}}}) == {}

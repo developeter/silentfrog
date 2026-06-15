@@ -194,3 +194,25 @@ def test_bot_matrix_tab_drill_down_dialog_title_names_the_bot(qtbot, monkeypatch
     assert model is not None
     tab._on_row_activated(model.index(0, 0))
     assert "GPTBot" in captured["title"]
+
+
+def test_llms_column_per_bot_from_ai_json_policies() -> None:
+    discovery = {
+        "well_known_ai_json": {
+            "present": True,
+            "parsed": {"agents": {"GPTBot": "allow", "ClaudeBot": "disallow"}},
+        }
+    }
+    rows = build_bot_rows(
+        [
+            ["GPTBot", "gptbot", "Yes", "-", "-", "Allowed", "ok"],
+            ["ClaudeBot", "claudebot", "Yes", "-", "-", "Allowed", "ok"],
+            ["PerplexityBot", "perplexitybot", "Yes", "-", "-", "Allowed", "ok"],
+        ],
+        discovery=discovery,
+    )
+    by_label = {r.label: r for r in rows}
+    # COL_LLMS is column index 3; statuses tuple covers columns 1..5.
+    assert by_label["GPTBot"].statuses[COL_LLMS - 1] == "good"  # explicitly allowed
+    assert by_label["ClaudeBot"].statuses[COL_LLMS - 1] == "warning"  # explicitly disallowed
+    assert by_label["PerplexityBot"].statuses[COL_LLMS - 1] == "good"  # site-wide fallback (ai.json present)
