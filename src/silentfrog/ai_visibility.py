@@ -30,6 +30,8 @@ from .integrations.google.checks import (
 from .integrations.google.lighthouse import LighthouseScores
 from .integrations.google.rich_results import RichResultsReport
 from .integrations.google.types import Ga4Metrics, GscMetrics
+from .integrations.semrush.checks import build_semrush_authority_checks
+from .integrations.semrush.types import SemrushMetrics
 from .perf_crux import CruxData
 from .perf_vitals import WebVitals, build_performance_checks
 from .render_diff import RenderDiff, build_render_diff_check
@@ -48,6 +50,8 @@ AI_VISIBILITY_AREAS = (
     # v2.0 V7 — only populated when Google Search Console / GA4 are connected.
     "Real performance",
     "Engagement",
+    # v2.0 V17 — only populated when Semrush is connected (optional).
+    "Authority signals",
 )
 
 _STATUS_ALIASES = {
@@ -434,6 +438,39 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Count of structured-data warnings that threaten rich-result eligibility.\n\n"
         "These are genuine defects in markup the page already ships, so they warn. Zero warnings => good."
     ),
+    # v2.0 V17 — Semrush authority signals (optional `silentfrog[semrush]`).
+    "semrush_domain_authority_above_30": (
+        "Semrush Authority Score (0-100) for the domain.\n\n"
+        "A higher score reflects a stronger, harder-to-fake link profile that AI engines and search "
+        "treat as a trust signal. Connect via Settings -> Authority (Semrush). This is an off-page "
+        "signal the page does not control cheaply, so per §1.5 it is good above 30 and otherwise info, "
+        "never a penalty. Not connected => info."
+    ),
+    "semrush_organic_keywords_present": (
+        "Count of organic keywords the domain ranks for, per Semrush.\n\n"
+        "A broad ranking footprint signals topical breadth and crawl-worthiness. Present => good; "
+        "absent or not connected => info. Never penalises the GEO Score (§1.5)."
+    ),
+    "semrush_organic_traffic_above_threshold": (
+        "Estimated monthly organic traffic for the domain, per Semrush.\n\n"
+        "A meaningful organic traffic base correlates with the authority AI engines reward. Above the "
+        "threshold => good; below or not connected => info. Off-page signal — never a penalty (§1.5)."
+    ),
+    "semrush_backlinks_above_threshold": (
+        "Total backlinks pointing at the domain, per Semrush.\n\n"
+        "Volume is a coarse signal — quality and diversity matter more — so this routes good above the "
+        "threshold and info otherwise, never a warning. Not connected => info."
+    ),
+    "semrush_referring_domains_diverse": (
+        "Count of unique referring domains, per Semrush.\n\n"
+        "Diversity of distinct linking domains is a stronger authority signal than raw backlink count. "
+        "Above the threshold => good; below or not connected => info. Never a penalty (§1.5)."
+    ),
+    "semrush_paid_signal_present": (
+        "Whether the domain runs paid search (paid keywords / traffic), per Semrush.\n\n"
+        "Purely informational context on the domain's marketing footprint; it neither helps nor hurts "
+        "the GEO Score. Present => good; absent or not connected => info."
+    ),
 }
 
 
@@ -813,6 +850,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     ga4 = Ga4Metrics.from_dict(data.get("ga4", {}))
     lighthouse = LighthouseScores.from_dict(data.get("lighthouse", {}))
     rich_results = RichResultsReport.from_dict(data.get("rich_results", {}))
+    semrush = SemrushMetrics.from_dict(data.get("semrush", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -847,6 +885,9 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     # Real performance / Engagement (V7): only when GSC/GA4 connected.
     if gsc.measured or ga4.measured:
         checks.extend(build_real_performance_checks(gsc, ga4))
+    # Authority signals (V17): only when Semrush is connected (optional).
+    if semrush.measured:
+        checks.extend(build_semrush_authority_checks(semrush))
     # Rich results (V14): schema-derived on every audit; Lighthouse only
     # after the opt-in single-page run, so it doesn't clutter stock pages.
     if rich_results.measured:

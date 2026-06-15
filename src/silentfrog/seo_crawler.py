@@ -319,6 +319,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     crux_payload = await _collect_crux(response.url)
     ai_citations_payload = await _collect_ai_citations(response.url)
     google_metrics = await _collect_google_metrics(response.url)
+    semrush_metrics = await _collect_semrush(response.url)
     rich_results = await _collect_rich_results(structured_data, response.url)
     raw_payload = {
         "schema": structured_data,
@@ -336,6 +337,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "ai_citations": ai_citations_payload,
         "custom_extraction": extract_custom(response.body, crawl_options.custom_extraction),
         "tech_stack": _collect_tech_stack(response, soup, crawl_options),
+        "semrush": semrush_metrics,
         **google_metrics,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
@@ -365,6 +367,48 @@ async def _collect_google_metrics(url: str) -> dict[str, Any]:
         return await asyncio.to_thread(connection.metrics_for, url)
     except Exception:  # noqa: BLE001 — integration failure degrades silently
         return {}
+
+
+def _semrush_enabled() -> bool:
+    return os.environ.get("SILENTFROG_SEMRUSH_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _semrush_max_calls() -> int:
+    try:
+        return int(os.environ.get("SILENTFROG_SEMRUSH_MAX_CALLS", "100").strip() or "100")
+    except ValueError:
+        return 100
+
+
+def _registrable_domain(url: str) -> str:
+    """Registrable domain (eTLD+1) of the URL host, so a whole-site crawl
+    caches one Semrush overview per domain rather than per URL."""
+    import tldextract
+
+    extracted = tldextract.extract(url)
+    return str(extracted.top_domain_under_public_suffix or "").lower()
+
+
+async def _collect_semrush(url: str) -> dict[str, Any]:
+    """v2.0 V17 — Semrush authority metrics, gated on
+    SILENTFROG_SEMRUSH_ENABLE + an API key (keyring or env). Returns {}
+    (unmeasured) on a stock audit. Cached per registrable domain so the
+    daily call budget covers ~1-2 calls per domain. Never raises."""
+    if not _semrush_enabled():
+        return {}
+    from .integrations.semrush.client import fetch_domain_overview, resolve_api_key
+
+    api_key = resolve_api_key()
+    if not api_key:
+        return {}
+    domain = _registrable_domain(url)
+    if not domain:
+        return {}
+    try:
+        metrics = await fetch_domain_overview(domain, api_key, _semrush_max_calls())
+    except Exception:  # noqa: BLE001 — integration failure degrades silently
+        return {}
+    return metrics.to_dict()
 
 
 async def _collect_rich_results(structured_data: dict[str, Any], url: str) -> dict[str, Any]:

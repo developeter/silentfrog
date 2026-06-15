@@ -83,6 +83,13 @@ google = [
     "google-api-python-client (>=2.197,<3)",
     "keyring (>=25.7,<26)",
 ]
+# v2.0 V17 — optional Semrush authority integration. The API key lives in
+# the OS keychain (same `keyring` pin as the google extra, so the lock
+# content is unchanged); the client lazy-imports it and degrades to env
+# only when absent. Off by default (SILENTFROG_SEMRUSH_ENABLE).
+semrush = [
+    "keyring (>=25.7,<26)",
+]
 
 [tool.poetry]
 packages = [{include = "silentfrog", from = "src"}]

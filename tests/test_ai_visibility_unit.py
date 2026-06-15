@@ -762,3 +762,50 @@ def test_ai_visibility_v14_tooltips_are_non_default() -> None:
     default = ai_visibility_check_tooltip("definitely-unknown-key")
     assert ai_visibility_check_tooltip("rich_results_eligible") != default
     assert ai_visibility_check_tooltip("lighthouse_perf_above_90") != default
+
+
+# --- V17 Semrush authority signals -----------------------------------------
+
+_V17_SEMRUSH = {
+    "domain_authority": 55,
+    "organic_keywords": 1500,
+    "organic_traffic": 52000,
+    "backlinks_total": 120000,
+    "referring_domains": 3400,
+    "paid_keywords": 30,
+    "paid_traffic": 800,
+    "measured": True,
+}
+_V17_SEMRUSH_KEYS = (
+    "semrush_domain_authority_above_30",
+    "semrush_organic_keywords_present",
+    "semrush_organic_traffic_above_threshold",
+    "semrush_backlinks_above_threshold",
+    "semrush_referring_domains_diverse",
+    "semrush_paid_signal_present",
+)
+
+
+def test_ai_visibility_emits_semrush_checks_when_measured() -> None:
+    payload = {**_payload_with_discovery({}), "semrush": _V17_SEMRUSH}
+    by_key = {c.key: c for c in build_ai_visibility_checks(payload)}
+    for key in _V17_SEMRUSH_KEYS:
+        assert key in by_key, f"missing semrush check: {key}"
+        assert by_key[key].area == "Authority signals"
+
+
+def test_ai_visibility_omits_semrush_checks_when_absent() -> None:
+    keys = {c.key for c in build_ai_visibility_checks(_payload_with_discovery({}))}
+    for key in _V17_SEMRUSH_KEYS:
+        assert key not in keys
+
+
+def test_ai_visibility_semrush_tooltip_is_non_default() -> None:
+    default = ai_visibility_check_tooltip("definitely-unknown-key")
+    assert ai_visibility_check_tooltip("semrush_domain_authority_above_30") != default
+
+
+def test_ai_visibility_areas_include_authority_signals() -> None:
+    assert "Authority signals" in AI_VISIBILITY_AREAS
+    # Appended after "Engagement" (V7's last area).
+    assert AI_VISIBILITY_AREAS.index("Authority signals") == AI_VISIBILITY_AREAS.index("Engagement") + 1

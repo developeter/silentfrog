@@ -26,6 +26,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._build_general_group())
         layout.addWidget(self._build_geo_group())
+        layout.addWidget(self._build_semrush_group(theme))
         layout.addWidget(self._build_advanced_group(theme))
         layout.addWidget(self._build_button_box())
         self._connect_signals()
@@ -56,6 +57,37 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         )
         geo_layout.addRow(self.chk_tech_stack)
         return geo_box
+
+    def _build_semrush_group(self, theme: str) -> QtWidgets.QGroupBox:
+        """Authority (Semrush) controls. Optional + off/empty by default —
+        the key is persisted to the OS keychain, the daily cap to QSettings."""
+        box = QtWidgets.QGroupBox("Authority (Semrush)")
+        form = QtWidgets.QFormLayout(box)
+        self.edit_semrush_key = QtWidgets.QLineEdit()
+        self.edit_semrush_key.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        self.edit_semrush_key.setPlaceholderText("Semrush API key (stored in the OS keychain)")
+        self.edit_semrush_key.setStyleSheet(self._field_stylesheet(theme))
+        self.edit_semrush_key.setToolTip(
+            "Optional. Fetches domain Authority Score, organic footprint, and backlink signals from the "
+            "Semrush Analytics API. Off/empty by default; per §1.5 these off-page signals never penalise "
+            "the GEO Score. Calls are metered — see the daily cap below."
+        )
+        form.addRow("API key", self.edit_semrush_key)
+        self.spin_semrush_max_calls = QtWidgets.QSpinBox()
+        self.spin_semrush_max_calls.setRange(1, 10000)
+        self.spin_semrush_max_calls.setValue(100)
+        form.addRow("Max Semrush calls per day", self.spin_semrush_max_calls)
+        self.btn_semrush_test = QtWidgets.QPushButton("Test connection")
+        self.btn_semrush_test.clicked.connect(self._on_semrush_test)
+        self.lbl_semrush_test = QtWidgets.QLabel("")
+        test_widget = QtWidgets.QWidget()
+        test_row = QtWidgets.QHBoxLayout(test_widget)
+        test_row.setContentsMargins(0, 0, 0, 0)
+        test_row.addWidget(self.btn_semrush_test)
+        test_row.addWidget(self.lbl_semrush_test)
+        test_row.addStretch(1)
+        form.addRow(test_widget)
+        return box
 
     def _configure_dialog(self) -> str:
         self.setWindowTitle("Crawl settings")
@@ -169,9 +201,26 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         else:
             self.chk_ssr_parity.setChecked(False)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
+        self._initialize_semrush()
         self._load_from_options(options)
         self._sync_state()
         self.resize(self.sizeHint().expandedTo(self.minimumSize()))
+
+    def _initialize_semrush(self) -> None:
+        """Prefill the masked key from the keychain and the cap from
+        QSettings. Both degrade to empty/default when unavailable."""
+        self.edit_semrush_key.setText(self._load_semrush_key())
+        settings = QtCore.QSettings("Silentfrog", "Silentfrog")
+        self.spin_semrush_max_calls.setValue(int(settings.value("semrush/max_calls", 100) or 100))
+
+    @staticmethod
+    def _load_semrush_key() -> str:
+        from .integrations.semrush.client import resolve_api_key
+
+        try:
+            return resolve_api_key()
+        except Exception:
+            return ""
 
     @staticmethod
     def _checkbox_stylesheet(theme: str) -> str:
@@ -252,6 +301,50 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
         )
+
+    def accept(self) -> None:
+        """Persist the Semrush key to the keychain and the daily cap to
+        QSettings, then close. Persistence failures never block accept."""
+        self._persist_semrush()
+        super().accept()
+
+    def _persist_semrush(self) -> None:
+        key = self.edit_semrush_key.text().strip()
+        settings = QtCore.QSettings("Silentfrog", "Silentfrog")
+        settings.setValue("semrush/max_calls", self.spin_semrush_max_calls.value())
+        try:
+            import keyring
+
+            keyring.set_password("silentfrog-semrush", "api_key", key)
+        except Exception:
+            # keyring is optional; without it the key falls back to env only.
+            return
+
+    def _on_semrush_test(self) -> None:
+        """Run test_connection off the UI thread and show ✓/✗. Tiny by
+        design — mirrors the app's daemon-thread pattern (see workers.py)."""
+        import asyncio
+        import threading
+
+        from .integrations.semrush.client import test_connection
+
+        key = self.edit_semrush_key.text().strip()
+        self.lbl_semrush_test.setText("Testing…")
+
+        def _target() -> None:
+            try:
+                ok, message = asyncio.run(test_connection(key))
+            except Exception as exc:  # noqa: BLE001
+                ok, message = False, str(exc)
+            mark = "✓" if ok else "✗"
+            QtCore.QMetaObject.invokeMethod(
+                self.lbl_semrush_test,
+                "setText",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, f"{mark} {message}"),
+            )
+
+        threading.Thread(target=_target, daemon=True).start()
 
     def _apply_preset(self, preset: str) -> None:
         if self._applying_preset:

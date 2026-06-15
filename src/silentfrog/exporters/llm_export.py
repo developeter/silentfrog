@@ -154,6 +154,20 @@ def _tech_stack_lines(payload: Any) -> list[str]:
     return lines
 
 
+def _semrush_lines(payload: Any) -> list[str]:
+    data = getattr(payload, "semrush", {}) or {}
+    if not isinstance(data, dict) or not data.get("measured"):
+        return []
+    return [
+        "### Authority (Semrush)",
+        "",
+        f"- Authority Score: {data.get('domain_authority', 0)}/100",
+        f"- Organic: {data.get('organic_keywords', 0)} keywords, ~{data.get('organic_traffic', 0)} visits/mo",
+        f"- Backlinks: {data.get('backlinks_total', 0)} from {data.get('referring_domains', 0)} referring domains",
+        "",
+    ]
+
+
 def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExport:
     metrics = _page_metrics(payload, url)
     checks = _checks_for(payload, mode)
@@ -170,6 +184,7 @@ def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExp
         *_lighthouse_lines(payload),
         *_rich_results_lines(payload),
         *_tech_stack_lines(payload),
+        *_semrush_lines(payload),
         *_custom_extraction_lines(payload),
         "### Issues",
         *_issue_table(checks),

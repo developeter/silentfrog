@@ -1219,6 +1219,8 @@ class CrawlPayload:
     # v2.0 V14: Lighthouse category scores (opt-in) + rich-result eligibility.
     lighthouse: dict[str, Any] = field(default_factory=dict)
     rich_results: dict[str, Any] = field(default_factory=dict)
+    # v2.0 V17: optional Semrush authority metrics (off by default).
+    semrush: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1247,6 +1249,7 @@ class CrawlPayload:
             tech_stack=dict(data.get("tech_stack") or {}) if isinstance(data.get("tech_stack"), dict) else {},
             lighthouse=dict(data.get("lighthouse") or {}) if isinstance(data.get("lighthouse"), dict) else {},
             rich_results=dict(data.get("rich_results") or {}) if isinstance(data.get("rich_results"), dict) else {},
+            semrush=dict(data.get("semrush") or {}) if isinstance(data.get("semrush"), dict) else {},
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1273,6 +1276,7 @@ class CrawlPayload:
             "tech_stack": dict(self.tech_stack),
             "lighthouse": dict(self.lighthouse),
             "rich_results": dict(self.rich_results),
+            "semrush": dict(self.semrush),
         }
 
     def __getitem__(self, key: str) -> Any:

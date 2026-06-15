@@ -95,3 +95,20 @@ def test_settings_dialog_tech_stack_toggle(qtbot) -> None:
     assert dialog.chk_tech_stack.isChecked() is False  # off by default
     dialog.chk_tech_stack.setChecked(True)
     assert dialog.options().tech_stack_detection is True
+
+
+def test_settings_dialog_semrush_defaults(qtbot, monkeypatch) -> None:
+    # V17 — the API-key field is empty + masked by default and the
+    # max-calls spinbox defaults to 100. Force env-only resolution (no
+    # stored key) so the default is deterministic regardless of keychain.
+    monkeypatch.delenv("SILENTFROG_SEMRUSH_API_KEY", raising=False)
+    from qtpy import QtWidgets
+
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    assert dialog.edit_semrush_key.text() == ""
+    assert dialog.edit_semrush_key.echoMode() == QtWidgets.QLineEdit.EchoMode.Password
+    assert dialog.spin_semrush_max_calls.value() == 100
