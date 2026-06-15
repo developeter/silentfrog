@@ -609,17 +609,16 @@ def test_seo_window_primary_controls_exist(qtbot) -> None:
     assert win.btn_settings.text() == "Crawl settings..."
 
 
-def test_seo_window_lighthouse_button_disabled_by_default(qtbot, monkeypatch) -> None:
-    # V14: the on-demand Lighthouse button exists, is disabled before any
-    # audit, and stays gated on the PSI enable env (no surprise calls).
-    monkeypatch.delenv("SILENTFROG_PSI_ENABLE", raising=False)
+def test_seo_window_lighthouse_button_disabled_until_audit(qtbot) -> None:
+    # V14: the on-demand Lighthouse button exists and is disabled before any
+    # audit (no payload yet). Clicking is the consent — it is NOT gated on an
+    # env var, so the button enables after any audit and normal scans never
+    # trigger Lighthouse (it is button-only, never in the crawl path).
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
     assert win.btn_lighthouse.text() == "Run Lighthouse"
     assert win.btn_lighthouse.isEnabled() is False
-    assert win._lighthouse_enabled() is False
-    monkeypatch.setenv("SILENTFROG_PSI_ENABLE", "1")
-    assert win._lighthouse_enabled() is True
+    assert not hasattr(win, "_lighthouse_enabled")
 
 
 def test_seo_window_configures_scrollable_tabs(qtbot) -> None:

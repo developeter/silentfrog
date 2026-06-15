@@ -431,10 +431,10 @@ class BotMatrixTab(TableTab):
         super().__init__(sorting=False)  # heatmap order = _AI_AGENTS order; sorting confuses chip cells
         self._summary = _rich_label(
             "<b>Bot Matrix</b> — 19 AI / search bots × 5 access signals. "
-            "Cells render as coloured chips: green = good, yellow = warning, red = critical, grey = "
-            "not measured / not applicable. Site-wide columns (Meta robots / llms.txt / SSR parity) "
-            "show the same chip across every row by design. Double-click any row for the full "
-            "per-bot reasoning."
+            "Each cell shows a glyph + colour: ✓ green = good, ! yellow = warning, ✗ red = critical, "
+            "– grey = not measured / not applicable. Site-wide columns (Meta robots / llms.txt / SSR "
+            "parity) repeat the same cell across every row by design. Double-click any row for the "
+            "full per-bot reasoning."
         )
         self._layout.insertWidget(0, self._summary)
         self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -462,6 +462,7 @@ class BotMatrixTab(TableTab):
             f"Allowed {counts['Allowed']} &nbsp; "
             f"Limited {counts['Limited']} &nbsp; "
             f"Blocked {counts['Blocked']} &nbsp;&nbsp; "
+            "✓ good · ! warning · ✗ critical · – n/a &nbsp;&nbsp; "
             "<i>(double-click a row for the full 7-column bot detail)</i>"
         )
         _set_header_modes(
@@ -509,9 +510,50 @@ class BotMatrixTab(TableTab):
         dialog.exec()
 
 
+# Bot Matrix accessibility: a glyph per status so meaning never depends on
+# colour alone (helps colour-blind users and makes the heatmap legible).
+# Statuses + their aliases collapse onto four buckets keyed to a symbol.
+_BOT_STATUS_KEYS = {
+    "good": "good",
+    "ok": "good",
+    "pass": "good",
+    "allowed": "good",
+    "warning": "warning",
+    "warn": "warning",
+    "limited": "warning",
+    "critical": "critical",
+    "bad": "critical",
+    "blocked": "critical",
+}
+_BOT_STATUS_GLYPHS = {
+    "good": "✓",  # ✓
+    "warning": "!",
+    "critical": "✗",  # ✗
+    "info": "–",  # –
+}
+# Fixed pens for the saturated chips; "info" falls back to the theme text
+# colour so the dash reads on both light and dark palettes.
+_BOT_GLYPH_PENS = {
+    "good": QtGui.QColor("#ffffff"),
+    "warning": QtGui.QColor("#1a1a1a"),
+    "critical": QtGui.QColor("#ffffff"),
+}
+
+
+def _bot_status_key(status: str) -> str:
+    return _BOT_STATUS_KEYS.get((status or "").strip().lower(), "info")
+
+
+def bot_matrix_status_glyph(status: str) -> str:
+    """Accessibility glyph for a Bot Matrix status (✓ / ! / ✗ / –) so the
+    heatmap conveys meaning without relying on colour."""
+    return _BOT_STATUS_GLYPHS[_bot_status_key(status)]
+
+
 class _ChipDelegate(QtWidgets.QStyledItemDelegate):
-    """Paints a centred 14×14 rounded-rect chip using the cell's
-    BackgroundRole brush. Column 0 falls through to the default text
+    """Paints a centred rounded-rect chip using the cell's BackgroundRole
+    brush, plus an accessibility glyph (✓ / ! / ✗ / –) so the signal is
+    legible without colour. Column 0 falls through to the default text
     delegate so the bot name renders normally."""
 
     _CHIP_SIZE = 14
@@ -529,28 +571,35 @@ class _ChipDelegate(QtWidgets.QStyledItemDelegate):
         # Manual fill — but defer selection highlight to the base style first.
         widget = option.widget
         style = widget.style() if widget is not None else QtWidgets.QApplication.style()
-        # Draw the cell background (handles selection highlight, alternate row, etc.).
         painter.save()
         opt = QtWidgets.QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
-        opt.text = ""  # we render the chip; suppress any DisplayRole text
+        opt.text = ""  # we render the chip + glyph; suppress any DisplayRole text
         style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, widget)
         brush_data = index.data(QtCore.Qt.ItemDataRole.BackgroundRole)
         if isinstance(brush_data, QtGui.QBrush):
-            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-            painter.setBrush(brush_data)
-            painter.setPen(QtCore.Qt.PenStyle.NoPen)
-            rect = option.rect
-            cx = rect.center().x()
-            cy = rect.center().y()
-            chip = QtCore.QRectF(
-                cx - self._CHIP_SIZE / 2,
-                cy - self._CHIP_SIZE / 2,
-                self._CHIP_SIZE,
-                self._CHIP_SIZE,
-            )
-            painter.drawRoundedRect(chip, self._CHIP_RADIUS, self._CHIP_RADIUS)
+            self._draw_chip(painter, option.rect, brush_data)
+        self._draw_glyph(painter, option, index)
         painter.restore()
+
+    def _draw_chip(self, painter: QtGui.QPainter, rect: QtCore.QRect, brush: QtGui.QBrush) -> None:
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(brush)
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        cx = rect.center().x()
+        cy = rect.center().y()
+        chip = QtCore.QRectF(cx - self._CHIP_SIZE / 2, cy - self._CHIP_SIZE / 2, self._CHIP_SIZE, self._CHIP_SIZE)
+        painter.drawRoundedRect(chip, self._CHIP_RADIUS, self._CHIP_RADIUS)
+
+    def _draw_glyph(
+        self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex
+    ) -> None:
+        key = _bot_status_key(str(index.data(QtCore.Qt.ItemDataRole.UserRole) or ""))
+        painter.setPen(_BOT_GLYPH_PENS.get(key, option.palette.text().color()))
+        font = QtGui.QFont(painter.font())
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(option.rect, QtCore.Qt.AlignmentFlag.AlignCenter, _BOT_STATUS_GLYPHS[key])
 
     def sizeHint(  # noqa: N802, D401
         self,

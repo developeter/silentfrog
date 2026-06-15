@@ -334,8 +334,8 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_lighthouse.setEnabled(False)
         self.btn_lighthouse.setToolTip(
             "Run a Lighthouse lab audit (PageSpeed Insights) for this page — slow, on-demand.\n"
-            "Set SILENTFROG_PSI_ENABLE=1 to allow the external PSI call; "
-            "SILENTFROG_PSI_API_KEY lifts the rate limit."
+            "Nothing runs until you click; normal scans never trigger it. "
+            "Optional: set SILENTFROG_PSI_API_KEY to lift the PSI rate limit."
         )
         self._register_dimmed_button(self.btn_lighthouse)
         self.btn_lighthouse.clicked.connect(self._run_lighthouse)
@@ -573,12 +573,6 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_img_dl.setEnabled(False)
         self.btn_lighthouse.setEnabled(False)
 
-    @staticmethod
-    def _lighthouse_enabled() -> bool:
-        """Lighthouse makes an external PSI call, so it is opt-in via the
-        same env gate as background CrUX collection."""
-        return os.environ.get("SILENTFROG_PSI_ENABLE", "").strip().lower() in {"1", "true", "yes"}
-
     def _run_lighthouse(self) -> None:
         if self._latest_payload is None:
             return
@@ -596,7 +590,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _apply_lighthouse(self, scores: dict[str, Any]) -> None:
         self.btn_lighthouse.setText("Run Lighthouse")
-        self.btn_lighthouse.setEnabled(self._lighthouse_enabled())
+        self.btn_lighthouse.setEnabled(self._latest_payload is not None)
         if self._latest_payload is None:
             return
         mapping = self._latest_payload.to_mapping()
@@ -606,7 +600,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     def _on_lighthouse_error(self, message: str) -> None:
         self.btn_lighthouse.setText("Run Lighthouse")
-        self.btn_lighthouse.setEnabled(self._lighthouse_enabled())
+        self.btn_lighthouse.setEnabled(True)
         QtWidgets.QMessageBox.warning(self, "Lighthouse failed", message or "PageSpeed Insights call failed.")
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
@@ -755,7 +749,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_export_ai.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
-        self.btn_lighthouse.setEnabled(self._latest_payload is not None and self._lighthouse_enabled())
+        self.btn_lighthouse.setEnabled(self._latest_payload is not None)
         self._update_recap_from_payload()
         self._reset_ui()
         self._set_intro_state(False)

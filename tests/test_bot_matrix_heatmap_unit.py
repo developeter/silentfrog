@@ -216,3 +216,18 @@ def test_llms_column_per_bot_from_ai_json_policies() -> None:
     assert by_label["GPTBot"].statuses[COL_LLMS - 1] == "good"  # explicitly allowed
     assert by_label["ClaudeBot"].statuses[COL_LLMS - 1] == "warning"  # explicitly disallowed
     assert by_label["PerplexityBot"].statuses[COL_LLMS - 1] == "good"  # site-wide fallback (ai.json present)
+
+
+def test_status_glyphs_cover_every_state() -> None:
+    # Accessibility: meaning must not depend on colour alone.
+    from silentfrog.tabs import bot_matrix_status_glyph
+
+    assert bot_matrix_status_glyph("good") == "✓"
+    assert bot_matrix_status_glyph("allowed") == "✓"
+    assert bot_matrix_status_glyph("warning") == "!"
+    assert bot_matrix_status_glyph("limited") == "!"
+    assert bot_matrix_status_glyph("critical") == "✗"
+    assert bot_matrix_status_glyph("blocked") == "✗"
+    assert bot_matrix_status_glyph("info") == "–"
+    assert bot_matrix_status_glyph("not_measured") == "–"
+    assert bot_matrix_status_glyph("") == "–"

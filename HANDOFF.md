@@ -1,6 +1,6 @@
 # Silentfrog Handoff
 
-Last updated: 2026-05-21
+Last updated: 2026-06-15
 
 ## Working Rules
 
@@ -22,10 +22,74 @@ Last updated: 2026-05-21
 
 ## Current Git Context
 
-- Main working branch in recent work: `dev`.
-- Latest pushed commit at handoff time: `7351838 Fix three small GUI regressions on theme + tabs + logo` (plus the bootstrap-README Sequoia note in the same series).
-- Working tree on the maintainer's Windows machine is clean.
-- The bootstrap publish workflow (`.github/workflows/release-bootstrap.yml`) is wired up but has not yet been triggered — no `v*` tag exists yet, so no GitHub Release has the bootstrap files attached.
+- **Active branch: `feature/v2.0`** (the v2.0 build; `dev` holds shipped v1.1).
+- Remote is pinned to GitHub account `developeter` via a repo-local
+  credential helper (`gh auth token --user developeter`), regardless of
+  any other VS project signed in as `marketing@lago.it`.
+- Latest pushed commits (most recent last): `0521669` V16 robots
+  simulator + hreflang, `81c4b70` V14 Lighthouse + Rich Results,
+  `edacc75` V17 Semrush. A follow-up GUI-feedback commit (Bot Matrix
+  accessibility glyphs + ungated Lighthouse button) sits on top.
+- Working tree on the maintainer's Windows machine is otherwise clean.
+
+## v2.0 State (source of truth: `.claude/plans/` active plan + `docs/v2_beat_screaming_frog_roadmap.md`)
+
+v2.0 targets ~1M-URL whole-site crawling + parity-plus vs Screaming
+Frog/Sitebulb. Milestone status:
+
+- **Shipped (V1–V17, minus the dropped ones):** V1 fetcher strategy, V2
+  streaming SQLite store, V3 hybrid spider crawl, V4 render pool, V5 LLM
+  export, V6 custom extraction, V7 GSC+GA4, V8 crawl diff, V9 link graph,
+  V11 per-agent ai.json/llms.txt, V13 server-log + crawl-budget, V15
+  tech-stack (off by default), **V16** robots simulator + hreflang depth,
+  **V14** Lighthouse (PSI) + Rich Results, **V17** Semrush.
+- **Stopped here by maintainer directive: do NOT start V19 without them.**
+  V19 = GUI redesign Stage A (regroup ~18 tabs into 5 sidebar buckets +
+  PyQtGraph charts behind a `[charts]` extra). It is the biggest single
+  PR and the maintainer wants to be hands-on for it.
+- **Queued after V19:** V10 (per-bot SSR), V20 (embeddings + brand
+  mentions). **Dropped from v2.0:** V18 (MCP server); V12 standalone
+  Common Crawl backlinks (folded into V17).
+- Invariants honoured everywhere: §1.5 myth rule (absent not-required
+  signal → info, never warning/critical), add-only `CrawlPayload` keys,
+  new Settings/integrations default OFF, code-shape baseline unchanged,
+  every heavy/external dep behind an optional extra (zero new base deps —
+  V14 reuses base aiohttp, V17's `[semrush]` extra reuses the `[google]`
+  keyring pin).
+
+### v2.0 build/test quirk on this Windows box
+
+The project is installed **non-editable**, so tests import the copy in
+`.venv/Lib/site-packages/silentfrog` — you must re-sync after editing
+source. Normally `./.venv/Scripts/python.exe -m pip install --no-deps
+--upgrade .` does it, BUT when the Silentfrog GUI is running it locks
+`silentfrog.exe` and pip rolls the whole install back. Workaround while
+the app is open: `cp -r src/silentfrog/* .venv/Lib/site-packages/silentfrog/`.
+With the app closed, a normal pip reinstall works cleanly.
+
+## v2.0 integrations & secrets (how to enable — none on by default)
+
+All external integrations are OFF by default and never run on a stock
+audit. Secrets live in the OS keychain or env vars — never in the repo.
+
+- **Semrush (V17):** key via Settings → "Authority (Semrush)" → OS
+  keychain (`keyring` service `silentfrog-semrush`, entry `api_key`), or
+  env `SILENTFROG_SEMRUSH_API_KEY`. Audit enrichment also needs
+  `SILENTFROG_SEMRUSH_ENABLE=1`; daily call cap via the Settings spinbox
+  or `SILENTFROG_SEMRUSH_MAX_CALLS` (default 100). "Test connection" only
+  needs the key.
+- **Lighthouse (V14):** **button-only, never automatic.** The "Run
+  Lighthouse" button on the single-page audit is always clickable after
+  an audit (clicking is the consent; no enable gate). Optional
+  `SILENTFROG_PSI_API_KEY` lifts the PSI rate limit. NOTE: the *separate*
+  background CrUX collection in `perf_crux.py` still uses
+  `SILENTFROG_PSI_ENABLE` — that gate is intentional and unrelated to the
+  button.
+- **Rich Results (V14):** schema-derived on every audit (free, no
+  network); upgraded to Google's verdict via the GSC URL Inspection API
+  only when GSC is connected (V7 OAuth).
+- **GSC + GA4 (V7):** `SILENTFROG_GOOGLE_ENABLE=1` + OAuth (system-browser
+  loopback, tokens in keychain `silentfrog-google`).
 
 ## Product Direction
 
@@ -42,6 +106,9 @@ The product should lead with:
 Avoid turning it into a raw-data clone of Screaming Frog/Ahrefs. Raw data should remain available, but the main value should be action clarity.
 
 ## Roadmap State
+
+> This section is the **v1.1** roadmap (shipped on `dev`). For the active
+> `feature/v2.0` work see the **v2.0 State** section above.
 
 See `PLAN.md` as the source of truth.
 
