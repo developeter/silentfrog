@@ -35,20 +35,35 @@ def test_default_ssl_context_uses_certifi_bundle() -> None:
     assert ctx.cert_store_stats()["x509_ca"] > 0
 
 
-def test_read_local_revision_dev_mode_reads_git_head(monkeypatch, tmp_path: Path) -> None:
+def test_read_local_revision_dev_mode_reads_git_head_and_branch(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     expected_sha = "abc1234abc1234abc1234abc1234abc1234abc12"
 
     def fake_run(cmd, cwd, capture_output, text, check):
-        assert cmd == ["git", "rev-parse", "HEAD"]
         assert cwd == tmp_path
-        return subprocess.CompletedProcess(cmd, 0, stdout=expected_sha + "\n", stderr="")
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=expected_sha + "\n", stderr="")
+        assert cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="dev\n", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     local = read_local_revision(tmp_path)
     assert local.mode is InstallMode.DEVELOPER
     assert local.sha == expected_sha
+    assert local.branch == "dev"
     assert local.repo_root == tmp_path
+
+
+def test_read_local_revision_dev_mode_detached_head_has_no_branch(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+
+    def fake_run(cmd, cwd, capture_output, text, check):
+        out = "HEAD\n" if "--abbrev-ref" in cmd else "abc1234\n"
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Detached HEAD reports "HEAD" -> treated as no named branch.
+    assert read_local_revision(tmp_path).branch == ""
 
 
 def test_read_local_revision_user_mode_reads_revision_file(tmp_path: Path) -> None:
@@ -57,6 +72,8 @@ def test_read_local_revision_user_mode_reads_revision_file(tmp_path: Path) -> No
     local = read_local_revision(tmp_path)
     assert local.mode is InstallMode.USER
     assert local.sha == sha
+    # The pinned revision string doubles as the branch for user installs.
+    assert local.branch == sha
 
 
 def test_read_local_revision_unknown_when_neither_marker_present(tmp_path: Path) -> None:

@@ -94,6 +94,8 @@ class AboutDialog(QDialog):
         layout = QVBoxLayout(self)
         local = read_local_revision(find_repo_root())
         layout.addWidget(QLabel(f"<b>Silentfrog</b> {__version__}"))
+        if local.branch:
+            layout.addWidget(QLabel(f"Branch: <code>{local.branch}</code>"))
         layout.addWidget(QLabel(f"Revision: <code>{_short_sha(local.sha)}</code>"))
         layout.addWidget(QLabel(f"Install mode: {_INSTALL_MODE_LABELS[local.mode]}"))
         link = QLabel(f'<a href="{_REPO_URL}">{_REPO_URL}</a>')

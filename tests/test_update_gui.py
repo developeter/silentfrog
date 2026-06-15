@@ -21,8 +21,8 @@ from silentfrog.updater import (  # type: ignore[reportMissingImports]
 )
 
 
-def _make_local(sha: str = "a" * 40, mode: InstallMode = InstallMode.USER) -> LocalRevision:
-    return LocalRevision(sha=sha, mode=mode, repo_root=Path("."))
+def _make_local(sha: str = "a" * 40, mode: InstallMode = InstallMode.USER, branch: str = "") -> LocalRevision:
+    return LocalRevision(sha=sha, mode=mode, repo_root=Path("."), branch=branch)
 
 
 def _make_remote(sha: str = "b" * 40, message: str = "Latest commit\n\nbody") -> RemoteRevision:
@@ -128,6 +128,29 @@ def test_about_dialog_shows_version_and_repo_link(qtbot, monkeypatch) -> None:
     assert "Silentfrog" in text
     assert "cafeb" in text
     assert "developeter/silentfrog" in text
+
+
+def test_about_dialog_shows_branch_when_present(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silentfrog.update_gui.read_local_revision",
+        lambda _root: _make_local(mode=InstallMode.DEVELOPER, branch="feature/v2.0"),
+    )
+    dlg = AboutDialog()
+    qtbot.addWidget(dlg)
+    text = " ".join(label.text() for label in dlg.findChildren(__import__("qtpy").QtWidgets.QLabel))
+    assert "Branch" in text
+    assert "feature/v2.0" in text
+
+
+def test_about_dialog_omits_branch_when_empty(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "silentfrog.update_gui.read_local_revision",
+        lambda _root: _make_local(branch=""),
+    )
+    dlg = AboutDialog()
+    qtbot.addWidget(dlg)
+    text = " ".join(label.text() for label in dlg.findChildren(__import__("qtpy").QtWidgets.QLabel))
+    assert "Branch" not in text
 
 
 def test_home_window_help_menu_lists_check_and_about(qtbot) -> None:

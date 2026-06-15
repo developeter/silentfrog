@@ -73,6 +73,9 @@ class LocalRevision:
     sha: str
     mode: InstallMode
     repo_root: Path
+    # Current branch: `git rev-parse --abbrev-ref HEAD` for a dev clone,
+    # or the pinned revision string for a user install. "" when unknown.
+    branch: str = ""
 
 
 @dataclass(frozen=True)
@@ -108,18 +111,21 @@ def read_local_revision(repo_root: Path) -> LocalRevision:
     """
     if (repo_root / ".git").exists():
         sha = _read_git_head(repo_root)
-        return LocalRevision(sha=sha, mode=InstallMode.DEVELOPER, repo_root=repo_root)
+        branch = _read_git_branch(repo_root)
+        return LocalRevision(sha=sha, mode=InstallMode.DEVELOPER, repo_root=repo_root, branch=branch)
     revision_file = repo_root / REVISION_FILE_NAME
     if revision_file.is_file():
-        sha = revision_file.read_text(encoding="utf-8").strip()
-        return LocalRevision(sha=sha, mode=InstallMode.USER, repo_root=repo_root)
+        pinned = revision_file.read_text(encoding="utf-8").strip()
+        # A user install pins a branch/revision string (e.g. "dev"); surface
+        # it as both the revision and the branch.
+        return LocalRevision(sha=pinned, mode=InstallMode.USER, repo_root=repo_root, branch=pinned)
     return LocalRevision(sha="", mode=InstallMode.UNKNOWN, repo_root=repo_root)
 
 
-def _read_git_head(repo_root: Path) -> str:
+def _git_output(repo_root: Path, *args: str) -> str:
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", *args],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -128,6 +134,16 @@ def _read_git_head(repo_root: Path) -> str:
     except (OSError, subprocess.CalledProcessError):
         return ""
     return result.stdout.strip()
+
+
+def _read_git_head(repo_root: Path) -> str:
+    return _git_output(repo_root, "rev-parse", "HEAD")
+
+
+def _read_git_branch(repo_root: Path) -> str:
+    branch = _git_output(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+    # Detached HEAD reports "HEAD"; treat that as no named branch.
+    return "" if branch == "HEAD" else branch
 
 
 def _new_session() -> aiohttp.ClientSession:
