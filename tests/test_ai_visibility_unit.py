@@ -417,9 +417,9 @@ def test_ai_visibility_myth_tooltips_carry_google_disclaimer(myth_key: str) -> N
 
 
 def test_ai_visibility_areas_include_eeat() -> None:
-    # M2 adds "E-E-A-T" as the sixth area.
+    # V16 inserts "Hreflang" before "E-E-A-T", shifting E-E-A-T to index 6.
     assert "E-E-A-T" in AI_VISIBILITY_AREAS
-    assert AI_VISIBILITY_AREAS.index("E-E-A-T") == 5
+    assert AI_VISIBILITY_AREAS.index("E-E-A-T") == 6
 
 
 def test_ai_visibility_emits_eeat_and_structure_rows() -> None:
@@ -583,7 +583,8 @@ def test_ai_visibility_propagates_render_diff_when_present() -> None:
 
 
 def test_ai_visibility_areas_include_performance_seventh() -> None:
-    assert AI_VISIBILITY_AREAS[6] == "Performance"
+    # V16's "Hreflang" insertion shifts "Performance" from index 6 to 7.
+    assert AI_VISIBILITY_AREAS[7] == "Performance"
 
 
 def test_ai_visibility_emits_six_lab_cwv_rows_in_performance_area() -> None:
@@ -687,3 +688,41 @@ def test_ai_visibility_keyword_stuffing_warns_when_density_above_threshold() -> 
     checks = build_ai_visibility_checks(payload)
     by_key = {c.key: c for c in checks}
     assert by_key["citation_no_keyword_stuffing"].status == "warning"
+
+
+_HREFLANG_KEYS = (
+    "hreflang_return_tag_complete",
+    "hreflang_x_default_present",
+    "hreflang_cluster_consistent",
+)
+
+
+def test_ai_visibility_emits_hreflang_checks_when_rows_present() -> None:
+    payload = _payload_with_discovery({})
+    payload["url"] = "https://example.com/en/"
+    payload["hreflang"] = [
+        ["en", "https://example.com/en/", "200", "Yes", "Yes"],
+        ["de", "https://example.com/de/", "200", "Yes", "No"],
+        ["x-default", "https://example.com/", "200", "Yes", "No"],
+    ]
+    by_key = {c.key: c for c in build_ai_visibility_checks(payload)}
+    for key in _HREFLANG_KEYS:
+        assert key in by_key, f"missing hreflang check: {key}"
+        assert by_key[key].area == "Hreflang"
+
+
+def test_ai_visibility_omits_hreflang_checks_when_rows_absent() -> None:
+    keys = {c.key for c in build_ai_visibility_checks(_payload_with_discovery({}))}
+    for key in _HREFLANG_KEYS:
+        assert key not in keys
+
+
+def test_ai_visibility_hreflang_tooltip_is_non_default() -> None:
+    default = ai_visibility_check_tooltip("definitely-unknown-key")
+    assert ai_visibility_check_tooltip("hreflang_x_default_present") != default
+    assert "x-default" in ai_visibility_check_tooltip("hreflang_x_default_present")
+
+
+def test_ai_visibility_areas_include_hreflang() -> None:
+    assert "Hreflang" in AI_VISIBILITY_AREAS
+    assert AI_VISIBILITY_AREAS.index("Hreflang") == 5

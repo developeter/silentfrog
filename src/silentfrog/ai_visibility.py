@@ -21,6 +21,7 @@ from .crawl_types import (
 )
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
+from .hreflang_validator import build_hreflang_checks
 from .integrations.google.checks import build_real_performance_checks
 from .integrations.google.types import Ga4Metrics, GscMetrics
 from .perf_crux import CruxData
@@ -35,6 +36,7 @@ AI_VISIBILITY_AREAS = (
     "Answerability",
     "Citation readiness",
     "Entity clarity",
+    "Hreflang",
     "E-E-A-T",
     "Performance",
     # v2.0 V7 — only populated when Google Search Console / GA4 are connected.
@@ -148,6 +150,23 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Product, Article, Service, or Person.\n\n"
         "FAQPage note: Princeton 2024 GEO research measured FAQPage schema correlating with +40% AI "
         "visibility — the largest schema-driven boost. Perplexity in particular prioritises FAQPage-shaped content."
+    ),
+    "hreflang_return_tag_complete": (
+        "Checks whether every hreflang alternate links back to this page (return-tag reciprocity).\n\n"
+        "Per §1.5: reciprocity can only be confirmed by crawling the alternates as a cluster. Without a "
+        "cluster this stays info when reciprocity is unconfirmable and good when the page self-references; "
+        "it NEVER warns. With a cluster, an alternate that fails to link back => warning."
+    ),
+    "hreflang_x_default_present": (
+        "Checks whether an x-default hreflang is declared for multi-language pages.\n\n"
+        "Per §1.5 x-default is recommended, not required: present or single-language => good; multiple "
+        "languages without it => info. NEVER warned."
+    ),
+    "hreflang_cluster_consistent": (
+        "Checks whether the hreflang set is internally consistent and (when a cluster is supplied) symmetric.\n\n"
+        "Per §1.5: a genuine in-set defect — duplicate language codes or a malformed lang value, or a "
+        "cluster that diverges — => warning. A sound or merely unconfirmable set => good or info. "
+        "Absence of a cluster never forces a warning."
     ),
     "access_llms_txt": (
         "Checks whether the site publishes an llms.txt declaring policies and entry points "
@@ -761,6 +780,8 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
+    hreflang_rows = _rows(data.get("hreflang", []))
+    page_url = str(data.get("url") or data.get("final_url") or "")
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
     structure_checks = build_structure_checks(structure)
@@ -778,6 +799,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_citation_content_checks(citation_content),
         *build_advanced_citation_checks(citation_advanced),
         *_build_entity_checks(title, h1, schema, social),
+        *build_hreflang_checks(page_url, hreflang_rows, cluster=None),
         *build_eeat_checks(eeat),
         *build_performance_checks(vitals, crux),
     ]
