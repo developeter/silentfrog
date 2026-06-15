@@ -49,6 +49,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "`pip install silentfrog[geo-render]` and `playwright install chromium`."
             )
         geo_layout.addRow(self.chk_ssr_parity)
+        self.chk_tech_stack = QtWidgets.QCheckBox("Detect tech stack (Wappalyzer-style)")
+        self.chk_tech_stack.setToolTip(
+            "Optional. Identifies the CMS, frameworks, analytics, CDN and server from the page's "
+            "HTML, headers and scripts. Off by default; adds a 'tech_stack' block to the audit."
+        )
+        geo_layout.addRow(self.chk_tech_stack)
         return geo_box
 
     def _configure_dialog(self) -> str:
@@ -162,6 +168,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             self.chk_ssr_parity.setChecked(options.ssr_parity_check)
         else:
             self.chk_ssr_parity.setChecked(False)
+        self.chk_tech_stack.setChecked(options.tech_stack_detection)
         self._load_from_options(options)
         self._sync_state()
         self.resize(self.sizeHint().expandedTo(self.minimumSize()))
@@ -243,6 +250,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             cookie_text=cookie_text,
             ssr_parity_check=ssr,
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
+            tech_stack_detection=self.chk_tech_stack.isChecked(),
         )
 
     def _apply_preset(self, preset: str) -> None:

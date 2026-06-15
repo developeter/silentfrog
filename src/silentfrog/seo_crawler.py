@@ -62,6 +62,7 @@ from .render_diff import compute_render_diff, render_with_playwright
 from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
+from .tech_stack import detect_tech
 
 # re-export host delay map for tests
 _HOST_DELAYS = crawl_http._HOST_DELAYS
@@ -332,10 +333,22 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "perf_crux": crux_payload,
         "ai_citations": ai_citations_payload,
         "custom_extraction": extract_custom(response.body, crawl_options.custom_extraction),
+        "tech_stack": _collect_tech_stack(response, soup, crawl_options),
         **google_metrics,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+def _collect_tech_stack(response: Any, soup: BeautifulSoup, crawl_options: CrawlOptions) -> dict[str, Any]:
+    """v2.0 V15 — optional Wappalyzer-style detection, off by default."""
+    if not crawl_options.tech_stack_detection:
+        return {}
+    scripts = [str(tag.get("src")) for tag in soup.find_all("script", src=True)]
+    generator_tag = soup.find("meta", attrs={"name": "generator"})
+    generator = str(generator_tag.get("content", "")) if generator_tag else ""
+    headers = dict(response.headers) if isinstance(getattr(response, "headers", None), dict) else {}
+    return detect_tech(response.body, headers, scripts, generator).to_dict()
 
 
 async def _collect_google_metrics(url: str) -> dict[str, Any]:

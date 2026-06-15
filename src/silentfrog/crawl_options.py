@@ -22,6 +22,9 @@ class CrawlOptions:
     use_stealth: bool = False
     # v2.0 V6: user-defined CSS/XPath/regex extraction rules.
     custom_extraction: CustomExtractionConfig = field(default_factory=CustomExtractionConfig)
+    # v2.0 V15: tech-stack (Wappalyzer-style) detection. Off by default;
+    # opt-in via Crawl Settings.
+    tech_stack_detection: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -34,6 +37,7 @@ class CrawlOptions:
             ssr_parity_check=False,
             use_stealth=False,
             custom_extraction=CustomExtractionConfig(),
+            tech_stack_detection=False,
         )
 
     @classmethod
@@ -49,6 +53,7 @@ class CrawlOptions:
         ssr_parity_check: bool = False,
         use_stealth: bool | None = None,
         custom_rules_text: str = "",
+        tech_stack_detection: bool | None = None,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -67,6 +72,7 @@ class CrawlOptions:
             ssr_parity_check=bool(ssr_parity_check),
             use_stealth=bool(use_stealth),
             custom_extraction=parse_rules_text(custom_rules_text or ""),
+            tech_stack_detection=bool(tech_stack_detection),
         )
 
 

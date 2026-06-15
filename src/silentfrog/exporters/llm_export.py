@@ -121,6 +121,17 @@ def _custom_extraction_lines(payload: Any) -> list[str]:
     return lines
 
 
+def _tech_stack_lines(payload: Any) -> list[str]:
+    data = getattr(payload, "tech_stack", {}) or {}
+    by_category = data.get("by_category") if isinstance(data, dict) else None
+    if not isinstance(by_category, dict) or not by_category:
+        return []
+    lines = ["### Tech stack", ""]
+    lines += [f"- {category}: {', '.join(names)}" for category, names in by_category.items() if names]
+    lines.append("")
+    return lines
+
+
 def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExport:
     metrics = _page_metrics(payload, url)
     checks = _checks_for(payload, mode)
@@ -134,6 +145,7 @@ def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExp
         f"- Meta description: {metrics['meta_description'] or '(missing)'}",
         f"- Word count: {metrics['word_count']}",
         "",
+        *_tech_stack_lines(payload),
         *_custom_extraction_lines(payload),
         "### Issues",
         *_issue_table(checks),

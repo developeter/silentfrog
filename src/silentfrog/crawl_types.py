@@ -1214,6 +1214,8 @@ class CrawlPayload:
     social: SocialPayload = field(default_factory=SocialPayload.empty)
     # v2.0 V6: {rule_name: extracted_value} from user-defined extraction rules.
     custom_extraction: dict[str, str] = field(default_factory=dict)
+    # v2.0 V15: optional tech-stack detection {"by_category": {...}}.
+    tech_stack: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1239,6 +1241,7 @@ class CrawlPayload:
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
             social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
             custom_extraction=_string_map(data.get("custom_extraction")),
+            tech_stack=dict(data.get("tech_stack") or {}) if isinstance(data.get("tech_stack"), dict) else {},
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1262,6 +1265,7 @@ class CrawlPayload:
             "performance": self.performance.to_dict(),
             "social": self.social.to_dict(),
             "custom_extraction": dict(self.custom_extraction),
+            "tech_stack": dict(self.tech_stack),
         }
 
     def __getitem__(self, key: str) -> Any:
