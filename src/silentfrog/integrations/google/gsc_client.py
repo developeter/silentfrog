@@ -67,5 +67,17 @@ class GscClient:
         rows = response.get("rows", []) if isinstance(response, dict) else []
         return _aggregate_rows(rows)
 
+    def inspect_url(self, site_url: str, page_url: str) -> dict[str, Any]:
+        """Raw URL Inspection response (carries the rich-results verdict),
+        or ``{}`` when unavailable. Never raises (v2.0 V14)."""
+        if self._service is None or not site_url:
+            return {}
+        body = {"inspectionUrl": page_url, "siteUrl": site_url}
+        try:
+            response = self._service.urlInspection().index().inspect(body=body).execute()
+        except Exception:  # noqa: BLE001 — API failure degrades, never raises
+            return {}
+        return response if isinstance(response, dict) else {}
+
 
 __all__ = ["GscClient"]

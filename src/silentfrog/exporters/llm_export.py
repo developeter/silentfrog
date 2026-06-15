@@ -121,6 +121,28 @@ def _custom_extraction_lines(payload: Any) -> list[str]:
     return lines
 
 
+def _lighthouse_lines(payload: Any) -> list[str]:
+    data = getattr(payload, "lighthouse", {}) or {}
+    if not isinstance(data, dict) or not data.get("measured"):
+        return []
+    cats = ("performance", "accessibility", "best_practices", "seo")
+    scores = ", ".join(f"{name.replace('_', ' ')} {data.get(name, 0)}" for name in cats)
+    return ["### Lighthouse (lab)", "", f"- {scores}", ""]
+
+
+def _rich_results_lines(payload: Any) -> list[str]:
+    data = getattr(payload, "rich_results", {}) or {}
+    if not isinstance(data, dict) or not data.get("measured"):
+        return []
+    eligible = ", ".join(str(t) for t in data.get("eligible_types", [])) or "none"
+    warnings = data.get("warnings", []) or []
+    lines = ["### Rich results", "", f"- Eligible types: {eligible} (source: {data.get('source', 'schema')})"]
+    if warnings:
+        lines.append(f"- Warnings: {len(warnings)}")
+    lines.append("")
+    return lines
+
+
 def _tech_stack_lines(payload: Any) -> list[str]:
     data = getattr(payload, "tech_stack", {}) or {}
     by_category = data.get("by_category") if isinstance(data, dict) else None
@@ -145,6 +167,8 @@ def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExp
         f"- Meta description: {metrics['meta_description'] or '(missing)'}",
         f"- Word count: {metrics['word_count']}",
         "",
+        *_lighthouse_lines(payload),
+        *_rich_results_lines(payload),
         *_tech_stack_lines(payload),
         *_custom_extraction_lines(payload),
         "### Issues",

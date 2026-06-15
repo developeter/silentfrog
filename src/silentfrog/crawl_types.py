@@ -1216,6 +1216,9 @@ class CrawlPayload:
     custom_extraction: dict[str, str] = field(default_factory=dict)
     # v2.0 V15: optional tech-stack detection {"by_category": {...}}.
     tech_stack: dict[str, Any] = field(default_factory=dict)
+    # v2.0 V14: Lighthouse category scores (opt-in) + rich-result eligibility.
+    lighthouse: dict[str, Any] = field(default_factory=dict)
+    rich_results: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1242,6 +1245,8 @@ class CrawlPayload:
             social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
             custom_extraction=_string_map(data.get("custom_extraction")),
             tech_stack=dict(data.get("tech_stack") or {}) if isinstance(data.get("tech_stack"), dict) else {},
+            lighthouse=dict(data.get("lighthouse") or {}) if isinstance(data.get("lighthouse"), dict) else {},
+            rich_results=dict(data.get("rich_results") or {}) if isinstance(data.get("rich_results"), dict) else {},
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1266,6 +1271,8 @@ class CrawlPayload:
             "social": self.social.to_dict(),
             "custom_extraction": dict(self.custom_extraction),
             "tech_stack": dict(self.tech_stack),
+            "lighthouse": dict(self.lighthouse),
+            "rich_results": dict(self.rich_results),
         }
 
     def __getitem__(self, key: str) -> Any:

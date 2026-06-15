@@ -319,8 +319,10 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     crux_payload = await _collect_crux(response.url)
     ai_citations_payload = await _collect_ai_citations(response.url)
     google_metrics = await _collect_google_metrics(response.url)
+    rich_results = await _collect_rich_results(structured_data, response.url)
     raw_payload = {
         "schema": structured_data,
+        "rich_results": rich_results,
         "performance": performance_metrics,
         **section_payload,
         "eeat": eeat.to_dict(),
@@ -361,6 +363,35 @@ async def _collect_google_metrics(url: str) -> dict[str, Any]:
         return {}
     try:
         return await asyncio.to_thread(connection.metrics_for, url)
+    except Exception:  # noqa: BLE001 — integration failure degrades silently
+        return {}
+
+
+async def _collect_rich_results(structured_data: dict[str, Any], url: str) -> dict[str, Any]:
+    """v2.0 V14 — rich-result eligibility. Schema-derived on every audit
+    (free, no network); upgraded to Google's verdict when a GSC site is
+    connected. Never raises."""
+    from .integrations.google.rich_results import derive_from_schema, from_url_inspection
+
+    report = derive_from_schema(structured_data)
+    inspection = await _gsc_inspection(url)
+    if inspection:
+        gsc_report = from_url_inspection(inspection)
+        if gsc_report.measured:
+            report = gsc_report
+    return report.to_dict()
+
+
+async def _gsc_inspection(url: str) -> dict[str, Any]:
+    """Optional GSC URL Inspection call, gated like the other Google
+    integrations. Returns {} unless a GSC site is connected."""
+    from .integrations.google.connection import from_env
+
+    connection = from_env()
+    if connection is None:
+        return {}
+    try:
+        return await asyncio.to_thread(connection.inspect_rich_results, url)
     except Exception:  # noqa: BLE001 — integration failure degrades silently
         return {}
 

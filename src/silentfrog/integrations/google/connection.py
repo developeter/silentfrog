@@ -40,6 +40,13 @@ class GoogleConnection:
         ga4_metrics = self.ga4.metrics_for_url(url, start, end)
         return {"gsc": gsc_metrics.to_dict(), "ga4": ga4_metrics.to_dict()}
 
+    def inspect_rich_results(self, url: str) -> dict[str, Any]:
+        """Raw GSC URL Inspection response for ``url`` (v2.0 V14), or
+        ``{}`` when no GSC site is connected. Never raises."""
+        if not self.site_url:
+            return {}
+        return self.gsc.inspect_url(self.site_url, url)
+
 
 def _enabled() -> bool:
     return os.environ.get("SILENTFROG_GOOGLE_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}

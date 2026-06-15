@@ -726,3 +726,39 @@ def test_ai_visibility_hreflang_tooltip_is_non_default() -> None:
 def test_ai_visibility_areas_include_hreflang() -> None:
     assert "Hreflang" in AI_VISIBILITY_AREAS
     assert AI_VISIBILITY_AREAS.index("Hreflang") == 5
+
+
+_V14_LIGHTHOUSE = {
+    "performance": 95,
+    "accessibility": 95,
+    "seo": 95,
+    "best_practices": 95,
+    "measured": True,
+    "fetched_at": "2026-06-15T00:00:00Z",
+}
+_V14_RICH = {
+    "eligible_types": ["Product"],
+    "ineligible_types": [],
+    "warnings": [],
+    "source": "schema",
+    "measured": True,
+}
+
+
+def test_ai_visibility_emits_v14_checks_in_existing_areas() -> None:
+    payload = {**_payload_with_discovery({}), "lighthouse": _V14_LIGHTHOUSE, "rich_results": _V14_RICH}
+    by_key = {c.key: c for c in build_ai_visibility_checks(payload)}
+    assert by_key["lighthouse_perf_above_90"].area == "Performance"
+    assert by_key["rich_results_eligible"].area == "Citation readiness"
+
+
+def test_ai_visibility_omits_v14_checks_without_data() -> None:
+    keys = {c.key for c in build_ai_visibility_checks(_payload_with_discovery({}))}
+    assert "lighthouse_perf_above_90" not in keys
+    assert "rich_results_eligible" not in keys
+
+
+def test_ai_visibility_v14_tooltips_are_non_default() -> None:
+    default = ai_visibility_check_tooltip("definitely-unknown-key")
+    assert ai_visibility_check_tooltip("rich_results_eligible") != default
+    assert ai_visibility_check_tooltip("lighthouse_perf_above_90") != default

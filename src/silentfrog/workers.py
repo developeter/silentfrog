@@ -30,6 +30,28 @@ def run_crawl(
     return thread
 
 
+def run_lighthouse(
+    url: str,
+    api_key: str,
+    on_success: Callable[[dict], None],
+    on_error: Callable[[str], None],
+) -> threading.Thread:
+    """v2.0 V14 — opt-in, single-page Lighthouse lab run via PSI."""
+
+    def _target() -> None:
+        try:
+            from .integrations.google.lighthouse import fetch_lighthouse
+
+            scores = asyncio.run(fetch_lighthouse(url, api_key))
+            on_success(scores.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            on_error(str(exc))
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    return thread
+
+
 def run_image_analysis(
     base: str,
     rows: Iterable[Iterable[str]],

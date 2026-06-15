@@ -22,7 +22,13 @@ from .crawl_types import (
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
 from .hreflang_validator import build_hreflang_checks
-from .integrations.google.checks import build_real_performance_checks
+from .integrations.google.checks import (
+    build_lighthouse_checks,
+    build_real_performance_checks,
+    build_rich_results_checks,
+)
+from .integrations.google.lighthouse import LighthouseScores
+from .integrations.google.rich_results import RichResultsReport
 from .integrations.google.types import Ga4Metrics, GscMetrics
 from .perf_crux import CruxData
 from .perf_vitals import WebVitals, build_performance_checks
@@ -398,6 +404,35 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "GA4 bounce rate for this URL.\n\n"
         "Bounce above ~70% is a warning — visitors leave without engaging, often an above-the-fold "
         "relevance or intent-match problem. Below the threshold => good."
+    ),
+    "lighthouse_perf_above_90": (
+        "Lighthouse Performance lab score (0-100) from PageSpeed Insights.\n\n"
+        "A measured score below 90 warns; 90+ is good. The lab run is slow and opt-in, so until you "
+        "click Run Lighthouse on the page audit this stays info (never penalised, per §1.5)."
+    ),
+    "lighthouse_a11y_above_90": (
+        "Lighthouse Accessibility lab score (0-100).\n\n"
+        "Below 90 warns; 90+ is good. Only evaluated after the opt-in single-page Lighthouse run; "
+        "otherwise info."
+    ),
+    "lighthouse_seo_above_90": (
+        "Lighthouse SEO lab score (0-100).\n\n"
+        "Below 90 warns; 90+ is good. Only evaluated after the opt-in single-page Lighthouse run; "
+        "otherwise info."
+    ),
+    "lighthouse_freshness": (
+        "When the Lighthouse lab run was fetched, plus the Best-practices score.\n\n"
+        "Informational context for the scores above; never affects the GEO Score."
+    ),
+    "rich_results_eligible": (
+        "Whether the page has rich-result-eligible structured data.\n\n"
+        "Derived from the page's own schema (Google retired the public Rich Results Test API), upgraded "
+        "to Google's real verdict when the site is Search-Console-connected. No eligible markup => info, "
+        "never a penalty (§1.5)."
+    ),
+    "rich_results_warning_count": (
+        "Count of structured-data warnings that threaten rich-result eligibility.\n\n"
+        "These are genuine defects in markup the page already ships, so they warn. Zero warnings => good."
     ),
 }
 
@@ -776,6 +811,8 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     ai_citations = AiCitationsPayload.from_raw(data.get("ai_citations", {}))
     gsc = GscMetrics.from_dict(data.get("gsc", {}))
     ga4 = Ga4Metrics.from_dict(data.get("ga4", {}))
+    lighthouse = LighthouseScores.from_dict(data.get("lighthouse", {}))
+    rich_results = RichResultsReport.from_dict(data.get("rich_results", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -810,6 +847,12 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     # Real performance / Engagement (V7): only when GSC/GA4 connected.
     if gsc.measured or ga4.measured:
         checks.extend(build_real_performance_checks(gsc, ga4))
+    # Rich results (V14): schema-derived on every audit; Lighthouse only
+    # after the opt-in single-page run, so it doesn't clutter stock pages.
+    if rich_results.measured:
+        checks.extend(build_rich_results_checks(rich_results))
+    if lighthouse.measured:
+        checks.extend(build_lighthouse_checks(lighthouse))
     return checks
 
 

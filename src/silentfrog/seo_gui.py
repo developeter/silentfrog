@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import logging
+import os
 import sys
 import webbrowser
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 
 from qtpy import QtCore, QtGui, QtWidgets
 
+from .ai_visibility import build_ai_visibility_payload
 from .audit_issues import AuditIssue, issues_for_payload
 from .audit_recap import AuditRecapWidget
 from .crawl_options import CrawlOptions
@@ -38,7 +40,7 @@ from .tabs import (
     SocialTab,
 )
 from .theme import left_align_tab_bar
-from .workers import run_crawl, run_image_analysis
+from .workers import run_crawl, run_image_analysis, run_lighthouse
 
 
 class _RecentUrls:
@@ -154,6 +156,8 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
     dataReady = QtCore.Signal(dict)  # payload dei dati
     errorSig = QtCore.Signal(str)  # messaggio d'errore
+    lighthouseReady = QtCore.Signal(dict)  # V14 — Lighthouse scores
+    lighthouseError = QtCore.Signal(str)  # V14 — Lighthouse run failed
 
     def __init__(self) -> None:
         super().__init__()
@@ -179,6 +183,8 @@ class WebpageSeoWindow(QtWidgets.QWidget):
 
         self.dataReady.connect(self._populate_tables)
         self.errorSig.connect(self._show_error)
+        self.lighthouseReady.connect(self._apply_lighthouse)
+        self.lighthouseError.connect(self._on_lighthouse_error)
 
         self.images_tab.view.doubleClicked.connect(self._open_img_url)
         self.meta_tab.view.doubleClicked.connect(self._open_meta_url)
@@ -324,6 +330,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._register_dimmed_button(self.btn_img_dl)
         self.btn_img_dl.clicked.connect(self._start_img_analysis)
         controls.addWidget(self.btn_img_dl)
+        self.btn_lighthouse = QtWidgets.QPushButton("Run Lighthouse")
+        self.btn_lighthouse.setEnabled(False)
+        self.btn_lighthouse.setToolTip(
+            "Run a Lighthouse lab audit (PageSpeed Insights) for this page — slow, on-demand.\n"
+            "Set SILENTFROG_PSI_ENABLE=1 to allow the external PSI call; "
+            "SILENTFROG_PSI_API_KEY lifts the rate limit."
+        )
+        self._register_dimmed_button(self.btn_lighthouse)
+        self.btn_lighthouse.clicked.connect(self._run_lighthouse)
+        controls.addWidget(self.btn_lighthouse)
         self.btn_settings = QtWidgets.QPushButton("Crawl settings...")
         self.btn_settings.setToolTip("Adjust gentle crawl preferences")
         self.btn_settings.clicked.connect(self._open_crawl_settings)
@@ -555,6 +571,43 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
         self.btn_img_dl.setEnabled(False)
+        self.btn_lighthouse.setEnabled(False)
+
+    @staticmethod
+    def _lighthouse_enabled() -> bool:
+        """Lighthouse makes an external PSI call, so it is opt-in via the
+        same env gate as background CrUX collection."""
+        return os.environ.get("SILENTFROG_PSI_ENABLE", "").strip().lower() in {"1", "true", "yes"}
+
+    def _run_lighthouse(self) -> None:
+        if self._latest_payload is None:
+            return
+        url = self._latest_payload.serp.url or self.url_edit.currentText().strip()
+        if not self._is_valid_url(url):
+            return
+        self.btn_lighthouse.setEnabled(False)
+        self.btn_lighthouse.setText("Running Lighthouse...")
+        run_lighthouse(
+            url,
+            os.environ.get("SILENTFROG_PSI_API_KEY", "").strip(),
+            on_success=lambda scores: self.lighthouseReady.emit(scores),
+            on_error=lambda err: self.lighthouseError.emit(err),
+        )
+
+    def _apply_lighthouse(self, scores: dict[str, Any]) -> None:
+        self.btn_lighthouse.setText("Run Lighthouse")
+        self.btn_lighthouse.setEnabled(self._lighthouse_enabled())
+        if self._latest_payload is None:
+            return
+        mapping = self._latest_payload.to_mapping()
+        mapping["lighthouse"] = scores
+        mapping["ai_visibility"] = build_ai_visibility_payload(mapping).to_dict()
+        self.dataReady.emit(mapping)
+
+    def _on_lighthouse_error(self, message: str) -> None:
+        self.btn_lighthouse.setText("Run Lighthouse")
+        self.btn_lighthouse.setEnabled(self._lighthouse_enabled())
+        QtWidgets.QMessageBox.warning(self, "Lighthouse failed", message or "PageSpeed Insights call failed.")
 
     def _open_img_url(self, index: QtCore.QModelIndex) -> None:
         url = index.sibling(index.row(), 0).data()
@@ -702,6 +755,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_export_ai.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
+        self.btn_lighthouse.setEnabled(self._latest_payload is not None and self._lighthouse_enabled())
         self._update_recap_from_payload()
         self._reset_ui()
         self._set_intro_state(False)

@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 
-import silentfrog.perf_crux as perf_crux
 from silentfrog.perf_crux import CruxData, _parse_psi_response, fetch_crux
 
 
@@ -69,7 +68,7 @@ def test_parse_psi_response_handles_missing_loading_experience() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_crux_returns_field_data_on_200(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(perf_crux, "_cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     body = {
         "loadingExperience": {
             "metrics": {
@@ -87,7 +86,7 @@ async def test_fetch_crux_returns_field_data_on_200(monkeypatch, tmp_path) -> No
 
 @pytest.mark.asyncio
 async def test_fetch_crux_uses_cache(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(perf_crux, "_cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     session1 = _DummySession(
         status=200,
         body={"loadingExperience": {"metrics": {"LARGEST_CONTENTFUL_PAINT_MS": {"percentile": 1500}}}},
@@ -103,7 +102,7 @@ async def test_fetch_crux_uses_cache(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_crux_handles_429(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(perf_crux, "_cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     session = _DummySession(status=429, body={})
     data = await fetch_crux("https://rate-limited.example/", session=session)
     assert data.has_field_data is False
@@ -112,7 +111,7 @@ async def test_fetch_crux_handles_429(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_crux_handles_network_error(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(perf_crux, "_cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     session = _DummySession(raises=ConnectionError)
     data = await fetch_crux("https://flaky.example/", session=session)
     assert data.has_field_data is False
@@ -121,7 +120,7 @@ async def test_fetch_crux_handles_network_error(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_crux_rejects_non_http_url(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(perf_crux, "_cache_dir", lambda: tmp_path / "cache")
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     data = await fetch_crux("not-a-url")
     assert data.has_field_data is False
     assert "absolute" in data.reason
