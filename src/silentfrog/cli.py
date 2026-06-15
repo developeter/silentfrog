@@ -73,17 +73,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stop after N cycles (default: run forever).",
     )
 
+    _add_export_parser(subparsers)
+    _add_logs_parser(subparsers)
+    return parser
+
+
+def _add_export_parser(subparsers: Any) -> None:
     export = subparsers.add_parser(
         "export",
         help="Audit a URL and write an LLM-friendly Markdown + JSON bundle for Claude.",
     )
     export.add_argument("url", help="The page URL to audit and export.")
     export.add_argument(
-        "--format",
-        dest="fmt",
-        choices=["llm"],
-        default="llm",
-        help="Export format (only 'llm' for now).",
+        "--format", dest="fmt", choices=["llm"], default="llm", help="Export format (only 'llm' for now)."
     )
     export.add_argument(
         "--mode",
@@ -98,7 +100,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output path stem (writes .md and .json). Default: ./silentfrog_audit.",
     )
 
-    return parser
+
+def _add_logs_parser(subparsers: Any) -> None:
+    logs = subparsers.add_parser(
+        "logs",
+        help="Analyse a server access log for crawl-budget waste (404s, redirects, bot fetches).",
+    )
+    logs.add_argument("path", type=Path, help="Path to the access log file (CLF / Combined / JSON).")
+    logs.add_argument("--out", type=Path, default=None, help="Write the JSON report to this path (default: stdout).")
 
 
 async def _aggregate_cmd(
@@ -162,10 +171,31 @@ async def _export_cmd(
     return 0
 
 
+async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | None = None) -> int:
+    from .logs import analyse_entries, parse_log_text
+
+    text = args.path.read_text(encoding="utf-8", errors="ignore")
+    report = analyse_entries(parse_log_text(text))
+    body = json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+    if args.out is None:
+        sys.stdout.write(body + "\n")
+    else:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(body + "\n", encoding="utf-8")
+        print(f"[logs] wrote {args.out}")
+    print(
+        f"[logs] {report.total_requests} requests, {report.bot_requests} from bots, "
+        f"{report.wasted_404} 4xx, {report.wasted_redirect} 3xx",
+        file=sys.stderr,
+    )
+    return 0
+
+
 _DISPATCH: dict[str, Callable[..., Any]] = {
     "aggregate": _aggregate_cmd,
     "watch": _watch_cmd,
     "export": _export_cmd,
+    "logs": _logs_cmd,
 }
 
 
