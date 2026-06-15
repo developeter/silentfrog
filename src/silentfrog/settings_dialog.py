@@ -120,6 +120,21 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.edit_cookies.setPlaceholderText("session=abc; theme=dark")
         self.edit_cookies.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.edit_cookies)
+
+        adv_layout.addWidget(QtWidgets.QLabel("Custom extraction rules"))
+        extraction_help = QtWidgets.QLabel(
+            "One rule per line: <b>Name | type | selector | attribute | post_regex</b>. "
+            "type is css / xpath / regex / attribute (default css). Example: "
+            "<code>Price | css | span.price</code> or <code>SKU | attribute | meta[name=sku] | content</code>."
+        )
+        extraction_help.setWordWrap(True)
+        extraction_help.setStyleSheet(f"color:{'#9fa3ab' if theme == 'dark' else '#666'};")
+        adv_layout.addWidget(extraction_help)
+        self.txt_custom_extraction = QtWidgets.QPlainTextEdit()
+        self.txt_custom_extraction.setPlaceholderText("Price | css | span.price")
+        self.txt_custom_extraction.setFixedHeight(90)
+        self.txt_custom_extraction.setStyleSheet(self._field_stylesheet(theme))
+        adv_layout.addWidget(self.txt_custom_extraction)
         return self.adv_group
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
@@ -135,6 +150,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.spin_parallel.valueChanged.connect(self._mark_custom)
         self.txt_headers.textChanged.connect(self._on_header_text_changed)
         self.edit_cookies.textChanged.connect(self._mark_custom)
+        self.txt_custom_extraction.textChanged.connect(self._mark_custom)
         self.btn_preset_standard.toggled.connect(lambda checked: checked and self._apply_preset("standard"))
         self.btn_preset_gentle.toggled.connect(lambda checked: checked and self._apply_preset("gentle"))
         self.btn_preset_custom.toggled.connect(lambda checked: checked and self._sync_state())
@@ -176,9 +192,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         headers_lines = [f"{key}: {value}" for key, value in options.extra_headers.items() if key.lower() != "cookie"]
         headers_text = "\n".join(headers_lines)
         cookie_text = options.extra_headers.get("Cookie", "")
-        advanced_on = bool(headers_text or cookie_text)
+        extraction_text = options.custom_extraction.to_text()
+        advanced_on = bool(headers_text or cookie_text or extraction_text)
         self.txt_headers.setPlainText(headers_text)
         self.edit_cookies.setText(cookie_text)
+        self.txt_custom_extraction.setPlainText(extraction_text)
         self._select_initial_preset(options, advanced_on)
         self._validate_headers()
         return advanced_on
@@ -224,6 +242,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             header_text=header_text,
             cookie_text=cookie_text,
             ssr_parity_check=ssr,
+            custom_rules_text=self.txt_custom_extraction.toPlainText(),
         )
 
     def _apply_preset(self, preset: str) -> None:

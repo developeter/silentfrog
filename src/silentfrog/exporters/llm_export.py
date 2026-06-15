@@ -111,6 +111,16 @@ def _check_dicts(checks: Sequence[Any]) -> list[dict[str, str]]:
     ]
 
 
+def _custom_extraction_lines(payload: Any) -> list[str]:
+    data = getattr(payload, "custom_extraction", {}) or {}
+    if not isinstance(data, dict) or not data:
+        return []
+    lines = ["### Custom extraction", "", "| Rule | Value |", "|---|---|"]
+    lines += [f"| {name} | {str(value).replace('|', '/') or '(no match)'} |" for name, value in data.items()]
+    lines.append("")
+    return lines
+
+
 def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExport:
     metrics = _page_metrics(payload, url)
     checks = _checks_for(payload, mode)
@@ -124,10 +134,17 @@ def export_page_for_llm(payload: Any, url: str, mode: str = "compact") -> LlmExp
         f"- Meta description: {metrics['meta_description'] or '(missing)'}",
         f"- Word count: {metrics['word_count']}",
         "",
+        *_custom_extraction_lines(payload),
         "### Issues",
         *_issue_table(checks),
     ]
-    json_data = {"type": "page", "page": metrics, "checks": _check_dicts(checks)}
+    custom = getattr(payload, "custom_extraction", {}) or {}
+    json_data = {
+        "type": "page",
+        "page": metrics,
+        "checks": _check_dicts(checks),
+        "custom_extraction": dict(custom) if isinstance(custom, dict) else {},
+    }
     return LlmExport(markdown="\n".join(lines), json_data=json_data)
 
 

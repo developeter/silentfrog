@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .custom_extraction import CustomExtractionConfig, parse_rules_text
 
 DEFAULT_USER_AGENT = "SilentFrog/1.0 (+https://example.com)"
 
@@ -18,6 +20,8 @@ class CrawlOptions:
     # extra installed to actually escalate; otherwise the strategy stays
     # on the aiohttp base path.
     use_stealth: bool = False
+    # v2.0 V6: user-defined CSS/XPath/regex extraction rules.
+    custom_extraction: CustomExtractionConfig = field(default_factory=CustomExtractionConfig)
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -29,6 +33,7 @@ class CrawlOptions:
             extra_headers={},
             ssr_parity_check=False,
             use_stealth=False,
+            custom_extraction=CustomExtractionConfig(),
         )
 
     @classmethod
@@ -43,6 +48,7 @@ class CrawlOptions:
         cookie_text: str | None = None,
         ssr_parity_check: bool = False,
         use_stealth: bool | None = None,
+        custom_rules_text: str = "",
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -60,6 +66,7 @@ class CrawlOptions:
             extra_headers=extras,
             ssr_parity_check=bool(ssr_parity_check),
             use_stealth=bool(use_stealth),
+            custom_extraction=parse_rules_text(custom_rules_text or ""),
         )
 
 

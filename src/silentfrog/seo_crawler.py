@@ -36,6 +36,7 @@ from .crawl_http import (
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .crawler_utils import _hr_size
+from .custom_extraction import extract as extract_custom
 from .discovery_files import fetch_discovery_files
 from .eeat_signals import extract_eeat_signals
 from .fetchers import FetchOptions, FetchRequest, FetchStrategy
@@ -330,6 +331,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
         "ai_citations": ai_citations_payload,
+        "custom_extraction": extract_custom(response.body, crawl_options.custom_extraction),
         **google_metrics,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()

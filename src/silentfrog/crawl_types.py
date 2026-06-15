@@ -122,6 +122,12 @@ def _optional_mapping_section(data: Mapping[str, Any], key: str) -> Mapping[str,
     return _ensure_mapping(raw, key)
 
 
+def _string_map(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
 def _keyword_entries(raw: Any) -> list[KeywordEntry]:
     if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
         return []
@@ -1206,6 +1212,8 @@ class CrawlPayload:
     ai_visibility: AiVisibilityPayload = field(default_factory=AiVisibilityPayload.empty)
     performance: PerformanceMetrics = field(default_factory=PerformanceMetrics.empty)
     social: SocialPayload = field(default_factory=SocialPayload.empty)
+    # v2.0 V6: {rule_name: extracted_value} from user-defined extraction rules.
+    custom_extraction: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1230,6 +1238,7 @@ class CrawlPayload:
             ai_visibility=AiVisibilityPayload.from_raw(data.get("ai_visibility", {})),
             performance=PerformanceMetrics.from_raw(data.get("performance", {})),
             social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
+            custom_extraction=_string_map(data.get("custom_extraction")),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1252,6 +1261,7 @@ class CrawlPayload:
             "ai_visibility": self.ai_visibility.to_dict(),
             "performance": self.performance.to_dict(),
             "social": self.social.to_dict(),
+            "custom_extraction": dict(self.custom_extraction),
         }
 
     def __getitem__(self, key: str) -> Any:

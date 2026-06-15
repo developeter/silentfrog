@@ -147,3 +147,14 @@ def test_write_llm_export_writes_md_and_json(tmp_path) -> None:
     assert all(p.exists() for p in paths)
     md = (tmp_path / "audit.md").read_text(encoding="utf-8")
     assert "GEO Score" in md
+
+
+def test_page_export_includes_custom_extraction() -> None:
+    payload = _payload("https://e.com/p", 80, _CHECKS)
+    # Inject custom extraction (V6) and confirm it surfaces in md + json.
+    object.__setattr__(payload, "custom_extraction", {"Price": "29.99", "SKU": "ABC-1"})
+    export = export_page_for_llm(payload, "https://e.com/p")
+    assert "Custom extraction" in export.markdown
+    assert "Price" in export.markdown
+    assert "29.99" in export.markdown
+    assert export.json_data["custom_extraction"]["SKU"] == "ABC-1"

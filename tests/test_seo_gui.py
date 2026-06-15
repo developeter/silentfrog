@@ -1741,6 +1741,24 @@ def test_crawl_settings_dialog_roundtrip(qtbot):
     assert options.extra_headers["Cookie"] == "session=abc"
 
 
+def test_crawl_settings_dialog_custom_extraction_roundtrip(qtbot):
+    # v2.0 V6: a config with rules pre-fills the textarea; edits flow back.
+    from silentfrog.custom_extraction import CustomExtractionConfig, CustomExtractionRule, RuleType
+
+    rules = (CustomExtractionRule(name="Price", type=RuleType.CSS, selector="span.price"),)
+    seeded = CrawlOptions.from_ui(gentle_mode=False, max_parallel=2)
+    seeded = __import__("dataclasses").replace(seeded, custom_extraction=CustomExtractionConfig(rules=rules))
+
+    dialog = CrawlSettingsDialog(seeded)
+    qtbot.addWidget(dialog)
+    assert "Price | css | span.price" in dialog.txt_custom_extraction.toPlainText()
+
+    dialog.txt_custom_extraction.setPlainText("SKU | attribute | meta[name=sku] | content")
+    options = dialog.options()
+    assert options.custom_extraction.names == ["SKU"]
+    assert options.custom_extraction.rules[0].attribute == "content"
+
+
 def test_crawl_settings_toggle_reset_to_standard(qtbot):
     dialog = CrawlSettingsDialog(CrawlOptions.default())
     qtbot.addWidget(dialog)
