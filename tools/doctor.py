@@ -179,6 +179,53 @@ def doctor_targets_for_mode(mode: str, repo_root: Path) -> tuple[DoctorTarget, .
     return by_mode[mode]
 
 
+@dataclass(frozen=True)
+class DoctorRunRequest:
+    """Typed inputs to :func:`plan_doctor_run` — a config object instead of
+    boolean-flag-soup parameters (AGENTS.md §1)."""
+
+    skip_tests: bool
+    skip_gates: bool
+    quick: bool
+    mode: str
+    any_target_runs_tests: bool
+
+
+@dataclass(frozen=True)
+class DoctorRunPlan:
+    """Which test/gate steps ``main()`` runs for one CLI invocation.
+
+    pytest is executed by BOTH the standalone test step and the full
+    quality gates (``tools/quality_gates.py``); ruff-quick does not run it.
+    ``pytest_runs`` must never exceed 1 — that double run was the bug this
+    plan exists to prevent.
+    """
+
+    run_standalone_tests: bool
+    run_ruff_quick: bool
+    run_full_gates: bool
+
+    @property
+    def pytest_runs(self) -> int:
+        return int(self.run_standalone_tests) + int(self.run_full_gates)
+
+
+def plan_doctor_run(request: DoctorRunRequest) -> DoctorRunPlan:
+    """Pure dispatch decision for ``main()``.
+
+    The full (non-quick) gates run pytest+coverage themselves, so the
+    standalone pytest step is suppressed whenever they will run — the two
+    are never combined.
+    """
+    if request.skip_tests:
+        return DoctorRunPlan(False, False, False)
+    gates_enabled = not request.skip_gates and request.mode != "venv"
+    run_full_gates = gates_enabled and not request.quick
+    run_ruff_quick = gates_enabled and request.quick
+    run_standalone_tests = request.any_target_runs_tests and not run_full_gates
+    return DoctorRunPlan(run_standalone_tests, run_ruff_quick, run_full_gates)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Silentfrog doctor: dependency, resource, compile and test checks.")
     parser.add_argument(
@@ -226,17 +273,23 @@ def main() -> int:
         _check_packaged_files()
         _run_code_shape_check()
         _run_compile_check()
-        if args.skip_tests:
-            print("[doctor] OK")
-            return 0
-        if any(target.run_tests for target in targets):
+        plan = plan_doctor_run(
+            DoctorRunRequest(
+                skip_tests=args.skip_tests,
+                skip_gates=args.skip_gates,
+                quick=args.quick,
+                mode=args.mode,
+                any_target_runs_tests=any(target.run_tests for target in targets),
+            )
+        )
+        if plan.run_standalone_tests:
             _run_tests(quick=args.quick)
-        # v1.1 N3b — quality gates after the existing test run.
-        if not args.skip_gates and args.mode != "venv":
-            if args.quick:
-                _run_ruff_quick()
-            else:
-                _run_quality_gates(skip_diff_cover=args.skip_diff_cover)
+        # v1.1 N3b — quality gates. The full set runs pytest+coverage itself,
+        # so it is never combined with the standalone test run above.
+        if plan.run_full_gates:
+            _run_quality_gates(skip_diff_cover=args.skip_diff_cover)
+        elif plan.run_ruff_quick:
+            _run_ruff_quick()
     except DoctorError as exc:
         print(f"[doctor] FAIL: {exc}", file=sys.stderr)
         return 1

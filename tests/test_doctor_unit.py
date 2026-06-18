@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import platform
 import sys
 from pathlib import Path
@@ -21,9 +22,11 @@ from tools.doctor import (
     POETRY_REQUIRED_IMPORTS,
     VENV_REQUIRED_IMPORTS,
     DoctorError,
+    DoctorRunRequest,
     _build_parser,
     _check_imports_via,
     doctor_targets_for_mode,
+    plan_doctor_run,
 )
 
 
@@ -83,3 +86,88 @@ def test_build_parser_accepts_mode_argument() -> None:
 def test_venv_required_imports_includes_pyside6_and_not_pyqt5() -> None:
     assert "PySide6" in VENV_REQUIRED_IMPORTS
     assert "PyQt5" not in VENV_REQUIRED_IMPORTS
+
+
+# PR-0/E0 regression: the doctor must never run pytest twice. The full
+# (non-quick) gates run pytest+coverage themselves, so the standalone test
+# step must be suppressed in that path.
+
+
+def _req(
+    *,
+    skip_tests=False,
+    skip_gates=False,
+    quick=False,
+    mode="poetry",
+    any_target_runs_tests=True,
+) -> DoctorRunRequest:
+    # Unannotated params on purpose: keeps each test expressing only the flag
+    # under test, and avoids tripping the bool-arg shape guard on the helper.
+    return DoctorRunRequest(
+        skip_tests=skip_tests,
+        skip_gates=skip_gates,
+        quick=quick,
+        mode=mode,
+        any_target_runs_tests=any_target_runs_tests,
+    )
+
+
+def test_plan_default_full_mode_runs_pytest_once_via_gates() -> None:
+    plan = plan_doctor_run(_req())
+    assert plan.run_full_gates is True
+    assert plan.run_standalone_tests is False
+    assert plan.run_ruff_quick is False
+    assert plan.pytest_runs == 1
+
+
+def test_plan_quick_mode_runs_pytest_once_via_standalone() -> None:
+    plan = plan_doctor_run(_req(quick=True))
+    assert plan.run_standalone_tests is True
+    assert plan.run_ruff_quick is True
+    assert plan.run_full_gates is False
+    assert plan.pytest_runs == 1
+
+
+def test_plan_skip_gates_runs_standalone_only() -> None:
+    plan = plan_doctor_run(_req(skip_gates=True))
+    assert plan.run_standalone_tests is True
+    assert plan.run_full_gates is False
+    assert plan.run_ruff_quick is False
+    assert plan.pytest_runs == 1
+
+
+def test_plan_venv_mode_runs_no_pytest() -> None:
+    # venv targets carry run_tests=False and gates are disabled in venv mode.
+    plan = plan_doctor_run(_req(mode="venv", any_target_runs_tests=False))
+    assert plan.run_standalone_tests is False
+    assert plan.run_full_gates is False
+    assert plan.run_ruff_quick is False
+    assert plan.pytest_runs == 0
+
+
+def test_plan_skip_tests_runs_nothing() -> None:
+    plan = plan_doctor_run(_req(skip_tests=True))
+    assert plan.pytest_runs == 0
+    assert plan.run_ruff_quick is False
+    assert plan.run_full_gates is False
+
+
+def test_plan_never_runs_pytest_twice_across_all_flag_combinations() -> None:
+    bools = (False, True)
+    for skip_tests, skip_gates, quick, any_tests in itertools.product(bools, bools, bools, bools):
+        for mode in ("poetry", "venv", "both"):
+            plan = plan_doctor_run(
+                _req(
+                    skip_tests=skip_tests,
+                    skip_gates=skip_gates,
+                    quick=quick,
+                    mode=mode,
+                    any_target_runs_tests=any_tests,
+                )
+            )
+            assert plan.pytest_runs <= 1, (
+                f"double pytest run: skip_tests={skip_tests} skip_gates={skip_gates} "
+                f"quick={quick} mode={mode} any_tests={any_tests}"
+            )
+            # ruff-quick and the full gates are mutually exclusive.
+            assert not (plan.run_ruff_quick and plan.run_full_gates)
