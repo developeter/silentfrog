@@ -6,6 +6,10 @@ from typing import Any
 
 from .image_diagnostics import normalize_image_rows
 
+# v2.0 H0: bump when CrawlPayload's serialized shape changes. Pre-H0 blobs
+# were written before this field existed → no key → load as version 1.
+PAYLOAD_SCHEMA_VERSION = 2
+
 
 def _is_iterable_of_iterables(value: Any) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
@@ -149,6 +153,44 @@ def _string_items(raw: Any) -> list[str]:
         if text:
             values.append(text)
     return values
+
+
+def _extra_group(data: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """Preserve an AI-Visibility source group as a raw JSON dict (H0).
+
+    These groups (discovery, eeat, …) are consumed by
+    ``ai_visibility.build_ai_visibility_checks`` via ``X.from_raw(dict)``, so
+    storing the raw dict round-trips losslessly without importing the
+    per-signal payload types (which would create an import cycle)."""
+    value = data.get(key)
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _clean_url(value: Any) -> str:
+    """Normalize a stored URL (H0): ``None``/absent → ``""`` (never the string
+    ``"None"``); real values pass through unchanged so Unicode URLs survive."""
+    return "" if value is None else str(value)
+
+
+def _schema_version(data: Mapping[str, Any]) -> int:
+    """Resolve and validate the payload schema version.
+
+    Only an ABSENT key means a pre-H0 blob → version 1. An explicit value must
+    be an ``int`` in ``[1, PAYLOAD_SCHEMA_VERSION]``; ``None``, booleans,
+    non-ints, and out-of-range versions raise ``ValueError`` rather than
+    silently degrading or mis-reading stored data."""
+    if "payload_schema_version" not in data:
+        return 1
+    raw = data["payload_schema_version"]
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(f"payload_schema_version must be an int, got {raw!r}")
+    if raw < 1:
+        raise ValueError(f"payload_schema_version must be >= 1, got {raw}")
+    if raw > PAYLOAD_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported payload_schema_version {raw}; this build supports up to {PAYLOAD_SCHEMA_VERSION}"
+        )
+    return raw
 
 
 @dataclass(frozen=True)
@@ -1221,36 +1263,79 @@ class CrawlPayload:
     rich_results: dict[str, Any] = field(default_factory=dict)
     # v2.0 V17: optional Semrush authority metrics (off by default).
     semrush: dict[str, Any] = field(default_factory=dict)
+    # v2.0 H0: serialized-shape version; pre-H0 blobs load as 1 (see from_raw).
+    payload_schema_version: int = PAYLOAD_SCHEMA_VERSION
+    # v2.0 H0: page URL provenance + the AI-Visibility source groups. These
+    # are what the GEO score is computed from; persisting them means a store
+    # round-trip (and any recompute, e.g. after Lighthouse) reproduces the
+    # original score instead of drifting to empty-group defaults. Kept as raw
+    # JSON dicts to avoid an import cycle with the per-signal payload modules.
+    requested_url: str = ""
+    final_url: str = ""
+    discovery: dict[str, Any] = field(default_factory=dict)
+    eeat: dict[str, Any] = field(default_factory=dict)
+    structure: dict[str, Any] = field(default_factory=dict)
+    citation_content: dict[str, Any] = field(default_factory=dict)
+    citation_advanced: dict[str, Any] = field(default_factory=dict)
+    seo_basics: dict[str, Any] = field(default_factory=dict)
+    render: dict[str, Any] = field(default_factory=dict)
+    perf_vitals: dict[str, Any] = field(default_factory=dict)
+    perf_crux: dict[str, Any] = field(default_factory=dict)
+    ai_citations: dict[str, Any] = field(default_factory=dict)
+    gsc: dict[str, Any] = field(default_factory=dict)
+    ga4: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
-        _require_crawl_keys(data)
+        return cls(**cls._decode_fields(data))
 
-        return cls(
-            meta=_rows_section(data, "meta"),
-            headers=_rows_section(data, "headers"),
-            images=normalize_image_rows(_rows_section(data, "images")),
-            links=_rows_section(data, "links"),
-            schema=StructuredDataPayload.from_raw(data["schema"]),
-            canonical=CanonicalInfo.from_raw(_mapping_section(data, "canonical")),
-            redirect=RedirectInfo.from_raw(_mapping_section(data, "redirect")),
-            robots=_normalize_robots(data["robots"]),
-            meta_robots=str(data.get("meta_robots", "")),
-            hreflang=_rows_section(data, "hreflang"),
-            ai_crawl=_rows_section(data, "ai_crawl"),
-            serp=SerpPreview.from_raw(_mapping_section(data, "serp")),
-            serp_audit=SerpAudit.from_raw(_mapping_section(data, "serp_audit")),
-            keywords=_keyword_entries(data.get("keywords", [])),
-            content_quality=ContentQuality.from_raw(data.get("content_quality", {})),
-            ai_visibility=AiVisibilityPayload.from_raw(data.get("ai_visibility", {})),
-            performance=PerformanceMetrics.from_raw(data.get("performance", {})),
-            social=SocialPayload.from_raw(_optional_mapping_section(data, "social")),
-            custom_extraction=_string_map(data.get("custom_extraction")),
-            tech_stack=dict(data.get("tech_stack") or {}) if isinstance(data.get("tech_stack"), dict) else {},
-            lighthouse=dict(data.get("lighthouse") or {}) if isinstance(data.get("lighthouse"), dict) else {},
-            rich_results=dict(data.get("rich_results") or {}) if isinstance(data.get("rich_results"), dict) else {},
-            semrush=dict(data.get("semrush") or {}) if isinstance(data.get("semrush"), dict) else {},
-        )
+    @classmethod
+    def _decode_fields(cls, data: Mapping[str, Any]) -> dict[str, Any]:
+        """Explicit field→value mapping for ``from_raw`` — the single source of
+        truth for deserialization. The guard test asserts its keys equal every
+        ``CrawlPayload`` dataclass field, so a new field cannot be silently
+        left unread on load (the ``from_raw`` half of the H0 drift guard)."""
+        _require_crawl_keys(data)
+        return {
+            "meta": _rows_section(data, "meta"),
+            "headers": _rows_section(data, "headers"),
+            "images": normalize_image_rows(_rows_section(data, "images")),
+            "links": _rows_section(data, "links"),
+            "schema": StructuredDataPayload.from_raw(data["schema"]),
+            "canonical": CanonicalInfo.from_raw(_mapping_section(data, "canonical")),
+            "redirect": RedirectInfo.from_raw(_mapping_section(data, "redirect")),
+            "robots": _normalize_robots(data["robots"]),
+            "meta_robots": str(data.get("meta_robots", "")),
+            "hreflang": _rows_section(data, "hreflang"),
+            "ai_crawl": _rows_section(data, "ai_crawl"),
+            "serp": SerpPreview.from_raw(_mapping_section(data, "serp")),
+            "serp_audit": SerpAudit.from_raw(_mapping_section(data, "serp_audit")),
+            "keywords": _keyword_entries(data.get("keywords", [])),
+            "content_quality": ContentQuality.from_raw(data.get("content_quality", {})),
+            "ai_visibility": AiVisibilityPayload.from_raw(data.get("ai_visibility", {})),
+            "performance": PerformanceMetrics.from_raw(data.get("performance", {})),
+            "social": SocialPayload.from_raw(_optional_mapping_section(data, "social")),
+            "custom_extraction": _string_map(data.get("custom_extraction")),
+            "tech_stack": dict(data.get("tech_stack") or {}) if isinstance(data.get("tech_stack"), dict) else {},
+            "lighthouse": dict(data.get("lighthouse") or {}) if isinstance(data.get("lighthouse"), dict) else {},
+            "rich_results": dict(data.get("rich_results") or {}) if isinstance(data.get("rich_results"), dict) else {},
+            "semrush": dict(data.get("semrush") or {}) if isinstance(data.get("semrush"), dict) else {},
+            "payload_schema_version": _schema_version(data),
+            "requested_url": _clean_url(data.get("requested_url")),
+            "final_url": _clean_url(data.get("final_url")),
+            "discovery": _extra_group(data, "discovery"),
+            "eeat": _extra_group(data, "eeat"),
+            "structure": _extra_group(data, "structure"),
+            "citation_content": _extra_group(data, "citation_content"),
+            "citation_advanced": _extra_group(data, "citation_advanced"),
+            "seo_basics": _extra_group(data, "seo_basics"),
+            "render": _extra_group(data, "render"),
+            "perf_vitals": _extra_group(data, "perf_vitals"),
+            "perf_crux": _extra_group(data, "perf_crux"),
+            "ai_citations": _extra_group(data, "ai_citations"),
+            "gsc": _extra_group(data, "gsc"),
+            "ga4": _extra_group(data, "ga4"),
+        }
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -1277,6 +1362,21 @@ class CrawlPayload:
             "lighthouse": dict(self.lighthouse),
             "rich_results": dict(self.rich_results),
             "semrush": dict(self.semrush),
+            "payload_schema_version": self.payload_schema_version,
+            "requested_url": self.requested_url,
+            "final_url": self.final_url,
+            "discovery": dict(self.discovery),
+            "eeat": dict(self.eeat),
+            "structure": dict(self.structure),
+            "citation_content": dict(self.citation_content),
+            "citation_advanced": dict(self.citation_advanced),
+            "seo_basics": dict(self.seo_basics),
+            "render": dict(self.render),
+            "perf_vitals": dict(self.perf_vitals),
+            "perf_crux": dict(self.perf_crux),
+            "ai_citations": dict(self.ai_citations),
+            "gsc": dict(self.gsc),
+            "ga4": dict(self.ga4),
         }
 
     def __getitem__(self, key: str) -> Any:
@@ -1307,4 +1407,5 @@ __all__ = [
     "PerformanceScripts",
     "PerformanceMetrics",
     "CrawlPayload",
+    "PAYLOAD_SCHEMA_VERSION",
 ]

@@ -856,7 +856,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     crux = CruxData.from_raw(data.get("perf_crux", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     hreflang_rows = _rows(data.get("hreflang", []))
-    page_url = str(data.get("url") or data.get("final_url") or "")
+    page_url = str(data.get("final_url") or data.get("requested_url") or data.get("url") or "")
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
     structure_checks = build_structure_checks(structure)

@@ -34,7 +34,7 @@ from .crawl_http import (
     _trace_redirects,
 )
 from .crawl_options import CrawlOptions
-from .crawl_types import CrawlPayload
+from .crawl_types import PAYLOAD_SCHEMA_VERSION, CrawlPayload
 from .crawler_utils import _hr_size
 from .custom_extraction import extract as extract_custom
 from .discovery_files import fetch_discovery_files
@@ -322,6 +322,9 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     semrush_metrics = await _collect_semrush(response.url)
     rich_results = await _collect_rich_results(structured_data, response.url)
     raw_payload = {
+        "payload_schema_version": PAYLOAD_SCHEMA_VERSION,
+        "requested_url": url,
+        "final_url": response.url,
         "schema": structured_data,
         "rich_results": rich_results,
         "performance": performance_metrics,

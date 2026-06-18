@@ -21,6 +21,54 @@ def _audit(url: str, score: int = 80, status: str = "200", **kw) -> StoredAudit:
     return StoredAudit(url=url, geo_score=score, http_status=status, **kw)
 
 
+# H0 source groups carried on CrawlPayload (kept here so this store test is
+# self-contained — tests must not import each other).
+_H0_GROUPS = (
+    "discovery",
+    "eeat",
+    "structure",
+    "citation_content",
+    "citation_advanced",
+    "seo_basics",
+    "render",
+    "perf_vitals",
+    "perf_crux",
+    "ai_citations",
+    "gsc",
+    "ga4",
+)
+
+
+def _full_payload_raw() -> dict[str, object]:
+    """A complete raw payload (all required sections + every H0 group + URLs +
+    schema version) for the store persistence round-trip."""
+    groups = {name: {name: True, "n": 1} for name in _H0_GROUPS}
+    return {
+        "meta": [["title", "Example"]],
+        "headers": [["h1", "Example"]],
+        "images": [],
+        "links": [],
+        "schema": {
+            "summary": {"total": 0, "by_syntax": {}, "by_type": {}, "errors": []},
+            "blocks": [],
+            "fallback_raw": [],
+        },
+        "canonical": {"target": "https://e.com/p", "self": True, "multiple": False, "status": "200"},
+        "redirect": {"chain": ["https://e.com/p"], "hops": 0, "final_status": "200", "loop": False},
+        "robots": {"*": [("Allow", "/")]},
+        "meta_robots": "index, follow",
+        "hreflang": [],
+        "ai_crawl": [],
+        "serp": {},
+        "serp_audit": {},
+        "keywords": [],
+        "payload_schema_version": 2,
+        "requested_url": "https://e.com/req",
+        "final_url": "https://e.com/p",
+        **groups,
+    }
+
+
 def test_schema_version_is_set() -> None:
     conn = sqlite3.connect(":memory:")
     from silentfrog.crawl_store_schema import apply_schema
@@ -140,6 +188,28 @@ def test_two_runs_are_isolated(store: CrawlStore) -> None:
     store.save_audit(run_b, _audit("https://b.com/2"))
     assert store.count(run_a) == 1
     assert store.count(run_b) == 2
+
+
+def test_crawl_store_roundtrip_preserves_h0_groups_urls_and_version(store: CrawlStore) -> None:
+    # H0: a full CrawlPayload (all 12 AI-Visibility source groups, both URLs,
+    # and the schema version) must survive the real compressed-JSON store path
+    # save_audit -> load_payload -> from_raw, not just an in-memory round trip.
+    from silentfrog.crawl_types import PAYLOAD_SCHEMA_VERSION, CrawlPayload
+
+    payload = CrawlPayload.from_raw(_full_payload_raw())
+    run_id = store.start_run("e.com", "https://e.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=payload.final_url, payload=payload.to_mapping()))
+    store.flush()
+
+    loaded = store.load_payload(run_id, payload.final_url)
+    assert loaded is not None
+    restored = CrawlPayload.from_raw(loaded)
+    assert restored == payload
+    for group in _H0_GROUPS:
+        assert getattr(restored, group) == {group: True, "n": 1}, group
+    assert restored.requested_url == "https://e.com/req"
+    assert restored.final_url == "https://e.com/p"
+    assert restored.payload_schema_version == PAYLOAD_SCHEMA_VERSION == 2
 
 
 def test_persists_to_disk_and_reopens(tmp_path) -> None:
