@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.resources
 import logging
 import os
 import sys
@@ -39,7 +38,7 @@ from .tabs import (
     SerpTab,
     SocialTab,
 )
-from .theme import left_align_tab_bar
+from .theme import left_align_tab_bar, window_icon
 from .workers import run_crawl, run_image_analysis, run_lighthouse
 
 
@@ -162,8 +161,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog - Single Page SEO Check")
-        icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
-        self.setWindowIcon(QtGui.QIcon(str(icon_path)))
+        self.setWindowIcon(window_icon())
         self._latest_payload: CrawlPayload | None = None
         self._dimmed_buttons: list[QtWidgets.QPushButton] = []
         self._crawl_options: CrawlOptions = CrawlOptions.default()

@@ -23,9 +23,7 @@ from qtpy.QtWidgets import (
 )
 
 from .redirect_gui import RedirectWindow
-from .theme import apply_theme, current_theme
-
-icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
+from .theme import apply_theme, current_theme, window_icon
 
 
 class HomeWindow(QMainWindow):
@@ -53,13 +51,19 @@ class HomeWindow(QMainWindow):
         self.main_layout.setSpacing(16)
         self.main_layout.setContentsMargins(48, 32, 48, 24)
 
-        icon_path = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
-        self.setWindowIcon(QIcon(str(icon_path)))
+        self.setWindowIcon(window_icon())
+
+        # The home-screen logo is its own asset so it can differ from the
+        # window/taskbar mini icon and the program icon. Falls back to the
+        # program icon (assets/icon.png) only if logo.png is missing.
+        logo_asset = importlib.resources.files("silentfrog").joinpath("assets/logo.png")
+        fallback = importlib.resources.files("silentfrog").joinpath("assets/icon.png")
+        logo_path = logo_asset if logo_asset.is_file() else fallback
 
         logo = QtWidgets.QLabel()
         logo.setAlignment(Qt.AlignCenter)  # type: ignore[reportAttributeAccessIssue]
         logo_pix = (
-            QtGui.QPixmap(str(icon_path)).scaledToWidth(120, Qt.SmoothTransformation)  # type: ignore[reportAttributeAccessIssue]
+            QtGui.QPixmap(str(logo_path)).scaledToWidth(120, Qt.SmoothTransformation)  # type: ignore[reportAttributeAccessIssue]
         )
         logo.setPixmap(logo_pix)
         # Pin the label to fit the pixmap so a stylesheet re-polish on

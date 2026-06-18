@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import importlib.resources
-import sys
 import threading
 import time
 from pathlib import Path
 
-from qtpy import QtCore, QtGui, QtWidgets
+from qtpy import QtCore, QtWidgets
 
 from .redirect import check_redirects
+from .theme import window_icon
 
 
 class RedirectWorker(QtCore.QThread):
@@ -71,9 +70,7 @@ class RedirectWorker(QtCore.QThread):
 class RedirectWindow(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
-        assets = importlib.resources.files("silentfrog").joinpath("assets")
-        ext = ".ico" if sys.platform.startswith("win") else ".png"
-        self.setWindowIcon(QtGui.QIcon(str(assets / f"icon{ext}")))
+        self.setWindowIcon(window_icon())
         self.setWindowTitle("Check Redirect – Silentfrog")
         self.setMinimumSize(650, 450)
         self._build_ui()

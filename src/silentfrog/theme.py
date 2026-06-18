@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import importlib.resources
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
 from qtpy import QtGui, QtWidgets
+
+
+def window_icon() -> QtGui.QIcon:
+    """Shared title-bar / taskbar-button icon for every Silentfrog window.
+
+    Kept separate from the program/desktop icon (``assets/icon.*``) and
+    from the home-screen logo (``assets/logo.png``) so the three can be
+    art-directed independently.
+    """
+    path = importlib.resources.files("silentfrog").joinpath("assets/window-icon.png")
+    return QtGui.QIcon(str(path))
+
 
 # `QTabWidget::tab-bar { left: 0px }` anchors the QTabBar to the left
 # edge of the QTabWidget's top area, neutralising macOS's default of

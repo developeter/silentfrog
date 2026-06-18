@@ -20,6 +20,8 @@ from typing import Any
 
 from qtpy import QtCore, QtWidgets
 
+from .theme import window_icon
+
 
 class _AnalyserRunner(QtCore.QObject):
     """Runs the async ``analyse`` calls in a worker thread and
@@ -93,6 +95,7 @@ class DashboardWindow(QtWidgets.QWidget):
     def __init__(self, analyser: Callable[[str], Awaitable[Any]] | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog — Multi-URL Dashboard")
+        self.setWindowIcon(window_icon())
         self.resize(960, 600)
         self._analyser = analyser
         self._runner: _AnalyserRunner | None = None

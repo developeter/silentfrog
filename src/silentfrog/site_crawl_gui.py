@@ -48,7 +48,7 @@ from .tabs import (
     SerpTab,
     SocialTab,
 )
-from .theme import current_theme, left_align_tab_bar, status_brushes
+from .theme import current_theme, left_align_tab_bar, status_brushes, window_icon
 from .workers import run_image_analysis, run_site_crawl
 
 _SETUP_PAGE = 0
@@ -199,6 +199,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog - Site Crawl")
+        self.setWindowIcon(window_icon())
         self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
