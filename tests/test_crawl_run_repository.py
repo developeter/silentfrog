@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from silentfrog.crawl_run_repository import CrawlRunRef, InMemoryCrawlRunRepository
+from silentfrog.crawl_run_repository import CrawlRunRef, InMemoryCrawlRunRepository, hydrate_payloads
 from silentfrog.crawl_store import CrawlStore, StoredAudit
 from silentfrog.crawl_types import CrawlPayload
 from silentfrog.site_crawl_types import SiteCrawlResult
@@ -146,3 +146,28 @@ def test_crawl_run_ref_shared_across_threads_each_opens_own_repo(tmp_path: Path)
 
     assert set(loaded) == {0, 1, 2, 3}
     assert all(payload == _payload(url) for payload in loaded.values())
+
+
+def test_hydrate_payloads_reloads_stripped_via_repository(tmp_path: Path) -> None:
+    url = "https://e.com/p"
+    db, run_id = _seeded_store(tmp_path, url)
+    stripped = dataclasses.replace(SiteCrawlResult.from_payload(url, _payload(url)), payload=None)
+    with CrawlRunRef(db, run_id).open() as repo:
+        out = hydrate_payloads([stripped], repo)
+    assert out[0].payload == _payload(url)
+
+
+def test_hydrate_payloads_passthrough_without_repository() -> None:
+    url = "https://e.com/p"
+    stripped = dataclasses.replace(SiteCrawlResult.from_payload(url, _payload(url)), payload=None)
+    out = hydrate_payloads([stripped], None)
+    assert out[0].payload is None
+
+
+def test_hydrate_payloads_keeps_unrecoverable_none(tmp_path: Path) -> None:
+    db, run_id = _seeded_store(tmp_path, "https://e.com/p")  # only /p is stored
+    absent = "https://e.com/absent"
+    stripped = dataclasses.replace(SiteCrawlResult.from_payload(absent, _payload(absent)), payload=None)
+    with CrawlRunRef(db, run_id).open() as repo:
+        out = hydrate_payloads([stripped], repo)
+    assert out[0].payload is None

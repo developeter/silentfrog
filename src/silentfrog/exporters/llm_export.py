@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..crawl_run_repository import CrawlRunRepository, hydrate_payloads
+
 _PREAMBLE = """# Silentfrog SEO/GEO audit — for AI analysis
 
 You are an expert SEO and GEO (Generative Engine Optimization) consultant.
@@ -235,7 +237,10 @@ def _worst_results(results: Sequence[Any], worst_n: int) -> list[Any]:
     return sorted(measured, key=_result_score)[:worst_n]
 
 
-def export_crawl_for_llm(results: Sequence[Any], mode: str = "compact", worst_n: int = 50) -> LlmExport:
+def export_crawl_for_llm(
+    results: Sequence[Any], mode: str = "compact", worst_n: int = 50, repository: CrawlRunRepository | None = None
+) -> LlmExport:
+    results = hydrate_payloads(results, repository)
     distribution = _score_distribution(results)
     frequency = _issue_frequency(results)
     worst = _worst_results(results, worst_n)

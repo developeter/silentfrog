@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -156,9 +156,31 @@ class InMemoryCrawlRunRepository:
         pass
 
 
+def hydrate_payloads(
+    results: Iterable[SiteCrawlResult], repository: CrawlRunRepository | None
+) -> list[SiteCrawlResult]:
+    """Return results with any stripped (None) payload reloaded via the run-bound
+    repository, so bulk consumers (exports, AI review) see complete data.
+
+    Results that already carry a payload — or that the repository cannot recover —
+    pass through unchanged. Without a repository, results pass through as-is.
+    """
+    if repository is None:
+        return list(results)
+    hydrated: list[SiteCrawlResult] = []
+    for result in results:
+        if result.payload is None:
+            payload = repository.load_payload(result.url)
+            if payload is not None:
+                result = replace(result, payload=payload)
+        hydrated.append(result)
+    return hydrated
+
+
 __all__ = [
     "CrawlRunRef",
     "CrawlRunRepository",
     "InMemoryCrawlRunRepository",
     "SqliteCrawlRunRepository",
+    "hydrate_payloads",
 ]

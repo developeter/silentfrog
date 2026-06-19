@@ -848,7 +848,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if not file_path:
             return
         target = Path(file_path if file_path.lower().endswith(".xlsx") else f"{file_path}.xlsx")
-        export_site_crawl_report(self._latest_report, target)
+        with self._open_run_repository(self._latest_report) as repo:
+            export_site_crawl_report(self._latest_report, target, repository=repo)
         QtWidgets.QMessageBox.information(self, "Export completed", "Site crawl report exported successfully.")
 
     def _export_ai(self) -> None:
@@ -862,7 +863,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         )
         if not file_path:
             return
-        export = export_crawl_for_llm(list(self._latest_report.results))
+        with self._open_run_repository(self._latest_report) as repo:
+            export = export_crawl_for_llm(list(self._latest_report.results), repository=repo)
         written = write_llm_export(export, Path(file_path).with_suffix(""), fmt="both")
         names = ", ".join(p.name for p in written)
         QtWidgets.QMessageBox.information(

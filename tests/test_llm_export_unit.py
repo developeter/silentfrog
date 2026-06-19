@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from pathlib import Path
 
+from silentfrog.crawl_run_repository import CrawlRunRef
+from silentfrog.crawl_store import CrawlStore, StoredAudit
 from silentfrog.crawl_types import CrawlPayload
 from silentfrog.exporters.llm_export import (
     export_crawl_for_llm,
@@ -127,6 +131,29 @@ def test_crawl_export_rollup_and_worst_pages() -> None:
     assert "https://e.com/bad" in export.markdown
     assert export.json_data["distribution"]["count"] == 3
     assert export.json_data["worst_pages"][0]["url"] == "https://e.com/bad"
+
+
+def test_crawl_export_hydrates_stripped_results(tmp_path: Path) -> None:
+    # A result whose in-memory payload was stripped past the cap must still
+    # appear in the rollup + worst pages when the run-bound repository is given.
+    url = "https://e.com/stripped"
+    payload = _payload(url, 20, _CHECKS)
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
+    store.finish_run(run_id)
+    store.close()
+    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
+
+    without = export_crawl_for_llm([stripped])
+    assert without.json_data["distribution"]["count"] == 0
+    assert url not in {p["url"] for p in without.json_data["worst_pages"]}
+
+    with CrawlRunRef(db, run_id).open() as repo:
+        with_repo = export_crawl_for_llm([stripped], repository=repo)
+    assert with_repo.json_data["distribution"]["count"] == 1
+    assert url in {p["url"] for p in with_repo.json_data["worst_pages"]}
 
 
 def test_crawl_export_issue_frequency() -> None:

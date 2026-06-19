@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from openpyxl import load_workbook
 
+from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
+from silentfrog.crawl_store import CrawlStore, StoredAudit  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.exporters import export_site_crawl_report  # type: ignore[reportMissingImports]
 from silentfrog.exporters.action_workbook import ACTION_SHEET_NAMES  # type: ignore[reportMissingImports]
@@ -274,6 +277,41 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
         assert workbook["SERP detail"]["C2"].value == "Title"
         assert workbook["Social detail"]["B2"].value == "OpenGraph"
         assert "https://example.com/fail" not in _column_values(workbook["Meta detail"], "A")
+    finally:
+        workbook.close()
+
+
+def test_export_site_crawl_report_hydrates_stripped_results(tmp_path: Path) -> None:
+    # A result stripped past the in-memory cap (payload=None) must still emit
+    # its payload-derived sheets when the run-bound repository is supplied.
+    url = "https://example.com/stripped"
+    payload = _payload(url)
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("example.com", "https://example.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
+    store.finish_run(run_id)
+    store.close()
+    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
+    report = SiteCrawlReport.from_results([stripped], discovered_count=1)
+
+    without = tmp_path / "without.xlsx"
+    export_site_crawl_report(report, without)
+    workbook = load_workbook(without)
+    try:
+        assert workbook["Structured data"]["A2"].value == "-"
+        assert workbook["GEO Score"]["A2"].value == "-"
+    finally:
+        workbook.close()
+
+    with_repo = tmp_path / "with.xlsx"
+    with CrawlRunRef(db, run_id).open() as repo:
+        export_site_crawl_report(report, with_repo, repository=repo)
+    workbook = load_workbook(with_repo)
+    try:
+        assert workbook["Structured data"]["A2"].value == url
+        assert workbook["Structured data"]["C2"].value == "Product"
+        assert workbook["GEO Score"]["A2"].value == url
     finally:
         workbook.close()
 

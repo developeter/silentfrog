@@ -15,6 +15,7 @@ from .audit_issues import (
     issues_for_payload,
     issues_for_site_report,
 )
+from .crawl_run_repository import CrawlRunRepository
 from .crawl_types import CrawlPayload
 from .site_crawl_types import SiteCrawlReport
 
@@ -98,11 +99,13 @@ def build_review_input_from_payload(url: str, payload: CrawlPayload) -> AiReview
     )
 
 
-def build_review_input_from_site_report(report: SiteCrawlReport) -> AiReviewInput:
+def build_review_input_from_site_report(
+    report: SiteCrawlReport, repository: CrawlRunRepository | None = None
+) -> AiReviewInput:
     return AiReviewInput(
         target="Site crawl",
         scope="site",
-        issues=tuple(issues_for_site_report(report)),
+        issues=tuple(issues_for_site_report(report, repository)),
         context=_site_report_context(report),
     )
 
