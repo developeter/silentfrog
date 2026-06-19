@@ -67,7 +67,7 @@ def _install_session(monkeypatch, routes: Mapping[str, tuple[int, str]]) -> _Dum
         session_holder["session"] = session
         return session
 
-    monkeypatch.setattr(discovery_files.aiohttp, "ClientSession", _factory)
+    monkeypatch.setattr(discovery_files, "open_crawl_session", _factory)
     return session_holder.setdefault("session", _DummySession(routes))
 
 
@@ -177,7 +177,7 @@ async def test_fetch_discovery_files_swallows_network_errors(monkeypatch) -> Non
 
             return _Broken()  # type: ignore[return-value]
 
-    monkeypatch.setattr(discovery_files.aiohttp, "ClientSession", _BoomSession)
+    monkeypatch.setattr(discovery_files, "open_crawl_session", _BoomSession)
 
     payload = await fetch_discovery_files("https://example.com/")
     # Errors collapse to absent entries; nothing is raised.

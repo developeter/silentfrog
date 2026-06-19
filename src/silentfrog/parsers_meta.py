@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 import bs4
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 from bs4 import BeautifulSoup
@@ -16,6 +15,7 @@ from .crawl_http import _headers_from_options, _polite_probe_response
 from .crawl_options import CrawlOptions
 from .crawler_utils import _attr, normalize_text, safe_attr
 from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
+from .transport import open_crawl_session
 
 Tag = bs4.element.Tag
 NavigableString = bs4.element.NavigableString
@@ -383,7 +383,7 @@ def _decode_image_size(raw: bytes, content_type: str) -> tuple[int, int, str]:
 
 
 async def _download_image(url: str, timeout: int) -> tuple[bytes, str]:
-    async with aiohttp.ClientSession() as session:
+    async with open_crawl_session() as session:
         async with session.get(url, timeout=ClientTimeout(total=timeout)) as response:
             raw = await response.read()
             return raw, _content_type(response.headers)
@@ -566,7 +566,7 @@ async def _check_canonical(
     status = ""
     if canonical_url:
         options = crawl_options or CrawlOptions.default()
-        async with aiohttp.ClientSession(headers=_headers_from_options(options)) as sess:
+        async with open_crawl_session(headers=_headers_from_options(options)) as sess:
             response = await _polite_probe_response(
                 sess,
                 canonical_url,
@@ -598,7 +598,7 @@ async def _extract_hreflang(
         rels[lang_val.lower()] = urljoin(page_url, href_val)
 
     options = crawl_options or CrawlOptions.default()
-    async with aiohttp.ClientSession(headers=_headers_from_options(options)) as sess:
+    async with open_crawl_session(headers=_headers_from_options(options)) as sess:
         for lang, href in rels.items():
             response = await _polite_probe_response(
                 sess,
@@ -805,7 +805,7 @@ def _serp_preview(page_url: str, soup: BeautifulSoup) -> dict[str, str]:
 
 async def _to_data_uri(img_url: str) -> str:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with open_crawl_session() as session:
             async with session.get(img_url, timeout=5) as response:
                 if response.status != 200:
                     return img_url

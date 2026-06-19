@@ -88,7 +88,7 @@ async def test_trace_redirects_reports_normal_chain(monkeypatch) -> None:
         _HeadResponse(301, {"Location": "/step-2"}),
         _HeadResponse(200),
     ]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http, "open_crawl_session", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
@@ -105,7 +105,7 @@ async def test_trace_redirects_reports_loop(monkeypatch) -> None:
         _HeadResponse(302, {"Location": "/a"}),
         _HeadResponse(302, {"Location": "/b"}),
     ]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http, "open_crawl_session", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/a", timeout=2)
 
@@ -122,7 +122,7 @@ async def test_trace_redirects_reports_loop(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_trace_redirects_reports_max_hops(monkeypatch) -> None:
     responses = [_HeadResponse(301, {"Location": f"/hop-{index}"}) for index in range(10)]
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession(responses))
+    monkeypatch.setattr(crawl_http, "open_crawl_session", lambda **_kwargs: _HeadSession(responses))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
@@ -133,7 +133,7 @@ async def test_trace_redirects_reports_max_hops(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_trace_redirects_reports_exception(monkeypatch) -> None:
-    monkeypatch.setattr(crawl_http.aiohttp, "ClientSession", lambda **_kwargs: _HeadSession([RuntimeError("boom")]))
+    monkeypatch.setattr(crawl_http, "open_crawl_session", lambda **_kwargs: _HeadSession([RuntimeError("boom")]))
 
     hops, status, hop_count, is_loop = await crawl_http._trace_redirects("https://example.com/start", timeout=2)
 
@@ -173,8 +173,8 @@ async def test_probe_status_keeps_unresolved_403_after_get_fallback() -> None:
 @pytest.mark.asyncio
 async def test_trace_redirects_uses_get_fallback_for_blocked_head(monkeypatch) -> None:
     monkeypatch.setattr(
-        crawl_http.aiohttp,
-        "ClientSession",
+        crawl_http,
+        "open_crawl_session",
         lambda **_kwargs: _HeadSession([_HeadResponse(403)], [_HeadResponse(200)]),
     )
 

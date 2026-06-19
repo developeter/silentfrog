@@ -15,6 +15,7 @@ from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aioh
 from .crawl_constants import _ACCEPT_DEFAULT, _ACCEPT_LANGUAGE_DEFAULT
 from .crawl_options import CrawlOptions
 from .http_client import fetch_text
+from .transport import open_crawl_session
 
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
@@ -315,7 +316,7 @@ async def _trace_redirects(
     active_options = options or CrawlOptions.default()
     try:
         headers = _headers_from_options(active_options)
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with open_crawl_session(headers=headers) as session:
             current_url = url
             for _ in range(max_hops):
                 response = await _polite_probe_response(

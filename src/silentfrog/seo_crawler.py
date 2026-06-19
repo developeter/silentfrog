@@ -11,7 +11,6 @@ import sys
 from typing import Any, cast
 from urllib.parse import urljoin
 
-import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from bs4 import BeautifulSoup, Comment
 
 import silentfrog.crawl_http as crawl_http
@@ -63,6 +62,7 @@ from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
 from .tech_stack import detect_tech
+from .transport import open_crawl_session
 
 # re-export host delay map for tests
 _HOST_DELAYS = crawl_http._HOST_DELAYS
@@ -154,9 +154,8 @@ async def _resolve_link_rows(
     crawl_options: CrawlOptions,
 ) -> list[list[str]]:
     links_rows = _extract_links(page_url, soup)
-    connector = aiohttp.TCPConnector(ssl=False)
     headers = _headers_from_options(crawl_options)
-    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+    async with open_crawl_session(headers=headers, ssl=False) as session:
         coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in links_rows]
         statuses = await asyncio.gather(*coroutines, return_exceptions=True)
     _update_link_statuses(links_rows, statuses)
@@ -497,8 +496,7 @@ async def _collect_crux(url: str) -> dict[str, Any]:
 
 
 async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) -> list[list[str]]:
-    conn = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=conn) as sess:
+    async with open_crawl_session(ssl=False) as sess:
         coros = [_image_info(sess, urljoin(base, row[0]), timeout) for row in rows]
         out = await asyncio.gather(*coros, return_exceptions=True)
 

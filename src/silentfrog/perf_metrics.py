@@ -9,6 +9,7 @@ import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .perf_guides import PerformanceContext, open_source_hints
+from .transport import open_crawl_session
 
 _RESOURCE_FETCH_LIMIT = 20
 _RESOURCE_BYTES_TIMEOUT = 5
@@ -707,10 +708,9 @@ async def _measure_remote_resources(
         return aggregated, per_url
 
     timeout = ClientTimeout(total=_RESOURCE_BYTES_TIMEOUT)
-    connector = aiohttp.TCPConnector(ssl=False)
     semaphore = asyncio.Semaphore(6)
 
-    async with aiohttp.ClientSession(connector=connector) as session:
+    async with open_crawl_session(ssl=False) as session:
         results = await asyncio.gather(
             *(
                 _probe_remote_resource(session, semaphore, resource_type, url, timeout)

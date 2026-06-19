@@ -10,6 +10,7 @@ import certifi
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .crawl_options import DEFAULT_USER_AGENT
+from .transport import open_crawl_session
 
 
 @dataclass
@@ -58,8 +59,7 @@ async def fetch_page(url: str, timeout: int = 10, headers: Optional[dict[str, st
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    connector = aiohttp.TCPConnector(ssl=_ssl_context())
-    async with aiohttp.ClientSession(headers=base_headers, connector=connector) as session:
+    async with open_crawl_session(headers=base_headers, ssl=_ssl_context()) as session:
         return await fetch(session, url, timeout)
 
 
@@ -78,7 +78,7 @@ async def head_status(session: ClientSession, url: str, timeout: int) -> int:
 
 async def fetch_text(url: str, timeout: int = 5) -> Optional[str]:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with open_crawl_session() as session:
             async with session.get(url, timeout=ClientTimeout(total=timeout)) as response:
                 return await response.text()
     except Exception:

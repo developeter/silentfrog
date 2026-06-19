@@ -49,9 +49,9 @@ async def test_fetch_image_details_empty_url() -> None:
 @pytest.mark.asyncio
 async def test_fetch_image_details_image_payload(monkeypatch) -> None:
     monkeypatch.setattr(
-        parsers.aiohttp,
-        "ClientSession",
-        lambda: _FakeSession(PNG_BYTES, {"Content-Type": "image/png"}),
+        parsers,
+        "open_crawl_session",
+        lambda **_kwargs: _FakeSession(PNG_BYTES, {"Content-Type": "image/png"}),
     )
 
     width, height, size_b, mime, data_uri = await parsers._fetch_image_details(
@@ -68,9 +68,9 @@ async def test_fetch_image_details_image_payload(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_fetch_image_details_non_image_payload(monkeypatch) -> None:
     monkeypatch.setattr(
-        parsers.aiohttp,
-        "ClientSession",
-        lambda: _FakeSession(b"plain text body", {"Content-Type": "text/plain"}),
+        parsers,
+        "open_crawl_session",
+        lambda **_kwargs: _FakeSession(b"plain text body", {"Content-Type": "text/plain"}),
     )
 
     width, height, size_b, mime, data_uri = await parsers._fetch_image_details(
@@ -95,7 +95,7 @@ async def test_fetch_image_details_graceful_failure(monkeypatch) -> None:
         def get(self, url: str, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(parsers.aiohttp, "ClientSession", lambda: _BrokenSession())
+    monkeypatch.setattr(parsers, "open_crawl_session", lambda **_kwargs: _BrokenSession())
 
     assert await parsers._fetch_image_details("https://example.com/image.png", timeout=1) == (
         0,

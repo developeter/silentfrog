@@ -197,13 +197,8 @@ async def test_measure_remote_resources_honors_limit(monkeypatch) -> None:
             self.calls.append(url)
             return _FakeResponse({})
 
-    class _FakeConnector:
-        def __init__(self, *args, **kwargs):
-            pass
-
     monkeypatch.setattr("silentfrog.perf_metrics._RESOURCE_FETCH_LIMIT", 2, raising=False)
-    monkeypatch.setattr("silentfrog.perf_metrics.aiohttp.ClientSession", _FakeSession)
-    monkeypatch.setattr("silentfrog.perf_metrics.aiohttp.TCPConnector", _FakeConnector)
+    monkeypatch.setattr("silentfrog.perf_metrics.open_crawl_session", _FakeSession)
 
     aggregated, per_url = await _measure_remote_resources(targets)
     assert aggregated["js"] == 0 and aggregated["css"] == 0

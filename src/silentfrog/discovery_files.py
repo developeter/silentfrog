@@ -23,6 +23,7 @@ from aiohttp import ClientTimeout
 from .crawl_http import _headers_from_options
 from .crawl_options import CrawlOptions
 from .crawl_types import AiVisibilityCheck
+from .transport import open_crawl_session
 
 _BODY_EXCERPT_LIMIT = 400
 _DEFAULT_TIMEOUT = 8
@@ -204,7 +205,7 @@ async def fetch_discovery_files(
     sitemap_candidates = _sitemap_urls_from_robots(robots_map or {})
     sitemap_target, sitemap_source = _resolve_sitemap_target(site_root, sitemap_candidates)
 
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with open_crawl_session(headers=headers) as session:
         llms, llms_full, well_known, sitemap_entry = await asyncio.gather(
             _probe(session, urls["llms_txt"], timeout, parser="llms-txt"),
             _probe(session, urls["llms_full_txt"], timeout, parser="llms-txt"),

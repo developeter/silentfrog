@@ -24,7 +24,7 @@ async def test_fetch_page_uses_supplied_headers(monkeypatch):
     async def fake_fetch(session, url, timeout):
         return HttpResponse("", 200, url, {}, 0.0, 0.0)
 
-    monkeypatch.setattr("silentfrog.http_client.aiohttp.ClientSession", DummySession)
+    monkeypatch.setattr("silentfrog.http_client.open_crawl_session", DummySession)
     monkeypatch.setattr("silentfrog.http_client.fetch", fake_fetch)
 
     custom_headers = {

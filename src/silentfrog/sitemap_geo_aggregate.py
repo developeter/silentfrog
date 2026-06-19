@@ -22,6 +22,7 @@ from aiohttp import ClientTimeout
 
 from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
+from .transport import open_crawl_session
 
 _SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 _DEFAULT_CONCURRENCY = 8
@@ -109,7 +110,7 @@ async def fetch_sitemap(
     """Download the sitemap XML body. Returns empty string on failure."""
     own_session = session is None
     if own_session:
-        session = aiohttp.ClientSession()
+        session = open_crawl_session()
     try:
         async with session.get(sitemap_url, timeout=ClientTimeout(total=timeout_seconds)) as response:
             if response.status >= 400:
