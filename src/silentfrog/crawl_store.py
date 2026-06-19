@@ -8,9 +8,9 @@ only on demand.
 
 Public surface (all typed):
 
-- ``CrawlStore`` — `start_run`, `save_audit`, `flush`, `finish_run`,
-  `iter_lightweight`, `load_payload`, `summary`, `resume_pending`,
-  `close`.
+- ``CrawlStore`` — `start_run`, `save_audit`, `admit`, `flush`,
+  `finish_run`, `iter_lightweight`, `iter_graph_inputs`, `load_payload`,
+  `summary`, `resume_pending`, `close`.
 - ``StoredAudit`` — what the crawler hands to `save_audit`.
 - ``LightweightAudit`` / ``RunSummary`` — read-side views (no blob).
 """
@@ -158,6 +158,20 @@ class CrawlStore:
         if self._pending_writes >= _BATCH_SIZE:
             self.flush()
 
+    def admit(self, run_id: str, normalized_url: str, source_url: str = "", depth: int = 0) -> bool:
+        """Atomically record a URL in the frontier (H3). Returns True when
+        newly admitted, False when it was already present (UNIQUE dedup).
+        Batched with audit writes; state transitions + resume land in
+        PR-8/PR-9, so PR-6 only ever writes the default ``pending`` state."""
+        cursor = self._conn.execute(
+            "INSERT OR IGNORE INTO frontier (run_id, normalized_url, source_url, depth) VALUES (?, ?, ?, ?)",
+            (run_id, normalized_url, source_url, depth),
+        )
+        self._pending_writes += 1
+        if self._pending_writes >= _BATCH_SIZE:
+            self.flush()
+        return cursor.rowcount > 0
+
     def flush(self) -> None:
         if self._pending_writes:
             self._conn.commit()
@@ -179,6 +193,22 @@ class CrawlStore:
     def count(self, run_id: str) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM audits WHERE run_id = ?", (run_id,)).fetchone()
         return int(row[0]) if row else 0
+
+    def iter_graph_inputs(self, run_id: str) -> list[tuple[str, str, int]]:
+        """Link-graph rows: every audited URL with the page it was discovered
+        from. Edges come from the frontier table via a LEFT JOIN, so a crawl
+        predating the frontier table stays edgeless instead of empty."""
+        cursor = self._conn.execute(
+            """
+            SELECT a.url, COALESCE(f.source_url, ''), a.geo_score
+            FROM audits a
+            LEFT JOIN frontier f ON f.run_id = a.run_id AND f.normalized_url = a.url
+            WHERE a.run_id = ?
+            ORDER BY a.insertion_order
+            """,
+            (run_id,),
+        )
+        return [(str(row[0]), str(row[1]), int(row[2])) for row in cursor.fetchall()]
 
     def load_payload(self, run_id: str, url: str) -> dict[str, Any] | None:
         row = self._conn.execute(

@@ -133,6 +133,50 @@ async def test_spider_streams_to_store(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_spider_persists_discovery_edges_for_link_graph(monkeypatch) -> None:
+    # F4 regression: the parent → child relationship must reach the store so
+    # the link graph has real edges (not an orphan dump). /c is reachable
+    # only via /a, so its edge proves discovery threading end to end.
+    _install_graph_analyser(monkeypatch)
+    store = CrawlStore(":memory:")
+    await site_crawler.crawl_site(_spider_config(), timeout=5, store=store)
+    run_id = store._conn.execute("SELECT run_id FROM runs LIMIT 1").fetchone()[0]
+
+    edges = {(source, url) for url, source, _score in store.iter_graph_inputs(run_id) if source}
+    assert ("https://e.com/", "https://e.com/a") in edges
+    assert ("https://e.com/", "https://e.com/b") in edges
+    assert ("https://e.com/a", "https://e.com/c") in edges
+    roots = {url for url, source, _score in store.iter_graph_inputs(run_id) if not source}
+    assert roots == {"https://e.com/"}  # only the seed has no discovering page
+
+    from silentfrog.link_graph import GraphInput, build_link_graph
+
+    graph = build_link_graph([GraphInput(*row) for row in store.iter_graph_inputs(run_id)], root_url="https://e.com/")
+    assert len(graph.edges) == 3
+    assert graph.orphans == ()  # every non-root page now has an inbound edge
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_discovery_edge_survives_url_normalization(monkeypatch) -> None:
+    # The frontier admission and the saved audit must key on the SAME
+    # normalized URL or the graph JOIN silently drops the edge. A link with a
+    # '#frag' normalizes the fragment away; the edge must still appear.
+    graph = {"https://e.com/": ["https://e.com/p#frag"], "https://e.com/p": []}
+
+    async def fake_analyse(url, timeout, options=None):
+        return _payload_with_links(url, graph.get(url, []))
+
+    monkeypatch.setattr(site_crawler, "analyse", fake_analyse)
+    store = CrawlStore(":memory:")
+    await site_crawler.crawl_site(_spider_config(), timeout=5, store=store)
+    run_id = store._conn.execute("SELECT run_id FROM runs LIMIT 1").fetchone()[0]
+    edges = {(source, url) for url, source, _score in store.iter_graph_inputs(run_id) if source}
+    assert ("https://e.com/", "https://e.com/p") in edges
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_hybrid_is_the_default_mode_for_base_url_only() -> None:
     config = SiteCrawlConfig.from_text(base_url="https://e.com")
     assert config.spider.mode is CrawlMode.HYBRID

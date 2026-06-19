@@ -160,13 +160,24 @@ async def _seed_from_sitemap(config: SiteCrawlConfig, timeout: int) -> list[str]
     return _filter_urls(urls, config)
 
 
+def _admit_frontier(ctx: _CrawlContext, url: str, source_url: str, depth: int) -> None:
+    """Record an admitted URL + its discovering page in the durable frontier
+    (H3). The in-memory frontier remains the live dedup gate; this is the
+    persisted parent → child edge the link graph reads (PR-8 moves dedup here)."""
+    if ctx.store is not None:
+        ctx.store.admit(ctx.run_id, url, source_url, depth)
+
+
 async def _drive_frontier(ctx: _CrawlContext) -> list[SiteCrawlResult]:
     results: list[SiteCrawlResult] = []
-    queue: asyncio.Queue[tuple[str, int]] = asyncio.Queue()
+    queue: asyncio.Queue[tuple[str, int, str]] = asyncio.Queue()
     while not ctx.frontier.is_empty:
         item = ctx.frontier.pop()
-        if item is not None:
-            queue.put_nowait(item)
+        if item is None:
+            continue
+        url, depth = item
+        _admit_frontier(ctx, url, "", depth)
+        queue.put_nowait((url, depth, ""))
     if queue.empty():
         return results
     workers = [asyncio.create_task(_frontier_worker(ctx, queue, results)) for _ in range(ctx.concurrency)]
@@ -179,13 +190,13 @@ async def _drive_frontier(ctx: _CrawlContext) -> list[SiteCrawlResult]:
 
 async def _frontier_worker(
     ctx: _CrawlContext,
-    queue: asyncio.Queue[tuple[str, int]],
+    queue: asyncio.Queue[tuple[str, int, str]],
     results: list[SiteCrawlResult],
 ) -> None:
     while True:
-        url, depth = await queue.get()
+        url, depth, source_url = await queue.get()
         try:
-            await _process_url(ctx, url, depth, queue, results)
+            await _process_url(ctx, url, depth, source_url, queue, results)
         finally:
             queue.task_done()
 
@@ -194,16 +205,17 @@ async def _process_url(
     ctx: _CrawlContext,
     url: str,
     depth: int,
-    queue: asyncio.Queue[tuple[str, int]],
+    source_url: str,
+    queue: asyncio.Queue[tuple[str, int, str]],
     results: list[SiteCrawlResult],
 ) -> None:
     await ctx.politeness.wait(url)
     result = await _crawl_one(url, ctx.config, ctx.timeout, ctx.on_event, ctx.cancel_event)
     if ctx.store is not None:
-        ctx.store.save_audit(ctx.run_id, _to_stored_audit(result, depth))
+        ctx.store.save_audit(ctx.run_id, _to_stored_audit(result, depth, source_url))
     # Follow links from the FULL payload before any stripping.
     if ctx.follows_links and result.payload is not None:
-        await _enqueue_links(ctx, result.payload, depth + 1, queue)
+        await _enqueue_links(ctx, url, result.payload, depth + 1, queue)
     kept = _bounded_result(ctx, result, len(results))
     results.append(kept)
     _emit(ctx.on_event, "row", result=kept, completed=len(results))
@@ -223,9 +235,10 @@ def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, current_count: 
 
 async def _enqueue_links(
     ctx: _CrawlContext,
+    source_url: str,
     payload: Any,
     depth: int,
-    queue: asyncio.Queue[tuple[str, int]],
+    queue: asyncio.Queue[tuple[str, int, str]],
 ) -> None:
     for url in _payload_link_urls(payload):
         if not ctx.frontier.in_scope(url, depth):
@@ -233,7 +246,9 @@ async def _enqueue_links(
         if ctx.robots is not None and not await ctx.robots.allows(url):
             continue
         if ctx.frontier.admit(url, depth):
-            queue.put_nowait((normalize_site_url(url), depth))
+            normalized = normalize_site_url(url)
+            _admit_frontier(ctx, normalized, source_url, depth)
+            queue.put_nowait((normalized, depth, source_url))
 
 
 def _payload_link_urls(payload: Any) -> list[str]:

@@ -77,6 +77,58 @@ def test_schema_version_is_set() -> None:
     assert schema_version(conn) == SCHEMA_VERSION
 
 
+def test_apply_schema_adds_frontier_to_legacy_db(tmp_path) -> None:
+    # A v1 database (runs + audits, no frontier) gains the frontier table on
+    # open via the additive migration, and the version bumps to current.
+    from silentfrog.crawl_store_schema import apply_schema
+
+    db = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(str(db))
+    legacy.execute("CREATE TABLE runs (run_id TEXT PRIMARY KEY)")
+    legacy.execute("CREATE TABLE audits (insertion_order INTEGER PRIMARY KEY, run_id TEXT, url TEXT)")
+    legacy.execute("PRAGMA user_version=1")
+    legacy.commit()
+    legacy.close()
+
+    conn = sqlite3.connect(str(db))
+    apply_schema(conn)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "frontier" in tables
+    assert schema_version(conn) == SCHEMA_VERSION == 2
+    conn.close()
+
+
+def test_admit_records_frontier_and_dedups(store: CrawlStore) -> None:
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    assert store.admit(run_id, "https://e.com/a", "https://e.com/", 1) is True
+    assert store.admit(run_id, "https://e.com/a", "https://e.com/", 1) is False  # UNIQUE dedup
+    store.flush()
+    rows = store._conn.execute(
+        "SELECT normalized_url, source_url, depth, state FROM frontier WHERE run_id = ?", (run_id,)
+    ).fetchall()
+    assert rows == [("https://e.com/a", "https://e.com/", 1, "pending")]
+
+
+def test_iter_graph_inputs_sources_edges_from_frontier(store: CrawlStore) -> None:
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.admit(run_id, "https://e.com/", "", 0)
+    store.admit(run_id, "https://e.com/a", "https://e.com/", 1)
+    store.save_audit(run_id, _audit("https://e.com/", score=90))
+    store.save_audit(run_id, _audit("https://e.com/a", score=70))
+    store.flush()
+    rows = {url: (source, score) for url, source, score in store.iter_graph_inputs(run_id)}
+    assert rows["https://e.com/"] == ("", 90)
+    assert rows["https://e.com/a"] == ("https://e.com/", 70)
+
+
+def test_iter_graph_inputs_edgeless_without_frontier_rows(store: CrawlStore) -> None:
+    # A crawl predating the frontier table (audits only) stays edgeless, not empty.
+    run_id = store.start_run("e.com", "https://e.com/", "list")
+    store.save_audit(run_id, _audit("https://e.com/x", score=50))
+    store.flush()
+    assert store.iter_graph_inputs(run_id) == [("https://e.com/x", "", 50)]
+
+
 def test_start_run_persists_and_returns_id(store: CrawlStore) -> None:
     run_id = store.start_run(scope="example.com", base_url="https://example.com/", mode="hybrid")
     assert run_id

@@ -766,12 +766,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         try:
             store = CrawlStore(self._crawl_store_path)
             try:
-                rows = store.iter_lightweight(self._crawl_run_id, offset=0, limit=1_000_000)
+                return store.iter_graph_inputs(self._crawl_run_id)
             finally:
                 store.close()
         except Exception:
             return []
-        return [(r.url, r.discovered_from, r.geo_score) for r in rows]
 
     def _show_diff(self) -> None:
         if self._latest_report is None or self._previous_report is None:
