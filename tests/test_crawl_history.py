@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from silentfrog.audit_issues import IssueCategory, IssueSeverity  # type: ignore[reportMissingImports]
+from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
+    IssueCategory,
+    IssueSeverity,
+    issues_for_payload,
+)
 from silentfrog.crawl_history import (  # type: ignore[reportMissingImports]
     CrawlHistoryIssue,
     CrawlHistoryRun,
@@ -11,6 +16,8 @@ from silentfrog.crawl_history import (  # type: ignore[reportMissingImports]
     diff_runs,
     format_history_status,
 )
+from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
+from silentfrog.crawl_store import CrawlStore, StoredAudit  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult  # type: ignore[reportMissingImports]
 
@@ -48,6 +55,62 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
             "social": {},
         }
     )
+
+
+def _issue_bearing_payload(url: str = "https://example.com/page") -> CrawlPayload:
+    # A page that yields >=1 AuditIssue: canonicalized-elsewhere + missing title.
+    return CrawlPayload.from_raw(
+        {
+            "meta": [["title", "", "0"], ["description", "", "0"]],
+            "headers": [],
+            "images": [],
+            "links": [],
+            "schema": {"summary": {"total": 0, "by_type": {}, "errors": []}, "blocks": [], "issues": []},
+            "canonical": {"target": "https://example.com/other", "self": False, "multiple": False, "status": "200"},
+            "redirect": {"chain": [url], "hops": 0, "final_status": "200", "loop": False},
+            "robots": {"*": [["Allow", "/"]]},
+            "meta_robots": "index, follow",
+            "hreflang": [],
+            "ai_crawl": [],
+            "serp": {"title": "", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp_audit": {},
+            "keywords": [],
+            "content_quality": {},
+            "ai_visibility": {"summary": {"verdict": "Needs work"}, "checks": []},
+            "performance": {"status": 200, "summary": {"verdict": "Good"}},
+            "social": {},
+        }
+    )
+
+
+def test_history_run_complete_with_repository_for_stripped_report(tmp_path: Path) -> None:
+    # H1: history routes through the repository, so a stripped-payload result
+    # still contributes its full issues — identical to the in-memory report,
+    # and strictly more than the no-repository (truncated) run.
+    url = "https://example.com/page"
+    payload = _issue_bearing_payload(url)
+    assert issues_for_payload(url, payload)  # precondition: payload yields issues
+
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("example.com", "https://example.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
+    store.finish_run(run_id)
+    store.close()
+
+    in_memory = SiteCrawlResult.from_payload(url, payload)
+    stripped_report = SiteCrawlReport.from_results(
+        [replace(in_memory, payload=None)], discovered_count=1, run_id=run_id
+    )
+    full_report = SiteCrawlReport.from_results([in_memory], discovered_count=1, run_id=run_id)
+
+    truncated_run = build_history_run(stripped_report)
+    with CrawlRunRef(db, run_id).open() as repo:
+        hydrated_run = build_history_run(stripped_report, repository=repo)
+    full_run = build_history_run(full_report)
+
+    assert hydrated_run.issues == full_run.issues
+    assert len(hydrated_run.issues) > len(truncated_run.issues)
 
 
 def _issue(

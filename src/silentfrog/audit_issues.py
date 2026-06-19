@@ -4,6 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
+from .crawl_run_repository import CrawlRunRepository
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL, SRC_COL
 from .indexability import build_indexability_rows
@@ -66,12 +67,22 @@ def issues_for_payload(url: str, payload: CrawlPayload) -> list[AuditIssue]:
     return dedupe_issues(issues)
 
 
-def issues_for_site_report(report: SiteCrawlReport) -> list[AuditIssue]:
+def issues_for_site_report(report: SiteCrawlReport, repository: CrawlRunRepository | None = None) -> list[AuditIssue]:
+    """Aggregate issues across a crawl.
+
+    For results whose in-memory ``payload`` was stripped to bound RAM, the
+    full payload is hydrated explicitly from ``repository`` (the run-bound
+    seam) when one is supplied — otherwise such results contribute only their
+    lightweight issues, which silently truncates large crawls.
+    """
     issues: list[AuditIssue] = []
     for result in report.results:
         issues.extend(_site_result_issues(result))
-        if result.payload:
-            issues.extend(issues_for_payload(result.url, result.payload))
+        payload = result.payload
+        if payload is None and repository is not None:
+            payload = repository.load_payload(result.url)
+        if payload:
+            issues.extend(issues_for_payload(result.url, payload))
     return dedupe_issues(issues)
 
 

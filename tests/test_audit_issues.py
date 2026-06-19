@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
     AuditIssue,
     IssueCategory,
@@ -11,6 +14,8 @@ from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
     severity_color_role,
     severity_rank,
 )
+from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
+from silentfrog.crawl_store import CrawlStore, StoredAudit  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import normalize_image_row  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult  # type: ignore[reportMissingImports]
@@ -126,6 +131,37 @@ def _payload(url: str = "https://example.com/page") -> CrawlPayload:
             "social": {},
         }
     )
+
+
+def test_issues_for_site_report_hydrates_stripped_payload_via_repository(tmp_path: Path) -> None:
+    # H1: recap/history route through the run-bound repository, so a result
+    # whose in-memory payload was stripped (to bound RAM) still contributes its
+    # full issues — recovered from the store, identical to the in-memory case.
+    url = "https://example.com/page"
+    payload = _payload(url)
+    assert issues_for_payload(url, payload)  # precondition: this payload yields issues
+
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("example.com", "https://example.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=url, payload=payload.to_mapping()))
+    store.finish_run(run_id)
+    store.close()
+
+    in_memory_result = SiteCrawlResult.from_payload(url, payload)
+    stripped_result = replace(in_memory_result, payload=None)
+    stripped_report = SiteCrawlReport.from_results([stripped_result], discovered_count=1, run_id=run_id)
+    full_report = SiteCrawlReport.from_results([in_memory_result], discovered_count=1, run_id=run_id)
+
+    # Without a repository the stripped payload's issues are silently lost...
+    truncated = issues_for_site_report(stripped_report)
+    # ...with the run-bound repository they are recovered — identical to the
+    # result that kept its payload in memory.
+    with CrawlRunRef(db, run_id).open() as repo:
+        hydrated = issues_for_site_report(stripped_report, repository=repo)
+
+    assert hydrated == issues_for_site_report(full_report)
+    assert len(hydrated) > len(truncated)
 
 
 def test_issues_for_payload_extracts_prioritized_evidence() -> None:

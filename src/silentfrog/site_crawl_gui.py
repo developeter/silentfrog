@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -15,6 +16,7 @@ from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
+from .crawl_run_repository import CrawlRunRef, CrawlRunRepository, InMemoryCrawlRunRepository
 from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
 from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
@@ -50,6 +52,8 @@ from .tabs import (
 )
 from .theme import current_theme, left_align_tab_bar, status_brushes, window_icon
 from .workers import run_image_analysis, run_site_crawl
+
+logger = logging.getLogger(__name__)
 
 _SETUP_PAGE = 0
 _RESULTS_PAGE = 1
@@ -640,15 +644,22 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.stack.setCurrentIndex(_SETUP_PAGE)
 
     def _update_recap_from_report(self, report: SiteCrawlReport) -> None:
+        try:
+            with self._open_run_repository(report) as repo:
+                issues = issues_for_site_report(report, repository=repo)
+        except Exception as exc:  # recap must never abort crawl completion (_handle_report)
+            logger.warning("recap hydration failed for run %s: %s", report.run_id, exc)
+            issues = issues_for_site_report(report)
         self.recap_widget.update_issues(
-            issues_for_site_report(report),
+            issues,
             item_count=max(1, report.discovered_count),
             item_label="crawl",
         )
 
     def _update_history_from_report(self, report: SiteCrawlReport) -> None:
         try:
-            run, diff = save_report_and_diff(self._history_store, report)
+            with self._open_run_repository(report) as repo:
+                run, diff = save_report_and_diff(self._history_store, report, repository=repo)
         except Exception as exc:  # noqa: BLE001
             self.lbl_history.setText(f"History: unavailable ({exc})")
             return
@@ -707,7 +718,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         result = self.model.result_at(source_index.row())
         if result is None:
             return
-        payload = result.payload or self._load_payload_from_store(result.url)
+        payload = result.payload or self._load_payload_for_detail(result.url)
         if payload is None:
             return
         base_url = result.final_url or result.url
@@ -793,20 +804,37 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             except OSError:
                 pass
 
-    def _load_payload_from_store(self, url: str) -> CrawlPayload | None:
-        """v2.0 V3.2 — reload a stripped payload from the crawl store on
-        demand (opens a read connection on the GUI thread)."""
-        if not self._crawl_store_path or not self._crawl_run_id:
+    def _run_ref(self, run_id: str) -> CrawlRunRef | None:
+        # Bind to the run the data belongs to (passed in), not the mutable
+        # _crawl_run_id field which a newer crawl may have moved on.
+        if not self._crawl_store_path or not run_id:
+            return None
+        return CrawlRunRef(Path(self._crawl_store_path), run_id)
+
+    def _open_run_repository(self, report: SiteCrawlReport) -> CrawlRunRepository:
+        """Open a run-bound repository for reads on the GUI thread: SQLite when
+        the crawl streamed to a store, else an in-memory view of the results.
+        Bound via ``report.run_id`` so it always matches the report's data."""
+        ref = self._run_ref(report.run_id)
+        if ref is not None:
+            return ref.open()
+        return InMemoryCrawlRunRepository(report.results)
+
+    def _load_payload_for_detail(self, url: str) -> CrawlPayload | None:
+        """Reload a stripped payload on demand for the detail dialog, via a
+        run-bound repository (its own read connection on the GUI thread).
+        Bound to the displayed report's run; returns None when no run is bound
+        or the read fails (V3.2/H1)."""
+        report = self._latest_report
+        ref = self._run_ref(report.run_id) if report is not None else None
+        if ref is None:
             return None
         try:
-            store = CrawlStore(self._crawl_store_path)
-            try:
-                raw = store.load_payload(self._crawl_run_id, url)
-            finally:
-                store.close()
-        except Exception:
+            with ref.open() as repo:
+                return repo.load_payload(url)
+        except Exception as exc:  # on-demand GUI load must not crash the app
+            logger.warning("payload reload failed for %s: %s", url, exc)
             return None
-        return CrawlPayload.from_raw(raw) if raw else None
 
     def _export_excel(self) -> None:
         if not self._latest_report:
