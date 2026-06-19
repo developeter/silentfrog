@@ -161,7 +161,12 @@ def _extra_group(data: Mapping[str, Any], key: str) -> dict[str, Any]:
     These groups (discovery, eeat, …) are consumed by
     ``ai_visibility.build_ai_visibility_checks`` via ``X.from_raw(dict)``, so
     storing the raw dict round-trips losslessly without importing the
-    per-signal payload types (which would create an import cycle)."""
+    per-signal payload types (which would create an import cycle).
+
+    Contract: group values MUST be JSON-native (no tuples/sets/Decimal). The
+    crawl store persists them in a zlib+JSON blob, so a tuple would reload as
+    a list and break round-trip equality. Every producer is a ``*.to_dict()``
+    that already emits JSON-native dicts, so this holds by construction."""
     value = data.get(key)
     return dict(value) if isinstance(value, Mapping) else {}
 

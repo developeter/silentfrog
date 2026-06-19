@@ -559,6 +559,15 @@ def _payload_mapping(value: CrawlPayload | Mapping[str, Any]) -> Mapping[str, An
     raise TypeError("AI visibility analyzer expects CrawlPayload or mapping input")
 
 
+def _resolve_page_url(data: Mapping[str, Any]) -> str:
+    """Page URL used by URL-dependent checks (e.g. hreflang).
+
+    Priority: the post-redirect ``final_url``, then the originally
+    ``requested_url``, then a legacy top-level ``url`` key for pre-H0 blobs.
+    Empty/missing values fall through; nothing resolved → ``""``."""
+    return str(data.get("final_url") or data.get("requested_url") or data.get("url") or "")
+
+
 def _rows(value: Any) -> list[list[str]]:
     return (
         [
@@ -856,7 +865,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     crux = CruxData.from_raw(data.get("perf_crux", {}))
     meta_robots = str(data.get("meta_robots", "")).strip()
     hreflang_rows = _rows(data.get("hreflang", []))
-    page_url = str(data.get("final_url") or data.get("requested_url") or data.get("url") or "")
+    page_url = _resolve_page_url(data)
     title = _title_from_meta(meta_rows)
     h1 = _first_h1(header_rows)
     structure_checks = build_structure_checks(structure)
@@ -931,12 +940,28 @@ def build_ai_visibility_payload(value: CrawlPayload | Mapping[str, Any]) -> AiVi
     return AiVisibilityPayload(summary=build_ai_visibility_summary(checks), checks=checks)
 
 
+def recompute_with_lighthouse(payload: CrawlPayload, scores: Mapping[str, Any]) -> dict[str, Any]:
+    """Merge Lighthouse ``scores`` into ``payload`` and recompute AI Visibility
+    from the full payload mapping.
+
+    Deterministic by construction: ``CrawlPayload.to_mapping()`` is lossless
+    (H0), so a store round-trip of ``payload`` cannot change the result — the
+    recompute sees the same source groups either way. Returns the updated
+    payload mapping (ready to emit or persist). This is the single derivation
+    path; the GUI only emits what this returns."""
+    mapping = payload.to_mapping()
+    mapping["lighthouse"] = dict(scores)
+    mapping["ai_visibility"] = build_ai_visibility_payload(mapping).to_dict()
+    return mapping
+
+
 __all__ = [
     "AI_VISIBILITY_AREAS",
     "ai_visibility_check_tooltip",
     "ai_visibility_summary_tooltip",
     "build_ai_visibility_checks",
     "build_ai_visibility_payload",
+    "recompute_with_lighthouse",
     "build_ai_visibility_summary",
     "normalize_ai_visibility_status",
 ]

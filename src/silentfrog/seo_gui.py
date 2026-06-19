@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from .ai_visibility import build_ai_visibility_payload
+from .ai_visibility import recompute_with_lighthouse
 from .audit_issues import AuditIssue, issues_for_payload
 from .audit_recap import AuditRecapWidget
 from .crawl_options import CrawlOptions
@@ -591,10 +591,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.btn_lighthouse.setEnabled(self._latest_payload is not None)
         if self._latest_payload is None:
             return
-        mapping = self._latest_payload.to_mapping()
-        mapping["lighthouse"] = scores
-        mapping["ai_visibility"] = build_ai_visibility_payload(mapping).to_dict()
-        self.dataReady.emit(mapping)
+        self.dataReady.emit(recompute_with_lighthouse(self._latest_payload, scores))
 
     def _on_lighthouse_error(self, message: str) -> None:
         self.btn_lighthouse.setText("Run Lighthouse")
