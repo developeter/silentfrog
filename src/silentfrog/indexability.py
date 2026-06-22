@@ -4,35 +4,19 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
+
+from .robots_simulator import allows_for_directives
 
 
 def _tokens(meta_robots: str) -> set[str]:
     return {token for token in re.split(r"[\s,]+", (meta_robots or "").lower()) if token}
 
 
-def _path_match(path: str, rule: str) -> bool:
-    normalized = (rule or "").strip()
-    if not normalized:
-        return False
-    rule_path = urlparse(normalized).path or normalized
-    return path.startswith(rule_path)
-
-
 def _robots_allowed(page_url: str, robots_map: Mapping[str, Iterable[tuple[str, str]]]) -> bool:
-    path = urlparse(page_url).path or "/"
-    directives = robots_map.get("*", [])
-    matches: list[tuple[int, bool]] = []
-    for verb, rule in directives:
-        if not _path_match(path, rule):
-            continue
-        rule_path = urlparse(rule).path or rule
-        matches.append((len(rule_path), str(verb).strip().lower() == "allow"))
-    if not matches:
-        return True
-    best_length = max(length for length, _ in matches)
-    best = [allowed for length, allowed in matches if length == best_length]
-    return any(best)
+    # The generic-crawler ("*") indexability verdict now shares the one RFC
+    # 9309 engine (H3 follow-up), so it honours wildcards/$ + longest-match
+    # like the spider gate instead of a prefix-only matcher.
+    return allows_for_directives(robots_map, "*", page_url)
 
 
 def _index_directive(meta_robots: str) -> str:

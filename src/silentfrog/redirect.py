@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-import urllib.robotparser
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -14,6 +13,8 @@ import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .robots_simulator import parse_robots
 
 __all__ = ["check_redirects"]
 
@@ -29,14 +30,16 @@ _RESULT_COLUMNS = (
 
 
 def _robots_allowed(url: str) -> bool:
+    # H3 follow-up: parse via the one RFC 9309 engine; the redirect tool keeps
+    # its synchronous requests fetch. Fail open (allow) on any fetch error.
     parsed = urlparse(url)
-    rp = urllib.robotparser.RobotFileParser()
-    rp.set_url(f"{parsed.scheme}://{parsed.netloc}/robots.txt")
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     try:
-        rp.read()
-        return rp.can_fetch("*", url)
+        response = requests.get(robots_url, headers={"User-Agent": USER_AGENT}, timeout=10)
     except Exception:
         return True
+    body = response.text if response.status_code < 400 else ""
+    return parse_robots(body).allows("*", url)
 
 
 def _new_session(verify_ssl: bool) -> requests.Session:

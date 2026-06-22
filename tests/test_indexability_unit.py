@@ -43,3 +43,10 @@ def test_indexability_verdict_variants() -> None:
         == "Indexable with warnings"
     )
     assert _verdict_value(_rows_for(canonical_multiple=True)) == "Indexable with warnings"
+
+
+def test_indexability_honors_robots_wildcard_after_unification() -> None:
+    # H3 follow-up: the "*" robots check shares the RFC 9309 engine, so a
+    # wildcard/anchor rule blocks /page — the old prefix matcher missed it.
+    rows = _rows_for(robots_map={"*": [("Disallow", "/*age$")]})
+    assert _verdict_value(rows) == "Blocked by robots.txt"

@@ -16,7 +16,7 @@ input yields the permissive default (allowed) that RFC 9309 mandates.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import unquote, urlparse
@@ -390,4 +390,30 @@ def parse_robots(body: str) -> RobotsRules:
     return RobotsRules(groups=groups, delays=delays, sitemaps=tuple(sitemaps), directives=directives)
 
 
-__all__ = ["RobotsRule", "RobotsRules", "RobotsSimResult", "parse_robots", "simulate_robots"]
+def _groups_from_directives(directive_map: Mapping[str, Iterable[tuple[str, str]]]) -> dict[str, list[RobotsRule]]:
+    groups: dict[str, list[RobotsRule]] = {}
+    for agent, rows in directive_map.items():
+        rules = groups.setdefault(str(agent).strip().lower(), [])
+        for verb, value in rows:
+            verb_lower = str(verb).strip().lower()
+            if verb_lower in {"allow", "disallow"}:
+                rules.append(_rule_from(verb_lower, str(value)))
+    return groups
+
+
+def allows_for_directives(directive_map: Mapping[str, Iterable[tuple[str, str]]], user_agent: str, url: str) -> bool:
+    """Allow/deny verdict for a legacy ``{ua: [(Verb, value)]}`` directive map
+    (the persisted ``robots`` field). Lets the indexability audit share the one
+    RFC 9309 engine — wildcards, ``$`` anchors, longest-match — without
+    re-fetching robots.txt."""
+    return _evaluate(_groups_from_directives(directive_map), user_agent, url).allowed
+
+
+__all__ = [
+    "RobotsRule",
+    "RobotsRules",
+    "RobotsSimResult",
+    "allows_for_directives",
+    "parse_robots",
+    "simulate_robots",
+]
