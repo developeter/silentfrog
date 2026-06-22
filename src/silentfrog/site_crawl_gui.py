@@ -16,7 +16,7 @@ from .audit_recap import AuditRecapWidget
 from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
-from .crawl_options import CrawlOptions
+from .crawl_options import AuditProfile, CrawlOptions, auto_suggest_profile
 from .crawl_run_repository import (
     CrawlRowQuery,
     CrawlRunRef,
@@ -327,7 +327,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle("Silentfrog - Site Crawl")
         self.setWindowIcon(window_icon())
-        self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
+        # H4: site crawls default to STANDARD (gated). Single-page audits stay DEEP.
+        self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
         # v2.0 V8: previous crawl kept so "Compare with previous" can diff the
@@ -579,6 +580,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
         self.btn_settings.clicked.connect(self._open_crawl_settings)
+        self.limit_spin.valueChanged.connect(self._update_speed_label)  # reflect H4 auto-suggest live
         self.search_edit.textChanged.connect(self._on_search_changed)
         self.status_filter.currentTextChanged.connect(self._on_status_changed)
         self.indexability_filter.currentTextChanged.connect(self._on_indexability_changed)
@@ -703,9 +705,17 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             exclude_text=self.exclude_text.toPlainText(),
             url_list_text=self.url_list.toPlainText(),
             limit=self.limit_spin.value(),
-            crawl_options=self._crawl_options,
+            crawl_options=self._effective_options(),
             spider=self._spider_from_ui(),
         )
+
+    def _effective_options(self) -> CrawlOptions:
+        """Apply the H4 auto-suggestion: a large crawl left on the STANDARD
+        default downgrades to LIGHTWEIGHT; an explicit choice is honoured."""
+        profile = auto_suggest_profile(self.limit_spin.value(), self._crawl_options.profile)
+        if profile is self._crawl_options.profile:
+            return self._crawl_options
+        return replace(self._crawl_options, profile=profile)
 
     def _spider_from_ui(self) -> SpiderConfig:
         raw = self.crawl_mode_combo.currentData()
@@ -863,7 +873,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
                 return
 
     def _open_crawl_settings(self) -> None:
-        dialog = CrawlSettingsDialog(self._crawl_options, self)
+        dialog = CrawlSettingsDialog(self._crawl_options, self, show_profile=True)
         if dialog.exec() == QtWidgets.QDialog.Accepted:
             self._crawl_options = dialog.options()
             self._update_speed_label()
@@ -874,7 +884,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _update_speed_label(self) -> None:
         mode = "Gentle" if self._crawl_options.gentle_mode else "Standard"
-        self.lbl_speed.setText(f"{mode} crawl, max {self._crawl_options.max_concurrent_per_host}/host")
+        profile = self._effective_options().profile.value.capitalize()
+        self.lbl_speed.setText(
+            f"{mode} crawl, max {self._crawl_options.max_concurrent_per_host}/host · {profile} profile"
+        )
 
     def _reset_eta_tracking(self) -> None:
         self._discovered_total = 0

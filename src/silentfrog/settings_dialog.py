@@ -4,8 +4,14 @@ from typing import cast
 
 from qtpy import QtCore, QtWidgets
 
-from .crawl_options import CrawlOptions, parse_header_lines
+from .crawl_options import AuditProfile, CrawlOptions, parse_header_lines
 from .theme import current_theme
+
+_PROFILE_CHOICES = (
+    (AuditProfile.LIGHTWEIGHT, "Lightweight — local parse only, no per-page probes"),
+    (AuditProfile.STANDARD, "Standard — bounded link/canonical/redirect probing"),
+    (AuditProfile.DEEP, "Deep — full probing, rendering, integrations"),
+)
 
 
 def _playwright_available() -> bool:
@@ -20,8 +26,13 @@ def _playwright_available() -> bool:
 class CrawlSettingsDialog(QtWidgets.QDialog):
     """Lightweight dialog that groups gentle crawl controls away from the main window."""
 
-    def __init__(self, options: CrawlOptions, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self, options: CrawlOptions, parent: QtWidgets.QWidget | None = None, *, show_profile: bool = False
+    ) -> None:
         super().__init__(parent)
+        # The audit-profile selector is shown for site crawls only; single-page
+        # audits stay DEEP (H4), so their dialog hides it and preserves the profile.
+        self._show_profile = show_profile
         theme = self._configure_dialog()
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self._build_general_group())
@@ -110,6 +121,17 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.spin_parallel = QtWidgets.QSpinBox()
         self.spin_parallel.setRange(1, 8)
         general_layout.addRow("Max parallel requests", self.spin_parallel)
+
+        self.profile_combo = QtWidgets.QComboBox()
+        for profile, label in _PROFILE_CHOICES:
+            self.profile_combo.addItem(label, profile.value)
+        self.profile_combo.setToolTip(
+            "Audit profile gates extra HTTP requests, rendering, and integrations. Local SEO / structure / "
+            "E-E-A-T / schema parsing and site-wide discovery run in every profile. Single-page audits always "
+            "run Deep."
+        )
+        if self._show_profile:
+            general_layout.addRow("Audit profile", self.profile_combo)
 
         presets_widget = self._build_presets_widget()
         general_layout.addRow("Presets", presets_widget)
@@ -201,6 +223,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         else:
             self.chk_ssr_parity.setChecked(False)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
+        profile_index = self.profile_combo.findData(options.profile.value)
+        self.profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
         self._initialize_semrush()
         self._load_from_options(options)
         self._sync_state()
@@ -300,6 +324,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             ssr_parity_check=ssr,
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
+            # Hidden selector (single-page) keeps the incoming profile (DEEP).
+            profile=self.profile_combo.currentData(),
         )
 
     def accept(self) -> None:

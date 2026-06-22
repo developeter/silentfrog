@@ -11,6 +11,9 @@ DEFAULT_USER_AGENT = "SilentFrog/1.0 (+https://example.com)"
 # probes them all; the cap keeps STANDARD's per-page request budget bounded so it
 # does not scale with link count (the F6 fan-out).
 _STANDARD_LINK_PROBE_CAP = 25
+# v2.0 H4: above this many target URLs a STANDARD site crawl auto-suggests
+# LIGHTWEIGHT so per-page probing fan-out does not blow up the request budget.
+_AUTO_LIGHTWEIGHT_THRESHOLD = 50_000
 
 
 class AuditProfile(StrEnum):
@@ -170,6 +173,14 @@ class CrawlOptions:
         )
 
 
+def auto_suggest_profile(url_count: int, selected: AuditProfile) -> AuditProfile:
+    """Suggest LIGHTWEIGHT for a large crawl left on the STANDARD default (H4);
+    an explicit LIGHTWEIGHT or DEEP choice is always honoured unchanged."""
+    if selected is AuditProfile.STANDARD and url_count > _AUTO_LIGHTWEIGHT_THRESHOLD:
+        return AuditProfile.LIGHTWEIGHT
+    return selected
+
+
 def parse_header_lines(text: str) -> tuple[dict[str, str], bool]:
     headers: dict[str, str] = {}
     invalid = False
@@ -189,4 +200,11 @@ def parse_header_lines(text: str) -> tuple[dict[str, str], bool]:
     return headers, invalid
 
 
-__all__ = ["AuditProfile", "CrawlOptions", "DEFAULT_USER_AGENT", "ProfilePolicy", "parse_header_lines"]
+__all__ = [
+    "AuditProfile",
+    "CrawlOptions",
+    "DEFAULT_USER_AGENT",
+    "ProfilePolicy",
+    "auto_suggest_profile",
+    "parse_header_lines",
+]
