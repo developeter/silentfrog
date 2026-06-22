@@ -31,7 +31,8 @@ _COMMON_SITEMAP_PATHS = ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml"
 # v2.0 V3.2: when streaming to a store, keep full payloads in memory only
 # for the first N results (rich history + instant detail on small crawls).
 # Beyond N the payload lives on disk and the in-memory result carries
-# lightweight fields only — bounding RAM at ~1M URLs.
+# lightweight fields only — keeping peak RSS bounded at scale (verified to
+# 100k URLs; method + numbers in tools/perf_harness.py).
 _PAYLOAD_MEMORY_LIMIT = 2000
 # v2.0 PR-8a: the worker queue is bounded so memory stays flat at ~1M URLs.
 # A single producer claims pending work from the durable frontier and feeds

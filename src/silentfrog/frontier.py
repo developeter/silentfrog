@@ -6,9 +6,11 @@ depth tracking, scope (same-host / subdomain + include/exclude), and the
 ``max_urls`` cap all live here. The async robots check stays in the
 orchestrator (it is per-host and cacheable) and gates ``enqueue``.
 
-At ~1M URLs the seen set is ~250-300 MB of normalized strings — within
-the laptop budget; the SQLite unique index is the durable resume
-backstop.
+This in-memory seen set backs only store-less crawls (tests + bounded
+small programmatic runs). Production crawls are SQLite-backed and dedup on
+the exact frontier table (the seen-set lives on disk, not RAM), so peak
+RSS stays bounded — measured ~117 MB at 100k URLs, the verified scale gate
+(``tools/perf_harness.py``). 1M is a post-gate follow-up.
 """
 
 from __future__ import annotations

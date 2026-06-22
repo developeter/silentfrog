@@ -141,7 +141,8 @@ class SiteCrawlConfig:
             include_patterns=tuple(_split_lines(include_text)),
             exclude_patterns=tuple(_split_lines(exclude_text)),
             url_list=url_list,
-            # v2.0 V3: store-backed crawls scale to ~1M URLs.
+            # v2.0 V3: store-backed crawls run at bounded memory — verified to
+            # 100k URLs (tools/perf_harness.py); 1M is a post-gate follow-up.
             limit=max(1, min(1_000_000, int(limit))),
             crawl_options=crawl_options or CrawlOptions.from_ui(gentle_mode=True, max_parallel=2),
             spider=resolved_spider,

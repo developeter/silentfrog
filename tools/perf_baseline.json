@@ -1,0 +1,9 @@
+{
+  "urls": 100000,
+  "repetitions": 2,
+  "peak_rss_bytes": 122884096,
+  "pages_per_sec": 451.1,
+  "ceiling_rss_bytes": 153605120,
+  "method": "tools/perf_harness.py --check (synthetic offline crawl; psutil RSS; median pages/s)",
+  "note": "Environment-specific; recorded on the controlled reference machine, not shared CI."
+}

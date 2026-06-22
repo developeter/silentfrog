@@ -1,10 +1,13 @@
 """Streaming SQLite crawl store (v2.0 V2).
 
 Replaces the in-memory ``list[SiteCrawlResult]`` (which held a full
-``CrawlPayload`` per URL and sorted O(n²) at the end) so crawls of up to
-~1M URLs stay at flat RAM. Each completed audit is written immediately,
-batched for speed; the full payload is zlib-compressed JSON deserialised
-only on demand.
+``CrawlPayload`` per URL and sorted O(n²) at the end) so memory stays
+bounded as the crawl grows rather than scaling with URL count. Measured
+peak RSS is ~117 MB at 100k URLs vs ~96 MB at 10k — the verified scale
+gate; 1M is a post-gate follow-up (method + numbers:
+``tools/perf_harness.py`` / ``tools/perf_baseline.json``). Each completed
+audit is written immediately, batched for speed; the full payload is
+zlib-compressed JSON deserialised only on demand.
 
 Public surface (all typed):
 
