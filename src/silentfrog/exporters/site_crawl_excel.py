@@ -9,7 +9,7 @@ from typing import Any
 import xlsxwriter
 
 from ..content_quality import build_content_quality_rows
-from ..crawl_run_repository import CrawlRunRepository, hydrate_payloads
+from ..crawl_run_repository import stream_report_results
 from ..crawl_types import CrawlPayload
 from ..image_diagnostics import IMAGE_HEADERS, normalize_image_rows
 from ..indexability import build_indexability_rows
@@ -19,16 +19,16 @@ from .action_workbook import write_site_crawl_action_sheets
 _PayloadRows = list[tuple[str, CrawlPayload]]
 
 
-def export_site_crawl_report(
-    report: SiteCrawlReport, file_path: Path, repository: CrawlRunRepository | None = None
-) -> None:
+def export_site_crawl_report(report: SiteCrawlReport, file_path: Path) -> None:
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    results = hydrate_payloads(report.results, repository)
+    # Stream the full crawl through the report's run-bound repository (H1/H2):
+    # the report itself carries no per-URL results.
+    results = list(stream_report_results(report))
     payload_rows = _payload_rows(results)
     with xlsxwriter.Workbook(str(file_path)) as workbook:
         formats = _WorkbookFormats(workbook)
-        write_site_crawl_action_sheets(workbook, report, repository)
+        write_site_crawl_action_sheets(workbook, report)
         _write_summary_sheets(workbook, formats, results)
         _write_detail_sheets(workbook, formats, payload_rows)
 

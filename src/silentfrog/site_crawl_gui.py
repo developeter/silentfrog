@@ -16,7 +16,7 @@ from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
-from .crawl_run_repository import CrawlRunRef, CrawlRunRepository, InMemoryCrawlRunRepository
+from .crawl_run_repository import open_report_repository, stream_report_results
 from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
 from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
@@ -591,15 +591,16 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _handle_report(self, report: SiteCrawlReport) -> None:
         self._previous_report = self._latest_report
         self._latest_report = report
-        self._crawl_run_id = report.run_id
+        self._crawl_run_id = report.run_ref.run_id if report.run_ref is not None else ""
         self._discovered_total = report.discovered_count
         self._completed_count = report.crawled_count + report.skipped_count
-        self.model.set_results(list(report.results))
+        # A store-less report carries inline results (small crawls + tests set the
+        # report directly without live "row" events): sync them into the model.
+        # A store-backed report has no per-URL results (H2) — its model was filled
+        # incrementally from "row" events during the crawl, so leave it untouched.
+        if report.results:
+            self.model.set_results(list(report.results))
         self._set_running(False)
-        self.btn_export.setEnabled(bool(report.results))
-        self.btn_export_ai.setEnabled(bool(report.results))
-        self.btn_diff.setEnabled(bool(report.results) and self._previous_report is not None)
-        self.btn_graph.setEnabled(bool(report.results) and bool(self._crawl_store_path))
         self._update_recap_from_report(report)
         self._update_history_from_report(report)
         summary = self._report_summary(report)
@@ -620,7 +621,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_settings.setEnabled(not running)
         self.btn_stop.setVisible(running)
         self.btn_stop.setEnabled(running)
-        has_results = bool(self._latest_report and self._latest_report.results)
+        # "Are there results" comes from the report's summary counts (H2), so it
+        # holds whether the report is store-backed or carries inline results.
+        has_results = bool(self._latest_report and self._latest_report.has_rows)
         self.btn_export.setEnabled(False if running else has_results)
         self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
@@ -645,11 +648,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _update_recap_from_report(self, report: SiteCrawlReport) -> None:
         try:
-            with self._open_run_repository(report) as repo:
-                issues = issues_for_site_report(report, repository=repo)
-        except Exception as exc:  # recap must never abort crawl completion (_handle_report)
-            logger.warning("recap hydration failed for run %s: %s", report.run_id, exc)
             issues = issues_for_site_report(report)
+        except Exception as exc:  # recap must never abort crawl completion (_handle_report)
+            logger.warning("recap build failed for run %s: %s", self._crawl_run_id, exc)
+            issues = []
         self.recap_widget.update_issues(
             issues,
             item_count=max(1, report.discovered_count),
@@ -658,8 +660,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _update_history_from_report(self, report: SiteCrawlReport) -> None:
         try:
-            with self._open_run_repository(report) as repo:
-                run, diff = save_report_and_diff(self._history_store, report, repository=repo)
+            run, diff = save_report_and_diff(self._history_store, report)
         except Exception as exc:  # noqa: BLE001
             self.lbl_history.setText(f"History: unavailable ({exc})")
             return
@@ -739,7 +740,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if not rows:
             QtWidgets.QMessageBox.information(self, "No graph data", "No crawl data to graph yet.")
             return
-        root = self._latest_report.results[0].url if self._latest_report and self._latest_report.results else ""
+        root = self._latest_report.base_url if self._latest_report else ""
         graph = build_link_graph([GraphInput(*r) for r in rows], root_url=root)
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Link graph — crawl tree")
@@ -803,33 +804,15 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             except OSError:
                 pass
 
-    def _run_ref(self, run_id: str) -> CrawlRunRef | None:
-        # Bind to the run the data belongs to (passed in), not the mutable
-        # _crawl_run_id field which a newer crawl may have moved on.
-        if not self._crawl_store_path or not run_id:
-            return None
-        return CrawlRunRef(Path(self._crawl_store_path), run_id)
-
-    def _open_run_repository(self, report: SiteCrawlReport) -> CrawlRunRepository:
-        """Open a run-bound repository for reads on the GUI thread: SQLite when
-        the crawl streamed to a store, else an in-memory view of the results.
-        Bound via ``report.run_id`` so it always matches the report's data."""
-        ref = self._run_ref(report.run_id)
-        if ref is not None:
-            return ref.open()
-        return InMemoryCrawlRunRepository(report.results)
-
     def _load_payload_for_detail(self, url: str) -> CrawlPayload | None:
-        """Reload a stripped payload on demand for the detail dialog, via a
-        run-bound repository (its own read connection on the GUI thread).
-        Bound to the displayed report's run; returns None when no run is bound
-        or the read fails (V3.2/H1)."""
+        """Reload a stripped payload on demand for the detail dialog, via the
+        displayed report's run-bound repository (its own read connection on the
+        GUI thread). Returns None when no run is bound or the read fails (H1)."""
         report = self._latest_report
-        ref = self._run_ref(report.run_id) if report is not None else None
-        if ref is None:
+        if report is None:
             return None
         try:
-            with ref.open() as repo:
+            with open_report_repository(report) as repo:
                 return repo.load_payload(url)
         except Exception as exc:  # on-demand GUI load must not crash the app
             logger.warning("payload reload failed for %s: %s", url, exc)
@@ -847,12 +830,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if not file_path:
             return
         target = Path(file_path if file_path.lower().endswith(".xlsx") else f"{file_path}.xlsx")
-        with self._open_run_repository(self._latest_report) as repo:
-            export_site_crawl_report(self._latest_report, target, repository=repo)
+        export_site_crawl_report(self._latest_report, target)
         QtWidgets.QMessageBox.information(self, "Export completed", "Site crawl report exported successfully.")
 
     def _export_ai(self) -> None:
-        if not self._latest_report or not self._latest_report.results:
+        if not self._latest_report or not self._latest_report.has_rows:
             return
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
@@ -862,8 +844,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         )
         if not file_path:
             return
-        with self._open_run_repository(self._latest_report) as repo:
-            export = export_crawl_for_llm(list(self._latest_report.results), repository=repo)
+        export = export_crawl_for_llm(list(stream_report_results(self._latest_report)))
         written = write_llm_export(export, Path(file_path).with_suffix(""), fmt="both")
         names = ", ".join(p.name for p in written)
         QtWidgets.QMessageBox.information(

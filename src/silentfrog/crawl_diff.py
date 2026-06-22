@@ -7,10 +7,12 @@ disappeared, which changed HTTP status, and which GEO Scores moved. Pure
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from .site_crawl_types import SiteCrawlReport, SiteCrawlResult
+from .crawl_run_repository import stream_report_lightweight
+from .crawl_store import LightweightAudit
+from .site_crawl_types import SiteCrawlReport
 
 
 @dataclass(frozen=True)
@@ -55,13 +57,15 @@ class CrawlDiff:
         }
 
 
-def _by_url(results: Sequence[SiteCrawlResult]) -> dict[str, SiteCrawlResult]:
-    return {r.url: r for r in results}
+def _by_url(rows: Iterable[LightweightAudit]) -> dict[str, LightweightAudit]:
+    return {row.url: row for row in rows}
 
 
 def diff_reports(previous: SiteCrawlReport, current: SiteCrawlReport) -> CrawlDiff:
-    prev = _by_url(previous.results)
-    curr = _by_url(current.results)
+    # Stream lightweight rows (status + GEO score, no payload) through each
+    # report's run-bound repository — a diff never needs the full payload.
+    prev = _by_url(stream_report_lightweight(previous))
+    curr = _by_url(stream_report_lightweight(current))
     prev_keys = set(prev)
     curr_keys = set(curr)
 
@@ -73,8 +77,8 @@ def diff_reports(previous: SiteCrawlReport, current: SiteCrawlReport) -> CrawlDi
     regressed: list[ScoreDelta] = []
     for url in sorted(prev_keys & curr_keys):
         a, b = prev[url], curr[url]
-        if a.status != b.status:
-            status_changes.append(StatusChange(url=url, previous=a.status, current=b.status))
+        if a.http_status != b.http_status:
+            status_changes.append(StatusChange(url=url, previous=a.http_status, current=b.http_status))
         if b.geo_score != a.geo_score:
             delta = ScoreDelta(url=url, previous=a.geo_score, current=b.geo_score)
             (improved if delta.delta > 0 else regressed).append(delta)

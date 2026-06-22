@@ -341,7 +341,7 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
     monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr(
         "silentfrog.site_crawl_gui.export_site_crawl_report",
-        lambda value, path, repository=None: called.update(report=value, path=path, repository=repository),
+        lambda value, path: called.update(report=value, path=path),
     )
 
     win = SiteCrawlWindow()
@@ -350,7 +350,7 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
     win.btn_export.setEnabled(True)
     qtbot.mouseClick(win.btn_export, QtCore.Qt.MouseButton.LeftButton)
 
+    # The bulk exporter derives its run-bound repository from the report's
+    # CrawlRunRef itself (H2), so the button just hands it the report + path.
     assert called["report"] is report
     assert called["path"] == target
-    # Bulk export must receive a run-bound repository so stripped payloads hydrate.
-    assert called["repository"] is not None

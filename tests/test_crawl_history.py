@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
@@ -83,10 +82,10 @@ def _issue_bearing_payload(url: str = "https://example.com/page") -> CrawlPayloa
     )
 
 
-def test_history_run_complete_with_repository_for_stripped_report(tmp_path: Path) -> None:
-    # H1: history routes through the repository, so a stripped-payload result
-    # still contributes its full issues — identical to the in-memory report,
-    # and strictly more than the no-repository (truncated) run.
+def test_history_run_streams_full_payload_from_run_repository(tmp_path: Path) -> None:
+    # H1/H2: history routes through the run-bound repository, so a store-backed
+    # report (carrying only a CrawlRunRef) yields the same issue set as the
+    # in-memory report that kept the payload inline.
     url = "https://example.com/page"
     payload = _issue_bearing_payload(url)
     assert issues_for_payload(url, payload)  # precondition: payload yields issues
@@ -98,19 +97,21 @@ def test_history_run_complete_with_repository_for_stripped_report(tmp_path: Path
     store.finish_run(run_id)
     store.close()
 
-    in_memory = SiteCrawlResult.from_payload(url, payload)
-    stripped_report = SiteCrawlReport.from_results(
-        [replace(in_memory, payload=None)], discovered_count=1, run_id=run_id
+    run_report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id),
+        discovered_count=1,
+        crawled_count=1,
+        skipped_count=0,
+        failed_count=0,
+        base_url="https://example.com/",
     )
-    full_report = SiteCrawlReport.from_results([in_memory], discovered_count=1, run_id=run_id)
+    inline_report = SiteCrawlReport.from_results(
+        [SiteCrawlResult.from_payload(url, payload)], discovered_count=1, base_url="https://example.com/"
+    )
 
-    truncated_run = build_history_run(stripped_report)
-    with CrawlRunRef(db, run_id).open() as repo:
-        hydrated_run = build_history_run(stripped_report, repository=repo)
-    full_run = build_history_run(full_report)
-
-    assert hydrated_run.issues == full_run.issues
-    assert len(hydrated_run.issues) > len(truncated_run.issues)
+    run = build_history_run(run_report)
+    assert run.issues  # payload-derived issues recovered from the store
+    assert run.issues == build_history_run(inline_report).issues
 
 
 def _issue(
@@ -146,7 +147,7 @@ def _run(run_id: str, issues: list[CrawlHistoryIssue]) -> CrawlHistoryRun:
 
 def test_build_history_run_extracts_site_scope_and_issue_counts() -> None:
     failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
-    report = SiteCrawlReport.from_results([failed], discovered_count=1)
+    report = SiteCrawlReport.from_results([failed], discovered_count=1, base_url="https://example.com/fail")
 
     run = build_history_run(report, created_at="2026-01-01T00:00:00Z")
 
@@ -160,6 +161,7 @@ def test_history_store_saves_and_loads_runs_by_scope(tmp_path: Path) -> None:
     report = SiteCrawlReport.from_results(
         [SiteCrawlResult.from_payload("https://example.com/page", _payload())],
         discovered_count=1,
+        base_url="https://example.com/page",
     )
     run = build_history_run(report, created_at="2026-01-01T00:00:00Z")
     store = CrawlHistoryStore(tmp_path)

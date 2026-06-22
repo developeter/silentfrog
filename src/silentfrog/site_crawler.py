@@ -12,6 +12,7 @@ from xml.etree import ElementTree
 
 from .crawl_http import _headers_from_options
 from .crawl_mode import CrawlMode
+from .crawl_run_repository import CrawlRunRef
 from .crawl_store import CrawlStore, StoredAudit
 from .frontier import CrawlFrontier, FrontierConfig
 from .http_client import fetch_page
@@ -113,12 +114,12 @@ async def crawl_site(
     spider = config.spider
     seeds = await _build_seeds(config, timeout)
     frontier = _build_frontier(config)
-    admitted_seeds = _admit_seeds(frontier, seeds)
-    _emit(on_event, "discovered", discovered=frontier.seen_count, total=frontier.seen_count)
-    robots = RobotsCache(config.crawl_options.user_agent, timeout) if spider.respect_robots else None
     run_id = store.start_run(config.base_host, config.base_url, str(spider.mode)) if store else ""
-    work_source = _make_work_source(store, run_id)
-    work_source.seed([(url, 0, "") for url in admitted_seeds])
+    work_source = _make_work_source(store, run_id, frontier, spider.max_urls)
+    for seed in seeds:
+        work_source.admit(seed, "", 0)
+    _emit(on_event, "discovered", discovered=work_source.count(), total=work_source.count())
+    robots = RobotsCache(config.crawl_options.user_agent, timeout) if spider.respect_robots else None
     ctx = _CrawlContext(
         config=config,
         frontier=frontier,
@@ -131,21 +132,29 @@ async def crawl_site(
         politeness=_PolitenessGate(spider.politeness_delay_ms),
         follows_links=spider.mode.follows_links,
     )
-    results = await _drive_frontier(ctx, work_source)
-    if store is not None:
-        store.finish_run(run_id)
-    return SiteCrawlReport.from_results(results, discovered_count=frontier.seen_count, run_id=run_id)
+    drive = await _drive_frontier(ctx, work_source)
+    return _build_report(config, store, run_id, drive, work_source.count())
 
 
-def _admit_seeds(frontier: CrawlFrontier, seeds: list[str]) -> list[str]:
-    """Pass seeds through the in-memory dedup/scope gate (marking them seen) and
-    return the normalized URLs that were newly admitted — the work the producer
-    starts from. The gate, not this list, is the dedup source of truth in PR-8a."""
-    admitted: list[str] = []
-    for url in seeds:
-        if frontier.admit(url, 0):
-            admitted.append(normalize_site_url(url))
-    return admitted
+def _build_report(
+    config: SiteCrawlConfig, store: CrawlStore | None, run_id: str, drive: _Drive, discovered: int
+) -> SiteCrawlReport:
+    """Store-less crawls return their bounded in-memory results; store-backed
+    crawls return only a CrawlRunRef + counts (H2) so the report stays flat —
+    the summary counts come from the store, never an in-memory result list."""
+    if store is None:
+        return SiteCrawlReport.from_results(drive.results, discovered_count=discovered, base_url=config.base_url)
+    store.finish_run(run_id)
+    summary = store.summary(run_id)
+    return SiteCrawlReport.from_run(
+        CrawlRunRef(store.db_path, run_id),
+        discovered_count=discovered,
+        crawled_count=summary.total - summary.skipped,
+        skipped_count=summary.skipped,
+        failed_count=summary.failed,
+        waf_count=drive.waf_count,
+        base_url=config.base_url,
+    )
 
 
 def _build_frontier(config: SiteCrawlConfig) -> CrawlFrontier:
@@ -184,54 +193,68 @@ async def _seed_from_sitemap(config: SiteCrawlConfig, timeout: int) -> list[str]
 
 
 class _WorkSource(Protocol):
-    """The durable frontier of record the producer claims work from. Two impls
-    mirror the repository's SQLite/in-memory split (locked decisions #2/#4):
-    production crawls use SQLite; store-less tests + bounded small programmatic
-    crawls use an in-memory deque. Items are ``(url, depth, source_url)``."""
+    """The durable frontier of record the producer claims work from, and the
+    dedup/scope/cap gate discoveries pass through. Two impls mirror the
+    repository's SQLite/in-memory split (locked decisions #2/#4): production
+    crawls dedup on the **exact SQLite frontier table** (the seen-set lives on
+    disk, not RAM); store-less tests + bounded small programmatic crawls dedup
+    in the in-memory ``CrawlFrontier``. Items are ``(url, depth, source_url)``."""
 
-    def seed(self, items: list[tuple[str, int, str]]) -> None: ...
+    def admit(self, url: str, source_url: str, depth: int) -> bool: ...
 
     def claim(self, batch: int) -> list[tuple[str, int, str]]: ...
 
-    def put_discovery(self, url: str, source_url: str, depth: int) -> None: ...
-
     def complete(self, url: str, state: str) -> None: ...
+
+    def count(self) -> int: ...
 
 
 class _SqliteWorkSource:
-    """SQLite-backed frontier of record (production). The producer claims
-    ``pending`` rows; workers persist discoveries as new ``pending`` rows. Dedup
-    still happens in the in-memory frontier gate in PR-8a; PR-8b makes this
-    table the dedup source of truth."""
+    """SQLite-backed frontier of record + dedup source of truth (production,
+    PR-8b). Admission dedups atomically on the frontier's ``UNIQUE(run_id,
+    normalized_url)`` index, so the seen-set is on disk; an O(1) counter bounds
+    the cap without an in-RAM set. Scope/depth stay on the stateless frontier
+    gate."""
 
-    def __init__(self, store: CrawlStore, run_id: str) -> None:
+    def __init__(self, store: CrawlStore, run_id: str, frontier: CrawlFrontier, max_urls: int) -> None:
         self._store = store
         self._run_id = run_id
+        self._frontier = frontier
+        self._max_urls = max_urls
+        self._count = 0
 
-    def seed(self, items: list[tuple[str, int, str]]) -> None:
-        for url, depth, source_url in items:
-            self._store.admit(self._run_id, url, source_url, depth)
+    def admit(self, url: str, source_url: str, depth: int) -> bool:
+        if not self._frontier.in_scope(url, depth) or self._count >= self._max_urls:
+            return False
+        if not self._store.admit(self._run_id, url, source_url, depth):
+            return False  # already present in the frontier (UNIQUE) — not newly admitted
+        self._count += 1
+        return True
 
     def claim(self, batch: int) -> list[tuple[str, int, str]]:
         return self._store.claim_pending(self._run_id, batch)
 
-    def put_discovery(self, url: str, source_url: str, depth: int) -> None:
-        self._store.admit(self._run_id, url, source_url, depth)
-
     def complete(self, url: str, state: str) -> None:
         self._store.mark(self._run_id, url, state)
+
+    def count(self) -> int:
+        return self._count
 
 
 class _MemoryWorkSource:
     """In-memory frontier of record for store-less crawls (tests + explicitly
-    bounded small programmatic crawls). Holds its own pending deque; the shared
-    in-memory ``CrawlFrontier`` stays the dedup/scope gate."""
+    bounded small programmatic crawls). The shared ``CrawlFrontier`` is the
+    dedup/scope/cap gate; this holds the pending deque the producer drains."""
 
-    def __init__(self) -> None:
+    def __init__(self, frontier: CrawlFrontier) -> None:
+        self._frontier = frontier
         self._pending: deque[tuple[str, int, str]] = deque()
 
-    def seed(self, items: list[tuple[str, int, str]]) -> None:
-        self._pending.extend(items)
+    def admit(self, url: str, source_url: str, depth: int) -> bool:
+        if not self._frontier.admit(url, depth):
+            return False
+        self._pending.append((url, depth, source_url))
+        return True
 
     def claim(self, batch: int) -> list[tuple[str, int, str]]:
         claimed: list[tuple[str, int, str]] = []
@@ -239,40 +262,48 @@ class _MemoryWorkSource:
             claimed.append(self._pending.popleft())
         return claimed
 
-    def put_discovery(self, url: str, source_url: str, depth: int) -> None:
-        self._pending.append((url, depth, source_url))
-
     def complete(self, url: str, state: str) -> None:
         pass
 
+    def count(self) -> int:
+        return self._frontier.seen_count
 
-def _make_work_source(store: CrawlStore | None, run_id: str) -> _WorkSource:
+
+def _make_work_source(store: CrawlStore | None, run_id: str, frontier: CrawlFrontier, max_urls: int) -> _WorkSource:
     if store is None:
-        return _MemoryWorkSource()
-    return _SqliteWorkSource(store, run_id)
+        return _MemoryWorkSource(frontier)
+    return _SqliteWorkSource(store, run_id, frontier, max_urls)
 
 
 @dataclass
 class _Drive:
     """Live state shared by the single producer and the workers within one
-    crawl. Mutated only between ``await`` points, so a plain int + Event are
-    safe without locks on the single crawl event loop."""
+    crawl. Mutated only between ``await`` points, so plain ints + an Event are
+    safe without locks on the single crawl event loop. ``results`` accumulates
+    only for store-less crawls; store-backed crawls keep nothing per-URL."""
 
     work_source: _WorkSource
     queue: asyncio.Queue[tuple[str, int, str]]
+    keep_results: bool
     results: list[SiteCrawlResult] = field(default_factory=list)
+    emitted: int = 0
+    waf_count: int = 0
     in_flight: int = 0
     wakeup: asyncio.Event = field(default_factory=asyncio.Event)
 
 
-async def _drive_frontier(ctx: _CrawlContext, work_source: _WorkSource) -> list[SiteCrawlResult]:
-    drive = _Drive(work_source=work_source, queue=asyncio.Queue(maxsize=_WORK_QUEUE_BOUND))
+async def _drive_frontier(ctx: _CrawlContext, work_source: _WorkSource) -> _Drive:
+    drive = _Drive(
+        work_source=work_source,
+        queue=asyncio.Queue(maxsize=_WORK_QUEUE_BOUND),
+        keep_results=ctx.store is None,
+    )
     workers = [asyncio.create_task(_frontier_worker(ctx, drive)) for _ in range(ctx.concurrency)]
     await _produce(drive)
     for worker in workers:
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
-    return drive.results
+    return drive
 
 
 async def _produce(drive: _Drive) -> None:
@@ -324,17 +355,21 @@ async def _process_url(ctx: _CrawlContext, drive: _Drive, url: str, depth: int, 
     if ctx.follows_links and result.payload is not None:
         await _enqueue_links(ctx, drive, url, result.payload, depth + 1)
     drive.work_source.complete(url, _FRONTIER_STATES.get(result.status, "completed"))
-    kept = _bounded_result(ctx, result, len(drive.results))
-    drive.results.append(kept)
-    _emit(ctx.on_event, "row", result=kept, completed=len(drive.results))
+    if result.has_waf_signal:
+        drive.waf_count += 1
+    kept = _bounded_result(ctx, result, drive.emitted)
+    drive.emitted += 1
+    if drive.keep_results:
+        drive.results.append(kept)
+    _emit(ctx.on_event, "row", result=kept, completed=drive.emitted)
 
 
-def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, current_count: int) -> SiteCrawlResult:
-    """Keep the full payload in memory only below the threshold (and only
-    when streaming to a store that holds the payload durably). Beyond it,
-    strip the payload so the in-memory list + live table model stay flat
-    at ~1M URLs; the GUI reloads it from the store on demand."""
-    if ctx.store is None or current_count < _PAYLOAD_MEMORY_LIMIT:
+def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, emitted: int) -> SiteCrawlResult:
+    """Strip the payload off the live row event past the threshold (store-backed
+    crawls only) so the live GUI table model stays flat at ~1M URLs; the GUI
+    reloads the payload from the store on demand. Store-less crawls keep every
+    payload (they have no store to reload from)."""
+    if ctx.store is None or emitted < _PAYLOAD_MEMORY_LIMIT:
         return result
     if result.payload is None:
         return result
@@ -347,11 +382,11 @@ async def _enqueue_links(ctx: _CrawlContext, drive: _Drive, source_url: str, pay
             continue
         if ctx.robots is not None and not await ctx.robots.allows(url):
             continue
-        if ctx.frontier.admit(url, depth):
-            # Persist the discovery to the frontier ONLY (never the bounded
-            # queue): an unbounded, non-blocking write, so recursive production
-            # cannot deadlock the workers.
-            drive.work_source.put_discovery(normalize_site_url(url), source_url, depth)
+        # Dedup + cap + persist happen in the work source (SQLite frontier for
+        # production, in-memory frontier for store-less). The discovery is
+        # written to the frontier ONLY — never the bounded queue — so recursive
+        # production is a non-blocking write and cannot deadlock the workers.
+        drive.work_source.admit(normalize_site_url(url), source_url, depth)
 
 
 def _payload_link_urls(payload: Any) -> list[str]:

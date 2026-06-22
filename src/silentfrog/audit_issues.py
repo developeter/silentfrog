@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from .crawl_run_repository import CrawlRunRepository
+from .crawl_run_repository import open_report_repository
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL, SRC_COL
 from .indexability import build_indexability_rows
@@ -67,22 +67,18 @@ def issues_for_payload(url: str, payload: CrawlPayload) -> list[AuditIssue]:
     return dedupe_issues(issues)
 
 
-def issues_for_site_report(report: SiteCrawlReport, repository: CrawlRunRepository | None = None) -> list[AuditIssue]:
-    """Aggregate issues across a crawl.
-
-    For results whose in-memory ``payload`` was stripped to bound RAM, the
-    full payload is hydrated explicitly from ``repository`` (the run-bound
-    seam) when one is supplied — otherwise such results contribute only their
-    lightweight issues, which silently truncates large crawls.
-    """
+def issues_for_site_report(report: SiteCrawlReport) -> list[AuditIssue]:
+    """Aggregate issues across a crawl by streaming every audited URL through the
+    report's run-bound repository (H1/H2), so large store-backed crawls are never
+    silently truncated to the first in-memory window. Successful rows carry their
+    full payload (losslessly rebuilt, H0); failed/skipped rows contribute only
+    their crawl-level issue."""
     issues: list[AuditIssue] = []
-    for result in report.results:
-        issues.extend(_site_result_issues(result))
-        payload = result.payload
-        if payload is None and repository is not None:
-            payload = repository.load_payload(result.url)
-        if payload:
-            issues.extend(issues_for_payload(result.url, payload))
+    with open_report_repository(report) as repo:
+        for result in repo.stream_results():
+            issues.extend(_site_result_issues(result))
+            if result.payload:
+                issues.extend(issues_for_payload(result.url, result.payload))
     return dedupe_issues(issues)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlunparse
 
 from .crawl_mode import CrawlMode
@@ -9,6 +10,9 @@ from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL
 from .indexability import build_indexability_rows
+
+if TYPE_CHECKING:
+    from .crawl_run_repository import CrawlRunRef
 
 DEFAULT_SITE_CRAWL_LIMIT = 500
 SITE_CRAWL_HEADERS = [
@@ -288,37 +292,76 @@ class SiteCrawlResult:
 
 @dataclass(frozen=True)
 class SiteCrawlReport:
-    results: tuple[SiteCrawlResult, ...]
+    # v2.0 H2/PR-8b: a store-backed run is identified by its CrawlRunRef; the
+    # report carries that handle + bounded summary counts, NOT a per-URL result
+    # tuple, so it stays flat regardless of crawl size. Consumers stream results
+    # through the run-bound repository (open_report_repository), never read
+    # ``results`` directly.
+    run_ref: CrawlRunRef | None
     discovered_count: int
     crawled_count: int
     skipped_count: int
     failed_count: int
     warning: str = ""
-    # v2.0 V3.2: the store run this crawl streamed to, so the GUI can
-    # load full payloads on demand for results whose in-memory payload
-    # was stripped to bound RAM at ~1M URLs.
-    run_id: str = ""
+    base_url: str = ""
+    # Per-URL results live in memory ONLY for store-less crawls (tests +
+    # explicitly bounded small programmatic crawls). Production crawls are
+    # SQLite-backed: ``run_ref`` is set and this stays empty.
+    results: tuple[SiteCrawlResult, ...] = ()
 
     @classmethod
     def from_results(
         cls,
         results: Iterable[SiteCrawlResult],
         discovered_count: int,
-        run_id: str = "",
+        *,
+        base_url: str = "",
     ) -> SiteCrawlReport:
+        """Build a store-less report from an in-memory result tuple (tests +
+        bounded small crawls). Production crawls use :meth:`from_run`."""
         rows = tuple(results)
         failed = sum(1 for result in rows if result.status == "error")
         skipped = sum(1 for result in rows if result.status == "skipped")
-        warning = _waf_warning(rows)
         return cls(
-            results=rows,
+            run_ref=None,
             discovered_count=discovered_count,
             crawled_count=len(rows) - skipped,
             skipped_count=skipped,
             failed_count=failed,
-            warning=warning,
-            run_id=run_id,
+            warning=_waf_warning_text(sum(1 for result in rows if result.has_waf_signal)),
+            base_url=base_url,
+            results=rows,
         )
+
+    @classmethod
+    def from_run(
+        cls,
+        run_ref: CrawlRunRef,
+        *,
+        discovered_count: int,
+        crawled_count: int,
+        skipped_count: int,
+        failed_count: int,
+        waf_count: int = 0,
+        base_url: str = "",
+    ) -> SiteCrawlReport:
+        """Build a store-backed report: carries the run handle + counts only."""
+        return cls(
+            run_ref=run_ref,
+            discovered_count=discovered_count,
+            crawled_count=crawled_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+            warning=_waf_warning_text(waf_count),
+            base_url=base_url,
+        )
+
+    @property
+    def has_rows(self) -> bool:
+        """Whether the crawl produced any audited rows, derived from the summary
+        counts so it holds for store-backed reports that keep no per-URL results
+        (``crawled_count + skipped_count`` equals the audited total)."""
+        return (self.crawled_count + self.skipped_count) > 0
 
 
 def _payload_status(payload: CrawlPayload) -> str:
@@ -434,8 +477,7 @@ def _issue_summary_items(result: SiteCrawlResult) -> list[str]:
     return issues
 
 
-def _waf_warning(results: Iterable[SiteCrawlResult]) -> str:
-    signals = sum(1 for result in results if result.has_waf_signal)
+def _waf_warning_text(signals: int) -> str:
     if signals < 3:
         return ""
     return (

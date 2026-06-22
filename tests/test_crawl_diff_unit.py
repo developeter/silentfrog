@@ -58,6 +58,40 @@ def test_no_changes_is_empty() -> None:
     assert diff.is_empty
 
 
+def test_diff_streams_two_store_backed_reports(tmp_path) -> None:
+    # PR-8b: store-backed reports carry only a CrawlRunRef. diff_reports must
+    # stream the lightweight rows (status + score) from each report's own
+    # run-bound repository — two independent on-disk runs.
+    from silentfrog.crawl_run_repository import CrawlRunRef
+    from silentfrog.crawl_store import CrawlStore, StoredAudit
+
+    def _run_report(name: str, rows: list[tuple[str, str, int]]) -> SiteCrawlReport:
+        db = tmp_path / f"{name}.db"
+        store = CrawlStore(db)
+        run_id = store.start_run("e.com", "https://e.com/", "list")
+        for url, status, score in rows:
+            store.save_audit(run_id, StoredAudit(url=url, http_status=status, geo_score=score))
+        store.finish_run(run_id)
+        store.close()
+        return SiteCrawlReport.from_run(
+            CrawlRunRef(db, run_id),
+            discovered_count=len(rows),
+            crawled_count=len(rows),
+            skipped_count=0,
+            failed_count=0,
+            base_url="https://e.com/",
+        )
+
+    prev = _run_report("prev", [("https://e.com/a", "200", 90), ("https://e.com/b", "200", 80)])
+    curr = _run_report("curr", [("https://e.com/a", "404", 90), ("https://e.com/c", "200", 70)])
+
+    diff = diff_reports(prev, curr)
+    assert diff.new_urls == ("https://e.com/c",)
+    assert diff.removed_urls == ("https://e.com/b",)
+    assert len(diff.status_changes) == 1
+    assert diff.status_changes[0].current == "404"
+
+
 def test_diff_to_markdown_lists_sections() -> None:
     prev = _report([_result("https://e.com/a", status="200", score=90), _result("https://e.com/gone")])
     curr = _report([_result("https://e.com/a", status="500", score=70), _result("https://e.com/new")])

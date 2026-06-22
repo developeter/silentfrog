@@ -13,7 +13,6 @@ from ..audit_issues import (
     issues_for_site_report,
     severity_rank,
 )
-from ..crawl_run_repository import CrawlRunRepository
 from ..crawl_types import CrawlPayload
 from ..site_crawl_types import SiteCrawlReport
 
@@ -58,11 +57,9 @@ class ActionFormats:
         }[severity]
 
 
-def write_site_crawl_action_sheets(
-    workbook: xlsxwriter.Workbook, report: SiteCrawlReport, repository: CrawlRunRepository | None = None
-) -> None:
+def write_site_crawl_action_sheets(workbook: xlsxwriter.Workbook, report: SiteCrawlReport) -> None:
     formats = ActionFormats(workbook)
-    issues = issues_for_site_report(report, repository)
+    issues = issues_for_site_report(report)
     _write_action_front_matter(workbook, formats, "Site crawl")
     _write_executive_summary(workbook, formats, _site_summary_rows(report, issues))
     _write_issue_sheet(workbook, formats, "Prioritized issues", issues)

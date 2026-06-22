@@ -1,14 +1,18 @@
-"""Run-bound crawl-result repository (v2.0 H1).
+"""Run-bound crawl-result repository (v2.0 H1/H2).
 
 A crawl streams its audits into a SQLite store keyed by ``run_id``.
 ``CrawlRunRef`` is an immutable handle to one such run: it is safe to pass
 across threads, and each thread opens its OWN :class:`CrawlRunRepository`
 from it (no shared SQLite connection). The repository is the single seam
-consumers (GUI detail dialog, recap, history) use to read a run's data — it
-is bound to one run, so no method takes a ``run_id``.
+consumers (GUI detail dialog, recap, history, diff, exporters, AI review)
+use to read a run's data — it is bound to one run, so no method takes a
+``run_id``.
 
-The in-memory implementation backs tests and explicitly bounded small
-programmatic crawls; production GUI crawls are SQLite-backed.
+Since PR-8b the report carries a ``CrawlRunRef`` instead of a per-URL result
+tuple, so consumers stream results through this seam (``stream_results``)
+rather than holding the whole crawl in memory. The in-memory implementation
+backs tests and explicitly bounded small programmatic crawls; production GUI
+crawls are SQLite-backed.
 
 Payload I/O is explicit here (``load_payload``); there is intentionally no
 lazy auto-loading hidden behind ``SiteCrawlResult.payload``.
@@ -18,20 +22,25 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from .crawl_store import _decompress
+from .crawl_store import LightweightAudit, _decompress, _lightweight_from_row
 from .crawl_types import CrawlPayload
 from .site_crawl_types import SiteCrawlResult
+
+if TYPE_CHECKING:
+    from .site_crawl_types import SiteCrawlReport
 
 logger = logging.getLogger(__name__)
 
 # Row statuses that legitimately carry no payload (failed / skipped / uncrawled).
 # A missing payload for these is expected and must not warn.
 _NO_PAYLOAD_STATUSES = frozenset({"", "error", "skipped"})
+
+_STREAM_BATCH = 500
 
 
 def _open_readonly(db_path: Path | str) -> sqlite3.Connection | None:
@@ -59,6 +68,42 @@ def _payload_from_blob(blob: bytes | None) -> CrawlPayload | None:
         return None
 
 
+def _result_from_lightweight(light: LightweightAudit) -> SiteCrawlResult:
+    """Reconstruct a degraded result when a success row's payload is missing
+    (corruption): keep the lightweight columns the store duplicated out of the
+    payload so the URL is never silently dropped from a stream."""
+    return SiteCrawlResult(
+        url=light.url,
+        status=light.http_status,
+        redirect_status="",
+        final_url=light.url,
+        title=light.title,
+        description_state="",
+        canonical_state="",
+        indexability=light.indexability,
+        hreflang_count=0,
+        schema_count=0,
+        image_issue_count=0,
+        h1_state="",
+        word_count=0,
+        link_issue_count=0,
+        performance_verdict="-",
+        ai_visibility_verdict="-",
+        geo_score=light.geo_score,
+        error=light.issue_summary,
+    )
+
+
+def _result_from_row(light: LightweightAudit, payload: CrawlPayload | None) -> SiteCrawlResult:
+    if light.http_status == "error":
+        return SiteCrawlResult.failed(light.url, light.issue_summary)
+    if light.http_status == "skipped":
+        return SiteCrawlResult.skipped(light.url, light.issue_summary)
+    if payload is not None:
+        return SiteCrawlResult.from_payload(light.url, payload)
+    return _result_from_lightweight(light)
+
+
 class CrawlRunRepository(Protocol):
     """Run-bound read seam over one crawl's audits.
 
@@ -68,6 +113,12 @@ class CrawlRunRepository(Protocol):
     """
 
     def load_payload(self, url: str) -> CrawlPayload | None: ...
+
+    def iter_lightweight(self, offset: int, limit: int) -> list[LightweightAudit]: ...
+
+    def stream_results(self, batch: int = _STREAM_BATCH) -> Iterator[SiteCrawlResult]: ...
+
+    def count(self) -> int: ...
 
     def close(self) -> None: ...
 
@@ -94,7 +145,7 @@ class CrawlRunRef:
 class SqliteCrawlRunRepository:
     """SQLite-backed repository: opens an EXISTING database READ-ONLY, bound to
     one run. Never creates or migrates storage on reads — a missing database or
-    a missing run simply yields ``None``.
+    a missing run simply yields empty reads.
 
     Not shared across threads: open one per thread from a :class:`CrawlRunRef`.
     """
@@ -120,6 +171,49 @@ class SqliteCrawlRunRepository:
             logger.warning("crawled payload missing or corrupt for run %s url %s", self._run_id, url)
         return payload
 
+    def iter_lightweight(self, offset: int, limit: int) -> list[LightweightAudit]:
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                """
+                SELECT url, depth, discovered_from, http_status, geo_score,
+                       indexability, title, issue_summary, insertion_order
+                FROM audits WHERE run_id = ?
+                ORDER BY insertion_order LIMIT ? OFFSET ?
+                """,
+                (self._run_id, limit, offset),
+            )
+        except sqlite3.Error:
+            return []
+        return [_lightweight_from_row(row) for row in cursor.fetchall()]
+
+    def stream_results(self, batch: int = _STREAM_BATCH) -> Iterator[SiteCrawlResult]:
+        """Stream every audited URL as a reconstructed :class:`SiteCrawlResult`,
+        a page of rows at a time so memory stays flat at ~1M URLs. Successful
+        rows are rebuilt from the (losslessly round-tripped, H0) payload; failed
+        and skipped rows carry no payload and rebuild from lightweight columns."""
+        offset = 0
+        while True:
+            rows = self.iter_lightweight(offset, batch)
+            if not rows:
+                return
+            for light in rows:
+                payload = None if light.http_status in _NO_PAYLOAD_STATUSES else self.load_payload(light.url)
+                yield _result_from_row(light, payload)
+            if len(rows) < batch:
+                return
+            offset += len(rows)
+
+    def count(self) -> int:
+        if self._conn is None:
+            return 0
+        try:
+            row = self._conn.execute("SELECT COUNT(*) FROM audits WHERE run_id = ?", (self._run_id,)).fetchone()
+        except sqlite3.Error:
+            return 0
+        return int(row[0]) if row else 0
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
@@ -137,14 +231,23 @@ class InMemoryCrawlRunRepository:
     """
 
     def __init__(self, results: Sequence[SiteCrawlResult]) -> None:
+        self._results: tuple[SiteCrawlResult, ...] = tuple(results)
         # Retain only real payloads: a stored ``None`` would be indistinguishable
-        # from a missing URL. The sole caller hydrates only when a result's own
-        # payload is already None, so dropping these keeps behaviour identical
-        # while removing the impossible state.
-        self._payloads: dict[str, CrawlPayload] = {r.url: r.payload for r in results if r.payload is not None}
+        # from a missing URL, and ``load_payload`` must not invent one.
+        self._payloads: dict[str, CrawlPayload] = {r.url: r.payload for r in self._results if r.payload is not None}
 
     def load_payload(self, url: str) -> CrawlPayload | None:
         return self._payloads.get(url)
+
+    def iter_lightweight(self, offset: int, limit: int) -> list[LightweightAudit]:
+        window = self._results[offset : offset + limit]
+        return [_lightweight_from_result(index + offset, result) for index, result in enumerate(window)]
+
+    def stream_results(self, batch: int = _STREAM_BATCH) -> Iterator[SiteCrawlResult]:
+        yield from self._results
+
+    def count(self) -> int:
+        return len(self._results)
 
     def close(self) -> None:
         pass
@@ -154,6 +257,53 @@ class InMemoryCrawlRunRepository:
 
     def __exit__(self, *exc: object) -> None:
         pass
+
+
+def _lightweight_from_result(insertion_order: int, result: SiteCrawlResult) -> LightweightAudit:
+    return LightweightAudit(
+        url=result.url,
+        depth=0,
+        discovered_from="",
+        http_status=result.status,
+        geo_score=result.geo_score,
+        indexability=result.indexability,
+        title=result.title,
+        issue_summary=result.issue_summary(),
+        insertion_order=insertion_order,
+    )
+
+
+def open_report_repository(report: SiteCrawlReport) -> CrawlRunRepository:
+    """Open the run-bound repository a report's data lives in: SQLite when the
+    crawl streamed to a store (production), else an in-memory view of the
+    report's bounded inline results (tests + small store-less crawls)."""
+    if report.run_ref is not None:
+        return report.run_ref.open()
+    return InMemoryCrawlRunRepository(report.results)
+
+
+def stream_report_results(report: SiteCrawlReport) -> Iterator[SiteCrawlResult]:
+    """Stream a report's per-URL results through its run-bound repository so a
+    consumer never materialises the whole crawl. The repository is opened for
+    the lifetime of the iteration and closed when it is exhausted."""
+    with open_report_repository(report) as repo:
+        yield from repo.stream_results()
+
+
+def stream_report_lightweight(report: SiteCrawlReport, batch: int = _STREAM_BATCH) -> Iterator[LightweightAudit]:
+    """Stream a report's lightweight per-URL rows (no payload load) for consumers
+    that only need status/score/url — e.g. the crawl diff — so a comparison never
+    decompresses a payload it does not read."""
+    with open_report_repository(report) as repo:
+        offset = 0
+        while True:
+            rows = repo.iter_lightweight(offset, batch)
+            if not rows:
+                return
+            yield from rows
+            if len(rows) < batch:
+                return
+            offset += len(rows)
 
 
 def hydrate_payloads(
@@ -183,4 +333,7 @@ __all__ = [
     "InMemoryCrawlRunRepository",
     "SqliteCrawlRunRepository",
     "hydrate_payloads",
+    "open_report_repository",
+    "stream_report_lightweight",
+    "stream_report_results",
 ]

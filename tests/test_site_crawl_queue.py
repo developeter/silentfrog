@@ -92,6 +92,12 @@ def _shrink_queue(monkeypatch, *, bound: int, batch: int) -> None:
     monkeypatch.setattr(site_crawler, "_CLAIM_BATCH", batch)
 
 
+def _crawled_urls(store: CrawlStore, report) -> set[str]:
+    # A store-backed report keeps no per-URL results (H2); the crawled set lives
+    # in the store, read back via the run's CrawlRunRef.
+    return {row.url for row in store.iter_lightweight(report.run_ref.run_id, 0, 10_000)}
+
+
 @pytest.mark.asyncio
 async def test_single_worker_with_tiny_queue_does_not_deadlock(monkeypatch) -> None:
     # The sharpest deadlock case: one worker, queue bound 1. In the naive
@@ -111,9 +117,9 @@ async def test_single_worker_with_tiny_queue_does_not_deadlock(monkeypatch) -> N
     report = await asyncio.wait_for(
         site_crawler.crawl_site(_spider_config(concurrency=1), timeout=5, store=store), _TIMEOUT
     )
-    crawled = {r.url for r in report.results}
+    crawled = _crawled_urls(store, report)
     assert crawled == {f"https://e.com/{p}" for p in ("", "a", "b", "c", "d", "e")}
-    assert store.count(report.run_id) == 6
+    assert store.count(report.run_ref.run_id) == 6
     store.close()
 
 
@@ -128,9 +134,9 @@ async def test_high_fanout_with_tiny_queue_stays_bounded_and_complete(monkeypatc
     report = await asyncio.wait_for(
         site_crawler.crawl_site(_spider_config(concurrency=4), timeout=5, store=store), _TIMEOUT
     )
-    crawled = {r.url for r in report.results}
+    crawled = _crawled_urls(store, report)
     assert crawled == {"https://e.com/", *leaves}
-    assert store.count(report.run_id) == 31
+    assert store.count(report.run_ref.run_id) == 31
     store.close()
 
 
@@ -169,12 +175,12 @@ async def test_worker_discoveries_reach_store_and_complete(monkeypatch) -> None:
     report = await asyncio.wait_for(
         site_crawler.crawl_site(_spider_config(concurrency=2), timeout=5, store=store), _TIMEOUT
     )
-    crawled = {r.url for r in report.results}
+    crawled = _crawled_urls(store, report)
     assert "https://e.com/c" in crawled
     states = {
         row[0]
         for row in store._conn.execute(
-            "SELECT DISTINCT state FROM frontier WHERE run_id = ?", (report.run_id,)
+            "SELECT DISTINCT state FROM frontier WHERE run_id = ?", (report.run_ref.run_id,)
         ).fetchall()
     }
     assert states == {"completed"}  # claim -> in_progress -> completed for every URL
@@ -230,6 +236,6 @@ async def test_producer_backpressures_instead_of_draining_frontier(monkeypatch) 
     finally:
         release.set()
     report = await asyncio.wait_for(run, _TIMEOUT)
-    assert {r.url for r in report.results} == set(urls)
-    assert store.count(report.run_id) == len(urls)
+    assert _crawled_urls(store, report) == set(urls)
+    assert store.count(report.run_ref.run_id) == len(urls)
     store.close()

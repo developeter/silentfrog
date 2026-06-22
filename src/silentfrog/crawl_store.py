@@ -109,9 +109,17 @@ def _decompress(blob: bytes | None) -> dict[str, Any] | None:
 
 class CrawlStore:
     def __init__(self, db_path: str | Path = ":memory:") -> None:
+        self._db_path = Path(db_path)
         self._conn = sqlite3.connect(str(db_path))
         apply_schema(self._conn)
         self._pending_writes = 0
+
+    @property
+    def db_path(self) -> Path:
+        """On-disk location of this run's store. A file-backed path round-trips
+        through ``CrawlRunRef``; ``:memory:`` stores cannot be reopened by a
+        separate connection (each ``:memory:`` connection is a fresh database)."""
+        return self._db_path
 
     # -- run lifecycle -------------------------------------------------
     def start_run(self, scope: str, base_url: str, mode: str) -> str:

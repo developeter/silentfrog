@@ -10,7 +10,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .audit_issues import AuditIssue, IssueCategory, IssueSeverity, issues_for_site_report, severity_rank
-from .crawl_run_repository import CrawlRunRepository
 from .site_crawl_types import SiteCrawlReport
 
 _DATA_DIR_ENV = "SILENTFROG_DATA_DIR"
@@ -184,11 +183,10 @@ def build_history_run(
     *,
     created_at: str | None = None,
     scope_key: str | None = None,
-    repository: CrawlRunRepository | None = None,
 ) -> CrawlHistoryRun:
     timestamp = created_at or _utc_timestamp()
     scope = scope_key or _scope_from_report(report)
-    issues = tuple(CrawlHistoryIssue.from_audit_issue(issue) for issue in issues_for_site_report(report, repository))
+    issues = tuple(CrawlHistoryIssue.from_audit_issue(issue) for issue in issues_for_site_report(report))
     return CrawlHistoryRun(
         run_id=f"{_safe_filename(scope)}_{_safe_filename(timestamp)}",
         created_at=timestamp,
@@ -222,10 +220,8 @@ def diff_runs(previous: CrawlHistoryRun, current: CrawlHistoryRun) -> CrawlHisto
 def save_report_and_diff(
     store: CrawlHistoryStore,
     report: SiteCrawlReport,
-    *,
-    repository: CrawlRunRepository | None = None,
 ) -> tuple[CrawlHistoryRun, CrawlHistoryDiff | None]:
-    current = build_history_run(report, repository=repository)
+    current = build_history_run(report)
     previous = store.latest_run(current.scope_key)
     store.save_run(current)
     return current, diff_runs(previous, current) if previous else None
@@ -260,11 +256,11 @@ def _load_run(path: Path) -> CrawlHistoryRun | None:
 
 
 def _scope_from_report(report: SiteCrawlReport) -> str:
-    for result in report.results:
-        host = urlparse(result.url).netloc.lower()
-        if host:
-            return host
-    return "unknown"
+    # The crawl root identifies the scope. It is a bounded summary field on the
+    # report, so this stays correct for store-backed crawls that keep no
+    # per-URL results.
+    host = urlparse(report.base_url).netloc.lower()
+    return host or "unknown"
 
 
 def _scope_matches(run: CrawlHistoryRun, scope_key: str | None) -> bool:

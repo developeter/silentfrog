@@ -6,7 +6,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from silentfrog.crawl_run_repository import CrawlRunRef
+from silentfrog.crawl_run_repository import CrawlRunRef, stream_report_results
 from silentfrog.crawl_store import CrawlStore, StoredAudit
 from silentfrog.crawl_types import CrawlPayload
 from silentfrog.exporters.llm_export import (
@@ -14,7 +14,7 @@ from silentfrog.exporters.llm_export import (
     export_page_for_llm,
     write_llm_export,
 )
-from silentfrog.site_crawl_types import SiteCrawlResult
+from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult
 
 
 def _payload(url: str, score: int, checks: list[dict]) -> CrawlPayload:
@@ -133,9 +133,10 @@ def test_crawl_export_rollup_and_worst_pages() -> None:
     assert export.json_data["worst_pages"][0]["url"] == "https://e.com/bad"
 
 
-def test_crawl_export_hydrates_stripped_results(tmp_path: Path) -> None:
-    # A result whose in-memory payload was stripped past the cap must still
-    # appear in the rollup + worst pages when the run-bound repository is given.
+def test_crawl_export_streams_results_from_run_repository(tmp_path: Path) -> None:
+    # The GUI streams results through the report's run-bound repository before
+    # exporting, so a store-backed run's payloads are rehydrated. A bare stripped
+    # result (no payload) contributes nothing measured.
     url = "https://e.com/stripped"
     payload = _payload(url, 20, _CHECKS)
     db = tmp_path / "crawl.db"
@@ -144,16 +145,23 @@ def test_crawl_export_hydrates_stripped_results(tmp_path: Path) -> None:
     store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
     store.finish_run(run_id)
     store.close()
-    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
 
+    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
     without = export_crawl_for_llm([stripped])
     assert without.json_data["distribution"]["count"] == 0
     assert url not in {p["url"] for p in without.json_data["worst_pages"]}
 
-    with CrawlRunRef(db, run_id).open() as repo:
-        with_repo = export_crawl_for_llm([stripped], repository=repo)
-    assert with_repo.json_data["distribution"]["count"] == 1
-    assert url in {p["url"] for p in with_repo.json_data["worst_pages"]}
+    run_report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id),
+        discovered_count=1,
+        crawled_count=1,
+        skipped_count=0,
+        failed_count=0,
+        base_url="https://e.com/",
+    )
+    streamed = export_crawl_for_llm(list(stream_report_results(run_report)))
+    assert streamed.json_data["distribution"]["count"] == 1
+    assert url in {p["url"] for p in streamed.json_data["worst_pages"]}
 
 
 def test_crawl_export_issue_frequency() -> None:

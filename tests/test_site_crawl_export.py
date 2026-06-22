@@ -281,9 +281,11 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
         workbook.close()
 
 
-def test_export_site_crawl_report_hydrates_stripped_results(tmp_path: Path) -> None:
-    # A result stripped past the in-memory cap (payload=None) must still emit
-    # its payload-derived sheets when the run-bound repository is supplied.
+def test_export_site_crawl_report_streams_payload_sheets_from_run_repository(tmp_path: Path) -> None:
+    # A store-backed report carries only a CrawlRunRef; the export streams every
+    # URL through the run-bound repository and emits the full payload-derived
+    # sheets. A store-less inline report with a stripped result has no payload to
+    # show, so those sheets stay empty.
     url = "https://example.com/stripped"
     payload = _payload(url)
     db = tmp_path / "crawl.db"
@@ -292,11 +294,12 @@ def test_export_site_crawl_report_hydrates_stripped_results(tmp_path: Path) -> N
     store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
     store.finish_run(run_id)
     store.close()
-    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
-    report = SiteCrawlReport.from_results([stripped], discovered_count=1)
 
+    inline_report = SiteCrawlReport.from_results(
+        [replace(SiteCrawlResult.from_payload(url, payload), payload=None)], discovered_count=1
+    )
     without = tmp_path / "without.xlsx"
-    export_site_crawl_report(report, without)
+    export_site_crawl_report(inline_report, without)
     workbook = load_workbook(without)
     try:
         assert workbook["Structured data"]["A2"].value == "-"
@@ -304,9 +307,16 @@ def test_export_site_crawl_report_hydrates_stripped_results(tmp_path: Path) -> N
     finally:
         workbook.close()
 
+    run_report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id),
+        discovered_count=1,
+        crawled_count=1,
+        skipped_count=0,
+        failed_count=0,
+        base_url="https://example.com/",
+    )
     with_repo = tmp_path / "with.xlsx"
-    with CrawlRunRef(db, run_id).open() as repo:
-        export_site_crawl_report(report, with_repo, repository=repo)
+    export_site_crawl_report(run_report, with_repo)
     workbook = load_workbook(with_repo)
     try:
         assert workbook["Structured data"]["A2"].value == url

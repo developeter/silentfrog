@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from silentfrog import site_crawler
@@ -62,35 +60,43 @@ def graph_analyser(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_report_carries_run_id_when_streaming_to_store(graph_analyser) -> None:
+async def test_report_carries_run_ref_when_streaming_to_store(graph_analyser) -> None:
     store = CrawlStore(":memory:")
     report = await site_crawler.crawl_site(_spider_config(), timeout=5, store=store)
-    assert report.run_id
-    assert store.count(report.run_id) == 4
+    # H2: the store-backed report carries a CrawlRunRef + counts, no results.
+    assert report.run_ref is not None
+    assert report.run_ref.run_id
+    assert report.results == ()
+    assert report.crawled_count == 4
+    assert store.count(report.run_ref.run_id) == 4
     store.close()
 
 
 @pytest.mark.asyncio
-async def test_payloads_stripped_beyond_threshold_but_links_still_followed(graph_analyser, monkeypatch) -> None:
-    # Force stripping after the first 2 results.
+async def test_live_row_events_strip_payload_beyond_threshold(graph_analyser, monkeypatch) -> None:
+    # Force stripping of the LIVE row events after the first 2 (store-backed). The
+    # report itself keeps no results (H2); the store holds every payload.
     monkeypatch.setattr(site_crawler, "_PAYLOAD_MEMORY_LIMIT", 2)
     store = CrawlStore(":memory:")
-    report = await site_crawler.crawl_site(_spider_config(), timeout=5, store=store)
+    emitted: list = []
 
-    # Link-following still reached all 4 pages despite stripping — the
-    # headline guarantee: /c is reachable only via /a's link.
-    crawled = {r.url for r in report.results}
-    assert crawled == {"https://e.com/", "https://e.com/a", "https://e.com/b", "https://e.com/c"}
+    def on_event(event) -> None:
+        if event.get("event") == "row":
+            emitted.append(event["result"])
 
-    # First 2 in-memory results keep their payload; the rest are stripped.
-    with_payload = sum(1 for r in report.results if r.payload is not None)
-    without_payload = sum(1 for r in report.results if r.payload is None)
-    assert with_payload == 2
-    assert without_payload == 2
+    report = await site_crawler.crawl_site(_spider_config(), timeout=5, store=store, on_event=on_event)
 
-    # But the store has every payload — a stripped one reloads from disk.
-    stripped = next(r for r in report.results if r.payload is None)
-    reloaded = store.load_payload(report.run_id, stripped.url)
+    # Link-following still reached all 4 pages despite stripping — the headline
+    # guarantee: /c is reachable only via /a's link.
+    assert report.results == ()
+    assert store.count(report.run_ref.run_id) == 4
+
+    # The first 2 live events keep their payload (so the GUI model + detail are
+    # instant for small crawls); past the threshold they are stripped so the live
+    # table model stays flat. The store still has every payload.
+    assert sum(1 for r in emitted if r.payload is not None) == 2
+    assert sum(1 for r in emitted if r.payload is None) == 2
+    reloaded = store.load_payload(report.run_ref.run_id, "https://e.com/c")
     assert reloaded is not None
     assert reloaded["ai_visibility"]["summary"]["score"] == 80
     store.close()
@@ -98,16 +104,18 @@ async def test_payloads_stripped_beyond_threshold_but_links_still_followed(graph
 
 @pytest.mark.asyncio
 async def test_no_store_keeps_all_payloads_in_memory(graph_analyser, monkeypatch) -> None:
-    # Without a store, nothing is stripped (backward-compatible).
+    # Without a store, nothing is stripped and the report carries inline results.
     monkeypatch.setattr(site_crawler, "_PAYLOAD_MEMORY_LIMIT", 1)
     report = await site_crawler.crawl_site(_spider_config(), timeout=5, store=None)
+    assert report.run_ref is None
     assert all(r.payload is not None for r in report.results)
 
 
-def test_gui_loads_stripped_payload_from_store(qtbot, tmp_path) -> None:
+def test_gui_loads_payload_from_run_ref(qtbot, tmp_path) -> None:
+    from silentfrog.crawl_run_repository import CrawlRunRef
     from silentfrog.crawl_store import StoredAudit
     from silentfrog.site_crawl_gui import SiteCrawlWindow
-    from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult
+    from silentfrog.site_crawl_types import SiteCrawlReport
 
     # Seed a store on disk with one payload.
     db = tmp_path / "crawl.db"
@@ -120,9 +128,9 @@ def test_gui_loads_stripped_payload_from_store(qtbot, tmp_path) -> None:
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
-    win._crawl_store_path = str(db)
-    stripped = replace(SiteCrawlResult.from_payload("https://e.com/p", payload), payload=None)
-    win._latest_report = SiteCrawlReport.from_results([stripped], discovered_count=1, run_id=run_id)
+    win._latest_report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id), discovered_count=1, crawled_count=1, skipped_count=0, failed_count=0
+    )
     loaded = win._load_payload_for_detail("https://e.com/p")
     assert isinstance(loaded, CrawlPayload)
     assert loaded.ai_visibility.summary.score == 80
@@ -134,17 +142,17 @@ def test_gui_load_returns_none_without_store(qtbot) -> None:
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
-    win._crawl_store_path = ""
-    win._latest_report = SiteCrawlReport.from_results([], discovered_count=0, run_id="r1")
+    win._latest_report = SiteCrawlReport.from_results([], discovered_count=0)
     assert win._load_payload_for_detail("https://e.com/p") is None
 
 
-def test_detail_load_binds_to_report_run_not_stale_field(qtbot, tmp_path) -> None:
-    # The detail load must bind via the displayed report's run_id, NOT the
+def test_detail_load_binds_to_report_run_ref_not_stale_field(qtbot, tmp_path) -> None:
+    # The detail load must bind via the displayed report's CrawlRunRef, NOT the
     # mutable _crawl_run_id (which a newer crawl may have moved on).
+    from silentfrog.crawl_run_repository import CrawlRunRef
     from silentfrog.crawl_store import StoredAudit
     from silentfrog.site_crawl_gui import SiteCrawlWindow
-    from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult
+    from silentfrog.site_crawl_types import SiteCrawlReport
 
     url = "https://e.com/p"
     payload = _payload_with_links(url, [])
@@ -157,27 +165,26 @@ def test_detail_load_binds_to_report_run_not_stale_field(qtbot, tmp_path) -> Non
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
-    win._crawl_store_path = str(db)
     win._crawl_run_id = "STALE-OTHER-RUN"  # a newer/other crawl moved the mutable field
-    stripped = replace(SiteCrawlResult.from_payload(url, payload), payload=None)
-    win._latest_report = SiteCrawlReport.from_results([stripped], discovered_count=1, run_id=run_id)
-    # Binds via report.run_id, so the load succeeds despite the stale field.
+    win._latest_report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id), discovered_count=1, crawled_count=1, skipped_count=0, failed_count=0
+    )
+    # Binds via report.run_ref, so the load succeeds despite the stale field.
     assert isinstance(win._load_payload_for_detail(url), CrawlPayload)
 
 
-def test_recap_repository_failure_does_not_escape(qtbot, monkeypatch) -> None:
+def test_recap_build_failure_does_not_escape(qtbot, monkeypatch) -> None:
     # Recap failures must be contained in _handle_report — never propagate.
+    from silentfrog import site_crawl_gui as gui_mod
     from silentfrog.site_crawl_gui import SiteCrawlWindow
-    from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult
+    from silentfrog.site_crawl_types import SiteCrawlReport
 
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
-    payload = _payload_with_links("https://e.com/p", [])
-    stripped = replace(SiteCrawlResult.from_payload("https://e.com/p", payload), payload=None)
-    report = SiteCrawlReport.from_results([stripped], discovered_count=1, run_id="r1")
+    report = SiteCrawlReport.from_results([], discovered_count=1)
 
     def _boom(_report):
-        raise RuntimeError("store unavailable")
+        raise RuntimeError("issues unavailable")
 
-    monkeypatch.setattr(win, "_open_run_repository", _boom)
-    win._update_recap_from_report(report)  # must not raise; falls back to in-memory
+    monkeypatch.setattr(gui_mod, "issues_for_site_report", _boom)
+    win._update_recap_from_report(report)  # must not raise; recap degrades to empty
