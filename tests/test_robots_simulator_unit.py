@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 from silentfrog.parsers_meta import _robot_access
-from silentfrog.robots_simulator import RobotsSimResult, simulate_robots
+from silentfrog.robots_simulator import RobotsSimResult, parse_robots, simulate_robots
 
 
 def _sim(body: str, ua: str, url: str) -> RobotsSimResult:
@@ -130,25 +130,40 @@ def test_pathological_wildcard_is_linear_in_process() -> None:
 
 
 def test_parity_with_parsers_meta_robot_access() -> None:
-    # The standalone engine must agree with the live crawl path on simple rules.
+    # The Bot Matrix gate (_robot_access over RobotsRules) and the one-shot
+    # simulator share one engine, so their verdicts must agree.
     cases = [
         ("User-agent: *\nDisallow: /private\n", "https://e.com/private/x"),
         ("User-agent: *\nDisallow: /\n", "https://e.com/page"),
         ("User-agent: *\nDisallow: /a\nAllow: /a/b\n", "https://e.com/a/b/c"),
     ]
     for body, url in cases:
-        robots_map = {"*": _directives_from(body)}
-        live_ok, _ = _robot_access(robots_map, "bot", url)
+        live_ok, _ = _robot_access(parse_robots(body), "bot", url)
         assert _sim(body, "bot", url).allowed is live_ok
 
 
-def _directives_from(body: str) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
-    for raw in body.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if ":" not in line:
-            continue
-        key, _sep, value = line.partition(":")
-        if key.strip().lower() in {"allow", "disallow"}:
-            out.append((key.strip().title(), value.strip()))
-    return out
+def test_parse_robots_groups_consecutive_user_agents() -> None:
+    # F5: consecutive User-agent lines share the following rules (the v1.x
+    # parser reset the group on each line, so only the last UA was bound).
+    rules = parse_robots("User-agent: a\nUser-agent: b\nDisallow: /x\n")
+    assert rules.allows("a", "https://e.com/x") is False
+    assert rules.allows("b", "https://e.com/x") is False
+    assert rules.allows("c", "https://e.com/x") is True  # no group -> allowed
+
+
+def test_crawl_delay_selected_by_product_token() -> None:
+    # The delay group is chosen by product-token prefix, not an exact full-UA
+    # match (the v1.x bug keyed on the whole UA string and never matched).
+    rules = parse_robots("User-agent: silentfrog\nCrawl-delay: 3\n")
+    assert rules.crawl_delay("SilentFrog/1.0 (+https://example.com)") == 3.0
+    assert rules.crawl_delay("OtherBot/2.0") == 0.0  # no matching group, no '*'
+
+
+def test_parse_robots_collects_sitemaps_and_keeps_directive_map() -> None:
+    body = "Sitemap: https://e.com/sitemap.xml\nUser-agent: *\nDisallow: /p\n"
+    rules = parse_robots(body)
+    assert rules.sitemaps == ("https://e.com/sitemap.xml",)
+    directives = rules.directive_map()
+    # Sitemap stays in the legacy map so discovery + the Robots sheet still see it.
+    assert ("Sitemap", "https://e.com/sitemap.xml") in directives["*"]
+    assert ("Disallow", "/p") in directives["*"]

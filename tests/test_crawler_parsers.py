@@ -14,6 +14,7 @@ from silentfrog.image_diagnostics import (
     RESPONSIVE_COL,
     SIZES_COL,
 )
+from silentfrog.robots_simulator import parse_robots  # type: ignore[reportMissingImports]
 
 
 @pytest.fixture
@@ -254,12 +255,12 @@ def test_schema_validation_flags_breadcrumb_and_product() -> None:
 
 
 def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
-    robots: dict[str, list[tuple[str, str]]] = {
-        "*": [("Disallow", "/private"), ("Allow", "/")],
-        "GPTBot": [("Allow", "/")],
-        "GoogleBot": [("Allow", "/")],
-    }
-    rows = crawler._ai_crawl_matrix(robots, "noai, nosnippet", "https://example.com/private/page")
+    rules = parse_robots(
+        "User-agent: *\nDisallow: /private\nAllow: /\n\n"
+        "User-agent: GPTBot\nAllow: /\n\n"
+        "User-agent: GoogleBot\nAllow: /\n"
+    )
+    rows = crawler._ai_crawl_matrix(rules, "noai, nosnippet", "https://example.com/private/page")
     verdicts = {row[0]: row[5] for row in rows}
     directives = {row[0]: row[3] for row in rows}
     controls = {row[0]: row[4] for row in rows}
@@ -282,7 +283,9 @@ def test_ai_crawl_matrix_respects_meta_and_robots() -> None:
 
 
 def test_ai_crawl_matrix_limits_googlebot_for_positive_max_snippet() -> None:
-    rows = crawler._ai_crawl_matrix({"*": [("Allow", "/")]}, "index, max-snippet:20", "https://example.com/page")
+    rows = crawler._ai_crawl_matrix(
+        parse_robots("User-agent: *\nAllow: /\n"), "index, max-snippet:20", "https://example.com/page"
+    )
     by_agent = {row[0]: row for row in rows}
 
     assert by_agent["Googlebot"][4] == "max-snippet:20"

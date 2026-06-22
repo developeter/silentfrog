@@ -15,6 +15,7 @@ from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
     RESPONSIVE_COL,
     SIZES_COL,
 )
+from silentfrog.robots_simulator import parse_robots  # type: ignore[reportMissingImports]
 from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
 
 # ------------------------------------------------------------------
@@ -301,7 +302,10 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
         sleep_calls.append(duration)
 
     async def fake_parse(url: str, timeout: int = 5):
-        return {"*": [("Crawl-delay", "2")]}
+        # Keyed on the product token "SilentFrog", not the full UA string — the
+        # delay must still apply via prefix selection (the H3 crawl-delay fix;
+        # the old exact full-UA lookup never matched and silently skipped it).
+        return parse_robots("User-agent: SilentFrog\nCrawl-delay: 2\n")
 
     monkeypatch.setattr(crawler, "_parse_robots", fake_parse)
     monkeypatch.setattr(crawler.asyncio, "sleep", fake_sleep)

@@ -14,25 +14,22 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from urllib import robotparser
 from urllib.parse import urlparse
 
 from .http_client import fetch_page
+from .robots_simulator import parse_robots
 
 
 class RobotsMatcher:
     def __init__(self, user_agent: str, robots_text: str = "") -> None:
         self._ua = user_agent or "*"
-        self._parser = robotparser.RobotFileParser()
-        self._has_rules = bool(robots_text.strip())
-        if self._has_rules:
-            self._parser.parse(robots_text.splitlines())
+        # Single live engine (H3): the spider gate, Bot Matrix, and crawl-delay
+        # all evaluate through robots_simulator, so their verdicts agree.
+        self._rules = parse_robots(robots_text)
 
     def allows(self, url: str) -> bool:
-        # No robots.txt (or empty) → allow everything.
-        if not self._has_rules:
-            return True
-        return self._parser.can_fetch(self._ua, url)
+        # Empty robots.txt → no group → allowed (RFC 9309 permissive default).
+        return self._rules.allows(self._ua, url)
 
 
 def _robots_url(url: str) -> str:

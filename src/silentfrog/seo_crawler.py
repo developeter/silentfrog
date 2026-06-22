@@ -23,7 +23,6 @@ from .content_quality import extract_content_quality
 from .crawl_http import (
     _BACKOFF_DELAY,
     _BACKOFF_STATUSES,
-    _crawl_delay_for,
     _headers_from_options,
     _host_key,
     _image_info,
@@ -58,6 +57,7 @@ from .parsers_meta import (
 )
 from .perf_metrics import _collect_performance_metrics
 from .render_diff import compute_render_diff, render_with_playwright
+from .robots_simulator import RobotsRules
 from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
@@ -84,13 +84,13 @@ async def _fetch_analysis_response(
     url: str,
     timeout: int,
     crawl_options: CrawlOptions,
-) -> tuple[Any, dict[str, list[tuple[str, str]]] | None]:
+) -> tuple[Any, RobotsRules | None]:
     host_key = _host_key(url)
-    robots_snapshot: dict[str, list[tuple[str, str]]] | None = None
+    robots_snapshot: RobotsRules | None = None
     async with _throttle_host(host_key, crawl_options):
         if crawl_options.respect_crawl_delay:
             robots_snapshot = await _parse_robots(url, timeout=timeout)
-        delay_seconds = _crawl_delay_for(crawl_options, host_key, robots_snapshot or {})
+        delay_seconds = robots_snapshot.crawl_delay(crawl_options.user_agent) if robots_snapshot else 0.0
         active_delay = delay_seconds if (crawl_options.gentle_mode and crawl_options.respect_crawl_delay) else 0.0
         crawl_http._HOST_DELAYS[host_key] = active_delay  # adjust host delay used by link-status helper
         if active_delay > 0:
@@ -222,7 +222,8 @@ async def _collect_analysis_sections(
         crawl_options=crawl_options,
     )
     meta_robots = _meta_robots_value(response.headers, soup)
-    robots_map = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
+    robots_rules = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
+    robots_map = robots_rules.directive_map()
     serp_snippet = await _make_serp_snippet(soup, response.url)
     discovery = await fetch_discovery_files(
         response.url,
@@ -241,7 +242,7 @@ async def _collect_analysis_sections(
         "robots": robots_map,
         "meta_robots": meta_robots,
         "hreflang": hreflang_rows,
-        "ai_crawl": _ai_crawl_matrix(robots_map, meta_robots, response.url),
+        "ai_crawl": _ai_crawl_matrix(robots_rules, meta_robots, response.url),
         "serp": serp_snippet,
         "serp_audit": _title_audit(serp_snippet["title"], header_rows),
         "keywords": _extract_keywords(soup, plain_text),

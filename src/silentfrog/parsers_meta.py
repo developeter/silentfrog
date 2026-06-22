@@ -15,6 +15,7 @@ from .crawl_http import _headers_from_options, _polite_probe_response
 from .crawl_options import CrawlOptions
 from .crawler_utils import _attr, normalize_text, safe_attr
 from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
+from .robots_simulator import RobotsRules
 from .transport import open_crawl_session
 
 Tag = bs4.element.Tag
@@ -654,56 +655,16 @@ def _meta_directives(meta_robots: str) -> set[str]:
     return {directive.strip().lower() for directive in str(meta_robots or "").split(",") if directive.strip()}
 
 
-def _page_path(page_url: str) -> str:
-    return urlparse(page_url).path or "/"
-
-
-def _path_matches_rule(page_path: str, rule: str) -> bool:
-    normalized = str(rule or "").strip()
-    return bool(normalized) and (normalized == "/" or page_path.startswith(normalized))
-
-
-def _agent_directives(
-    robots_map: dict[str, list[tuple[str, str]]],
-    agent_token: str,
-) -> list[tuple[str, str]]:
-    normalized = {str(agent).strip().casefold(): directives for agent, directives in robots_map.items()}
-    return normalized.get(agent_token.casefold()) or normalized.get("*", [])
-
-
-def _matching_robot_rules(
-    directives: list[tuple[str, str]],
-    page_url: str,
-) -> list[tuple[str, str]]:
-    page_path = _page_path(page_url)
-    return [
-        (verb.title(), path)
-        for verb, path in directives
-        if verb.lower() in {"allow", "disallow"} and _path_matches_rule(page_path, path)
-    ]
-
-
-def _longest_robot_match(matches: list[tuple[str, str]]) -> tuple[str, str] | None:
-    if not matches:
-        return None
-    return max(
-        matches,
-        key=lambda item: (len(str(item[1] or "")), 1 if str(item[0]).lower() == "allow" else 0),
-    )
-
-
-def _robot_access(
-    robots_map: dict[str, list[tuple[str, str]]],
-    agent_token: str,
-    page_url: str,
-) -> tuple[bool, list[str]]:
-    matches = _matching_robot_rules(_agent_directives(robots_map, agent_token), page_url)
-    winning_rule = _longest_robot_match(matches)
-    if winning_rule is None:
+def _robot_access(rules: RobotsRules, agent_token: str, page_url: str) -> tuple[bool, list[str]]:
+    """Per-agent robots verdict via the single live engine (H3). Returns
+    ``(allowed, [blocking pattern] | [])`` — the pattern feeds the Bot Matrix
+    notes. RFC 9309 wildcards/anchors + longest-match now apply, where the
+    v1.x prefix matcher silently missed ``*``/``$`` rules."""
+    result = rules.evaluate(agent_token, page_url)
+    if result.allowed:
         return True, []
-    verb, path = winning_rule
-    blocked = verb.lower() == "disallow"
-    return (not blocked), ([path] if blocked else [])
+    pattern = result.winning_rule.pattern if result.winning_rule else ""
+    return False, ([pattern] if pattern else [])
 
 
 def _ai_nonstandard_directives(directives: set[str]) -> list[str]:
@@ -756,7 +717,7 @@ def _ai_notes(
     return "; ".join(notes) or "No explicit AI restrictions detected"
 
 
-def _ai_crawl_matrix(robots_map: dict[str, list[tuple[str, str]]], meta_robots: str, page_url: str) -> list[list[str]]:
+def _ai_crawl_matrix(rules: RobotsRules, meta_robots: str, page_url: str) -> list[list[str]]:
     directives = _meta_directives(meta_robots)
     nonstandard_directives = _ai_nonstandard_directives(directives)
     google_controls = _google_search_controls(directives)
@@ -764,7 +725,7 @@ def _ai_crawl_matrix(robots_map: dict[str, list[tuple[str, str]]], meta_robots: 
     out: list[list[str]] = []
     for agent in _AI_AGENTS:
         disallows: list[str]
-        robots_ok, disallows = _robot_access(robots_map, agent.token, page_url)
+        robots_ok, disallows = _robot_access(rules, agent.token, page_url)
         controls = google_controls if agent.applies_google_search_controls else []
         search_control_text = ", ".join(controls) or "-"
         verdict = _ai_verdict(robots_ok, controls)

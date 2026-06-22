@@ -15,6 +15,7 @@ from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aioh
 from .crawl_constants import _ACCEPT_DEFAULT, _ACCEPT_LANGUAGE_DEFAULT
 from .crawl_options import CrawlOptions
 from .http_client import fetch_text
+from .robots_simulator import RobotsRules, parse_robots
 from .transport import open_crawl_session
 
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
@@ -240,53 +241,14 @@ async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
     return await fetch_text(robots_url, timeout)
 
 
-async def _parse_robots(url: str, timeout: int = 5) -> dict[str, list[tuple[str, str]]]:
+async def _parse_robots(url: str, timeout: int = 5) -> RobotsRules:
+    """Fetch + parse robots.txt for ``url`` into the single live engine (H3).
+
+    Replaces the v1.x line-loop parser (which reset the group on every
+    ``User-agent`` line); grouping, allow/deny, crawl-delay, and sitemaps all
+    come from ``robots_simulator.parse_robots`` now."""
     txt = await _fetch_robots(url, timeout)
-    if txt is None:
-        return {}
-
-    result: dict[str, list[tuple[str, str]]] = {}
-    current_agents: list[str] = ["*"]
-
-    for raw in txt.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-
-        if ":" not in line:
-            continue
-        key, value = (p.strip() for p in line.split(":", 1))
-        key_low = key.lower()
-
-        if key_low == "user-agent":
-            current_agents = [a.strip() for a in value.split()]
-            for ua in current_agents:
-                result.setdefault(ua, [])
-            continue
-
-        if key_low in ("allow", "disallow"):
-            for ua in current_agents:
-                result.setdefault(ua, []).append((key.title(), value))
-            continue
-
-        for ua in current_agents:
-            result.setdefault(ua, []).append((key.title(), value))
-
-    return result
-
-
-def _crawl_delay_for(options: CrawlOptions, host: str, robots: dict[str, list[tuple[str, str]]]) -> float:
-    if not options.gentle_mode or not options.respect_crawl_delay:
-        return 0.0
-    ua_key = options.user_agent.lower()
-    candidates = robots.get(ua_key) or robots.get("*") or []
-    for key, value in candidates:
-        if key.lower() == "crawl-delay":
-            try:
-                return max(0.0, float(value.replace(",", ".").strip()))
-            except ValueError:
-                return 0.0
-    return 0.0
+    return parse_robots(txt or "")
 
 
 def _redirect_hops_result(hop_urls: list[str], status: str, is_loop: bool) -> tuple[list[str], str, int, bool]:

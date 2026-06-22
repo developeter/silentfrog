@@ -6,14 +6,17 @@ won the longest-match contest. It is built for a future Settings->Tools
 robots simulator dialog that renders ``RobotsSimResult.to_dict()``; the
 dialog itself is deferred.
 
-This does NOT replace ``robots_matcher.py`` or ``parsers_meta._robot_access``
-(the live crawl path stays on those). It is a standalone, pure engine that
-parses a raw robots body string and never raises — malformed input simply
-yields the permissive default (allowed) that RFC 9309 mandates.
+As of H3 this IS the single live engine: ``RobotsRules`` (parse once, query
+many) backs the spider allow/deny gate (``robots_matcher``), the Bot Matrix
+(``parsers_meta._robot_access``), and crawl-delay selection, so all robots
+verdicts agree. ``simulate_robots`` remains the one-shot explainable entry
+point for the Settings simulator dialog. The engine never raises — malformed
+input yields the permissive default (allowed) that RFC 9309 mandates.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import unquote, urlparse
@@ -129,21 +132,24 @@ def _consume_directive(
     return current, False
 
 
-def _select_group(groups: dict[str, list[RobotsRule]], ua_lower: str) -> tuple[str, bool]:
-    """Pick the group key for ``ua_lower`` and report whether ``*`` was used.
-
-    RFC 9309 precedence: exact token, else the longest token that is a prefix
-    of the UA, else ``*``, else "" (no group => caller allows). Uses max-by-
-    length rather than ranked branches.
-    """
-    if ua_lower in groups:
+def _select_token(tokens: Iterable[str], ua_lower: str) -> tuple[str, bool]:
+    """RFC 9309 group precedence over a set of lowercased UA tokens: exact
+    token, else the longest token that is a prefix of the UA (this is how the
+    product token is derived — ``silentfrog`` matches ``silentfrog/1.0 ...``),
+    else ``*``, else "" (no group => allowed). Returns ``(key, used_star)``."""
+    token_set = set(tokens)
+    if ua_lower in token_set:
         return ua_lower, False
-    prefixes = [token for token in groups if token and token != "*" and ua_lower.startswith(token)]
+    prefixes = [token for token in token_set if token and token != "*" and ua_lower.startswith(token)]
     if prefixes:
         return max(prefixes, key=len), False
-    if "*" in groups:
+    if "*" in token_set:
         return "*", True
     return "", False
+
+
+def _select_group(groups: dict[str, list[RobotsRule]], ua_lower: str) -> tuple[str, bool]:
+    return _select_token(groups.keys(), ua_lower)
 
 
 def _url_path(url: str) -> str:
@@ -252,13 +258,13 @@ def _no_group_result(user_agent: str) -> RobotsSimResult:
     )
 
 
-def simulate_robots(robots_body: str, user_agent: str, url: str) -> RobotsSimResult:
-    """Evaluate ``url`` for ``user_agent`` against a raw robots.txt body.
+def _evaluate(groups: dict[str, list[RobotsRule]], user_agent: str, url: str) -> RobotsSimResult:
+    """Evaluate ``url`` for ``user_agent`` against already-parsed groups.
 
-    Returns an explainable verdict; never raises. With no matching group or
-    no matching rule the URL is allowed, per RFC 9309's permissive default.
+    Shared by ``simulate_robots`` (one-shot) and ``RobotsRules`` (parse once,
+    query many) so the live crawl gate, Bot Matrix, and simulator dialog all
+    return the same verdict from the same engine.
     """
-    groups = _parse_groups(robots_body)
     ua_lower = str(user_agent or "").strip().lower()
     group_key, used_star = _select_group(groups, ua_lower)
     if not group_key:
@@ -280,10 +286,108 @@ def simulate_robots(robots_body: str, user_agent: str, url: str) -> RobotsSimRes
     )
 
 
+def simulate_robots(robots_body: str, user_agent: str, url: str) -> RobotsSimResult:
+    """Evaluate ``url`` for ``user_agent`` against a raw robots.txt body.
+
+    Returns an explainable verdict; never raises. With no matching group or
+    no matching rule the URL is allowed, per RFC 9309's permissive default.
+    """
+    return _evaluate(_parse_groups(robots_body), user_agent, url)
+
+
 def _outcome_token(winner: RobotsRule | None) -> str:
     if winner is None:
         return "no_match"
     return "allow_wins" if winner.verb == "allow" else "disallow_wins"
 
 
-__all__ = ["RobotsRule", "RobotsSimResult", "simulate_robots"]
+def _parse_delay(value: str) -> float | None:
+    try:
+        return max(0.0, float(value.replace(",", ".").strip()))
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class RobotsRules:
+    """A robots.txt parsed once, queried many times — the single live engine
+    (H3). ``allows`` and ``crawl_delay`` share group selection with the V16
+    simulator, so the crawl gate, Bot Matrix, and crawl-delay all agree.
+    ``directive_map`` reproduces the legacy ``{ua: [(Verb, value)]}`` shape the
+    persisted payload + Excel still consume, now with RFC 9309 grouping."""
+
+    groups: dict[str, list[RobotsRule]]
+    delays: dict[str, float]
+    sitemaps: tuple[str, ...]
+    directives: dict[str, list[tuple[str, str]]]
+
+    def evaluate(self, user_agent: str, url: str) -> RobotsSimResult:
+        return _evaluate(self.groups, user_agent, url)
+
+    def allows(self, user_agent: str, url: str) -> bool:
+        return self.evaluate(user_agent, url).allowed
+
+    def crawl_delay(self, user_agent: str) -> float:
+        key, _used_star = _select_token(self.delays.keys(), str(user_agent or "").strip().lower())
+        return self.delays.get(key, 0.0)
+
+    def directive_map(self) -> dict[str, list[tuple[str, str]]]:
+        return {agent: list(rows) for agent, rows in self.directives.items()}
+
+
+def _fold_directive(
+    key: str,
+    value: str,
+    tokens: list[str],
+    groups: dict[str, list[RobotsRule]],
+    delays: dict[str, float],
+    directives: dict[str, list[tuple[str, str]]],
+) -> None:
+    for token in tokens:
+        directives.setdefault(token, []).append((key.title(), value))
+        token_lower = token.lower()
+        if key in {"allow", "disallow"}:
+            groups.setdefault(token_lower, []).append(_rule_from(key, value))
+        elif key == "crawl-delay" and (delay := _parse_delay(value)) is not None:
+            delays[token_lower] = delay
+
+
+def parse_robots(body: str) -> RobotsRules:
+    """Parse a robots.txt body once into the live ``RobotsRules`` engine.
+
+    Groups consecutive ``User-agent`` lines per RFC 9309 (fixing the v1.x
+    grouping bug), collects per-group ``Crawl-delay`` and global ``Sitemap``
+    directives, and keeps the original-case directive map for display. Never
+    raises — malformed input yields permissive (empty) rules.
+    """
+    groups: dict[str, list[RobotsRule]] = {}
+    delays: dict[str, float] = {}
+    directives: dict[str, list[tuple[str, str]]] = {}
+    sitemaps: list[str] = []
+    current: list[str] = []
+    expecting_agent = True
+    for raw in str(body or "").splitlines():
+        parsed = _split_directive(_strip_comment(raw))
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key == "sitemap":
+            expecting_agent = False  # a non-group directive ends the agent run
+            if value:
+                sitemaps.append(value)
+                for token in current or ["*"]:
+                    directives.setdefault(token, []).append(("Sitemap", value))
+            continue
+        if _is_agent_line(key):
+            current = [] if not expecting_agent else current
+            current.append(value)
+            groups.setdefault(value.lower(), [])
+            directives.setdefault(value, [])
+            expecting_agent = True
+            continue
+        expecting_agent = False
+        _fold_directive(key, value, current or ["*"], groups, delays, directives)
+    return RobotsRules(groups=groups, delays=delays, sitemaps=tuple(sitemaps), directives=directives)
+
+
+__all__ = ["RobotsRule", "RobotsRules", "RobotsSimResult", "parse_robots", "simulate_robots"]
