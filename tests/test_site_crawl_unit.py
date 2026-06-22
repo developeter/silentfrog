@@ -188,11 +188,17 @@ async def test_crawl_site_returns_cached_payloads_and_failed_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_crawl_site_marks_pending_urls_skipped_when_cancelled(monkeypatch):
+async def test_crawl_site_cancelled_before_start_processes_nothing(monkeypatch):
+    # PR-9 cooperative cancellation: a crawl cancelled before any URL is claimed
+    # stops cleanly with NO rows processed (the old behavior marked every pending
+    # URL "skipped"). A regression that ignores cancel would analyse a + b and
+    # produce two rows, failing this guard.
     cancel = __import__("threading").Event()
     cancel.set()
+    analysed: list[str] = []
 
     async def fake_analyse(url: str, timeout: int, options=None):
+        analysed.append(url)
         return _payload(url)
 
     monkeypatch.setattr(site_crawler, "analyse", fake_analyse)
@@ -203,4 +209,5 @@ async def test_crawl_site_marks_pending_urls_skipped_when_cancelled(monkeypatch)
 
     report = await site_crawler.crawl_site(config, cancel_event=cancel)
 
-    assert {result.status for result in report.results} == {"skipped"}
+    assert report.results == ()
+    assert analysed == []

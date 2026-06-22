@@ -166,6 +166,51 @@ def test_mark_sets_terminal_frontier_state(store: CrawlStore) -> None:
     assert row[0] == "completed"
 
 
+def test_requeue_in_progress_resets_only_claimed_rows(store: CrawlStore) -> None:
+    # PR-9 resume: in_progress -> pending, leaving pending and terminal rows
+    # untouched so resume re-runs only the abandoned claims.
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    for path in ("a", "b", "c"):
+        store.admit(run_id, f"https://e.com/{path}", "", 0)
+    store.claim_pending(run_id, 2)  # a, b -> in_progress; c stays pending
+    store.mark(run_id, "https://e.com/a", "completed")  # a is terminal
+    requeued = store.requeue_in_progress(run_id)
+    assert requeued == 1  # only b was in_progress
+    states = dict(
+        store._conn.execute("SELECT normalized_url, state FROM frontier WHERE run_id = ?", (run_id,)).fetchall()
+    )
+    assert states == {
+        "https://e.com/a": "completed",  # terminal, untouched
+        "https://e.com/b": "pending",  # requeued
+        "https://e.com/c": "pending",  # never claimed, untouched
+    }
+
+
+def test_requeue_in_progress_is_isolated_per_run(store: CrawlStore) -> None:
+    run_a = store.start_run("a.com", "https://a.com/", "spider")
+    run_b = store.start_run("b.com", "https://b.com/", "spider")
+    store.admit(run_a, "https://a.com/1", "", 0)
+    store.admit(run_b, "https://b.com/1", "", 0)
+    store.claim_pending(run_a, 1)
+    store.claim_pending(run_b, 1)
+    store.requeue_in_progress(run_a)
+    # Run A's row is back to pending; run B's claim is untouched.
+    a_state = store._conn.execute("SELECT state FROM frontier WHERE run_id = ?", (run_a,)).fetchone()[0]
+    b_state = store._conn.execute("SELECT state FROM frontier WHERE run_id = ?", (run_b,)).fetchone()[0]
+    assert a_state == "pending"
+    assert b_state == "in_progress"
+
+
+def test_frontier_count_tracks_admitted_rows(store: CrawlStore) -> None:
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    assert store.frontier_count(run_id) == 0
+    store.admit(run_id, "https://e.com/a", "", 0)
+    store.admit(run_id, "https://e.com/b", "", 0)
+    store.admit(run_id, "https://e.com/a", "", 0)  # UNIQUE dedup — not a new row
+    store.claim_pending(run_id, 1)  # state changes do not change the count
+    assert store.frontier_count(run_id) == 2
+
+
 def test_iter_graph_inputs_edgeless_without_frontier_rows(store: CrawlStore) -> None:
     # A crawl predating the frontier table (audits only) stays edgeless, not empty.
     run_id = store.start_run("e.com", "https://e.com/", "list")

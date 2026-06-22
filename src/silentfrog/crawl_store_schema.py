@@ -14,8 +14,9 @@ Three tables:
   ``INSERT OR IGNORE``. ``source_url`` is the page it was discovered from
   (the durable parent → child edge the link graph reads). ``state``
   defaults ``pending``; ``claim_pending``/``mark`` drive the
-  ``in_progress``/``completed`` transitions (PR-8a); ``in_progress -> pending``
-  resume requeue lands in PR-9, not here.
+  ``in_progress``/``completed`` transitions (PR-8a); ``requeue_in_progress``
+  resets ``in_progress -> pending`` on resume (PR-9) so an interrupted crawl
+  re-runs only its unfinished URLs.
 
 ``insertion_order`` is an AUTOINCREMENT primary key — it preserves crawl
 order without the O(n²) ``urls.index()`` sort the in-memory list used.

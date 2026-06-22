@@ -110,11 +110,19 @@ async def crawl_site(
     on_event: ProgressCallback | None = None,
     cancel_event: threading.Event | None = None,
     store: CrawlStore | None = None,
+    resume_run_id: str | None = None,
 ) -> SiteCrawlReport:
+    """Crawl ``config``, streaming audits into ``store`` when given.
+
+    Pass ``resume_run_id`` (store-backed only) to resume an interrupted run:
+    its ``in_progress`` rows are returned to ``pending`` and the crawl re-runs
+    only its unfinished URLs (PR-9). ``cancel_event`` requests a cooperative
+    stop — in-flight requests finish, claimed-but-unstarted URLs stay
+    ``in_progress`` for a later resume, and the partial run stays queryable."""
     spider = config.spider
     seeds = await _build_seeds(config, timeout)
     frontier = _build_frontier(config)
-    run_id = store.start_run(config.base_host, config.base_url, str(spider.mode)) if store else ""
+    run_id = _start_or_resume(store, config, resume_run_id)
     work_source = _make_work_source(store, run_id, frontier, spider.max_urls)
     for seed in seeds:
         work_source.admit(seed, "", 0)
@@ -133,18 +141,37 @@ async def crawl_site(
         follows_links=spider.mode.follows_links,
     )
     drive = await _drive_frontier(ctx, work_source)
-    return _build_report(config, store, run_id, drive, work_source.count())
+    return _build_report(config, store, run_id, drive, work_source.count(), _is_cancelled(ctx))
+
+
+def _start_or_resume(store: CrawlStore | None, config: SiteCrawlConfig, resume_run_id: str | None) -> str:
+    """Start a fresh run, or resume an existing one by requeuing its abandoned
+    ``in_progress`` rows. Resume needs a store (the durable frontier); a
+    store-less resume request is ignored (in-memory crawls do not persist)."""
+    if store is None:
+        return ""
+    if resume_run_id:
+        store.requeue_in_progress(resume_run_id)
+        return resume_run_id
+    return store.start_run(config.base_host, config.base_url, str(config.spider.mode))
 
 
 def _build_report(
-    config: SiteCrawlConfig, store: CrawlStore | None, run_id: str, drive: _Drive, discovered: int
+    config: SiteCrawlConfig,
+    store: CrawlStore | None,
+    run_id: str,
+    drive: _Drive,
+    discovered: int,
+    cancelled: bool,
 ) -> SiteCrawlReport:
     """Store-less crawls return their bounded in-memory results; store-backed
     crawls return only a CrawlRunRef + counts (H2) so the report stays flat —
-    the summary counts come from the store, never an in-memory result list."""
+    the summary counts come from the store, never an in-memory result list. A
+    cancelled run is finished as ``cancelled`` (not ``completed``) but stays
+    fully queryable through its CrawlRunRef (partial-run persistence, PR-9)."""
     if store is None:
         return SiteCrawlReport.from_results(drive.results, discovered_count=discovered, base_url=config.base_url)
-    store.finish_run(run_id)
+    store.finish_run(run_id, status="cancelled" if cancelled else "completed")
     summary = store.summary(run_id)
     return SiteCrawlReport.from_run(
         CrawlRunRef(store.db_path, run_id),
@@ -221,7 +248,10 @@ class _SqliteWorkSource:
         self._run_id = run_id
         self._frontier = frontier
         self._max_urls = max_urls
-        self._count = 0
+        # Seed the cap counter from the durable frontier: 0 for a fresh run,
+        # the already-admitted total when resuming (PR-9) so the cap holds across
+        # sessions instead of admitting another ``max_urls`` on resume.
+        self._count = store.frontier_count(run_id)
 
     def admit(self, url: str, source_url: str, depth: int) -> bool:
         if not self._frontier.in_scope(url, depth) or self._count >= self._max_urls:
@@ -299,14 +329,18 @@ async def _drive_frontier(ctx: _CrawlContext, work_source: _WorkSource) -> _Driv
         keep_results=ctx.store is None,
     )
     workers = [asyncio.create_task(_frontier_worker(ctx, drive)) for _ in range(ctx.concurrency)]
-    await _produce(drive)
+    await _produce(ctx, drive)
     for worker in workers:
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
     return drive
 
 
-async def _produce(drive: _Drive) -> None:
+def _is_cancelled(ctx: _CrawlContext) -> bool:
+    return ctx.cancel_event is not None and ctx.cancel_event.is_set()
+
+
+async def _produce(ctx: _CrawlContext, drive: _Drive) -> None:
     """Single producer: claim pending work from the durable frontier and feed
     the bounded queue, blocking when it is full (backpressure). Workers persist
     discoveries back to the frontier, so the producer alone bridges frontier ->
@@ -314,13 +348,21 @@ async def _produce(drive: _Drive) -> None:
     deadlock-free. Terminates when no pending work remains and nothing claimed
     is still in flight (so no worker can produce more). The ``wakeup`` is
     cleared BEFORE claiming so a discovery admitted concurrently cannot be
-    lost between an empty claim and the wait."""
+    lost between an empty claim and the wait.
+
+    On cancel (PR-9) the producer stops claiming new work but does NOT return
+    while items are still in flight: it waits for the in-flight count to drain
+    so no worker is mid-request when the workers are cancelled (in-flight
+    requests finish; claimed-but-unstarted URLs are abandoned in ``in_progress``
+    by the worker). This keeps cancel deadlock-free — the same bounded drain as
+    normal termination, just with claiming switched off."""
     while True:
         drive.wakeup.clear()
-        claimed = drive.work_source.claim(_CLAIM_BATCH)
-        if claimed:
-            await _dispatch(drive, claimed)
-            continue
+        if not _is_cancelled(ctx):
+            claimed = drive.work_source.claim(_CLAIM_BATCH)
+            if claimed:
+                await _dispatch(drive, claimed)
+                continue
         if drive.in_flight == 0:
             return
         await drive.wakeup.wait()
@@ -347,8 +389,17 @@ async def _frontier_worker(ctx: _CrawlContext, drive: _Drive) -> None:
 
 
 async def _process_url(ctx: _CrawlContext, drive: _Drive, url: str, depth: int, source_url: str) -> None:
+    # Cooperative cancellation (PR-9): abandon a claimed-but-unstarted URL by
+    # returning before any work — its frontier row stays ``in_progress`` and a
+    # later resume requeues it. Re-checked after the politeness wait so a cancel
+    # during that wait still skips the (possibly rendering) analyse call. An
+    # in-flight request past this point finishes normally and is persisted.
+    if _is_cancelled(ctx):
+        return
     await ctx.politeness.wait(url)
-    result = await _crawl_one(url, ctx.config, ctx.timeout, ctx.on_event, ctx.cancel_event)
+    if _is_cancelled(ctx):
+        return
+    result = await _crawl_one(url, ctx.config, ctx.timeout, ctx.on_event)
     if ctx.store is not None:
         ctx.store.save_audit(ctx.run_id, _to_stored_audit(result, depth, source_url))
     # Follow links from the FULL payload before any stripping.
@@ -419,10 +470,7 @@ async def _crawl_one(
     config: SiteCrawlConfig,
     timeout: int,
     on_event: ProgressCallback | None,
-    cancel_event: threading.Event | None,
 ) -> SiteCrawlResult:
-    if cancel_event and cancel_event.is_set():
-        return SiteCrawlResult.skipped(url, "Cancelled")
     _emit(on_event, "running", url=url)
     try:
         payload = await analyse(url, timeout=timeout, options=config.crawl_options)

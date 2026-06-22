@@ -9,8 +9,9 @@ only on demand.
 Public surface (all typed):
 
 - ``CrawlStore`` — `start_run`, `save_audit`, `admit`, `claim_pending`,
-  `mark`, `flush`, `finish_run`, `iter_lightweight`, `iter_graph_inputs`,
-  `load_payload`, `summary`, `resume_pending`, `close`.
+  `mark`, `requeue_in_progress`, `frontier_count`, `flush`, `finish_run`,
+  `iter_lightweight`, `iter_graph_inputs`, `load_payload`, `summary`,
+  `resume_pending`, `close`.
 - ``StoredAudit`` — what the crawler hands to `save_audit`.
 - ``LightweightAudit`` / ``RunSummary`` — read-side views (no blob).
 """
@@ -200,6 +201,28 @@ class CrawlStore:
     def mark(self, run_id: str, normalized_url: str, state: str) -> None:
         """Set the terminal frontier ``state`` of one claimed URL (PR-8a)."""
         self._set_state(run_id, [normalized_url], state)
+
+    def requeue_in_progress(self, run_id: str) -> int:
+        """Return every claimed-but-unfinished frontier row to ``pending`` (PR-9
+        resume). A crawl that was cancelled or crashed leaves rows ``in_progress``;
+        an abandoned claim never wrote an audit, so on resume those URLs must be
+        re-claimed and re-crawled. ``pending`` and terminal rows are untouched, so
+        resume re-runs only unfinished URLs with no duplicates. Returns the count
+        requeued. Committed immediately: the requeue must be durable before the
+        producer starts claiming."""
+        cursor = self._conn.execute(
+            "UPDATE frontier SET state = 'pending' WHERE run_id = ? AND state = 'in_progress'",
+            (run_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def frontier_count(self, run_id: str) -> int:
+        """Number of URLs admitted to this run's frontier in any state — the cap
+        baseline the producer resumes from, so a resumed crawl honors ``max_urls``
+        across sessions instead of admitting another ``max_urls`` on top."""
+        row = self._conn.execute("SELECT COUNT(*) FROM frontier WHERE run_id = ?", (run_id,)).fetchone()
+        return int(row[0]) if row else 0
 
     def _set_state(self, run_id: str, urls: list[str], state: str) -> None:
         # Parameterised IN-list: only the placeholder COUNT is interpolated,
