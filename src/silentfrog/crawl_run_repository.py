@@ -42,6 +42,57 @@ _NO_PAYLOAD_STATUSES = frozenset({"", "error", "skipped"})
 
 _STREAM_BATCH = 500
 
+# Audit columns the windowed GUI model may sort/filter on (PR-10). These are the
+# lightweight columns the store duplicates out of the payload, so a page query
+# never decompresses a blob. Display columns derived from the payload (words, img
+# issues, ...) are not here and fall back to crawl (insertion) order — sorting
+# them would require loading every payload, defeating the bounded window.
+_SORTABLE_COLUMNS = frozenset({"url", "http_status", "indexability", "title", "geo_score", "issue_summary"})
+
+
+@dataclass(frozen=True)
+class CrawlRowQuery:
+    """Filter + sort spec for one windowed page of a run's audited rows.
+
+    All fields optional; the default selects every row in crawl (insertion)
+    order. ``sort`` must name a column in :data:`_SORTABLE_COLUMNS` or it falls
+    back to insertion order. ``status``/``indexability`` are exact matches (empty
+    = no filter); ``search`` is a case-insensitive substring over url + title.
+    """
+
+    sort: str = ""
+    descending: bool = False
+    status: str = ""
+    indexability: str = ""
+    search: str = ""
+
+
+def _row_filters(run_id: str, query: CrawlRowQuery) -> tuple[str, list[object]]:
+    """Build the parameterised WHERE clause for a row query. Only placeholders
+    are interpolated; every value is bound, so this stays injection-safe."""
+    clauses = ["run_id = ?"]
+    params: list[object] = [run_id]
+    if query.status:
+        clauses.append("http_status = ?")
+        params.append(query.status)
+    if query.indexability:
+        clauses.append("indexability = ?")
+        params.append(query.indexability)
+    if query.search:
+        clauses.append("(url LIKE ? OR title LIKE ?)")
+        like = f"%{query.search}%"
+        params.extend([like, like])
+    return " AND ".join(clauses), params
+
+
+def _row_order(query: CrawlRowQuery) -> str:
+    # ``insertion_order`` is the stable tiebreak so equal keys keep crawl order;
+    # the sort column is allowlisted (never raw input) before interpolation.
+    if query.sort not in _SORTABLE_COLUMNS:
+        return "insertion_order ASC"
+    direction = "DESC" if query.descending else "ASC"
+    return f"{query.sort} {direction}, insertion_order ASC"
+
 
 def _open_readonly(db_path: Path | str) -> sqlite3.Connection | None:
     """Open an EXISTING crawl database read-only.
@@ -214,6 +265,44 @@ class SqliteCrawlRunRepository:
             return 0
         return int(row[0]) if row else 0
 
+    def filtered_count(self, query: CrawlRowQuery) -> int:
+        """Number of rows matching ``query`` — the windowed GUI model's row count
+        (PR-10). O(1)-ish in memory: SQL counts, nothing is materialised."""
+        if self._conn is None:
+            return 0
+        where, params = _row_filters(self._run_id, query)
+        try:
+            row = self._conn.execute(f"SELECT COUNT(*) FROM audits WHERE {where}", params).fetchone()
+        except sqlite3.Error:
+            return 0
+        return int(row[0]) if row else 0
+
+    def page_results(self, query: CrawlRowQuery, offset: int, limit: int) -> list[SiteCrawlResult]:
+        """One SQL-sorted/filtered page of fully-rebuilt results (PR-10). Only this
+        page's payloads are loaded, so the GUI model holds at most a window in
+        memory regardless of crawl size. Failed/skipped rows carry no payload and
+        rebuild from the lightweight columns."""
+        results: list[SiteCrawlResult] = []
+        for light in self._page_lightweight(query, offset, limit):
+            payload = None if light.http_status in _NO_PAYLOAD_STATUSES else self.load_payload(light.url)
+            results.append(_result_from_row(light, payload))
+        return results
+
+    def _page_lightweight(self, query: CrawlRowQuery, offset: int, limit: int) -> list[LightweightAudit]:
+        if self._conn is None:
+            return []
+        where, params = _row_filters(self._run_id, query)
+        sql = (
+            "SELECT url, depth, discovered_from, http_status, geo_score, indexability, "
+            f"title, issue_summary, insertion_order FROM audits WHERE {where} "
+            f"ORDER BY {_row_order(query)} LIMIT ? OFFSET ?"
+        )
+        try:
+            cursor = self._conn.execute(sql, [*params, limit, offset])
+        except sqlite3.Error:
+            return []
+        return [_lightweight_from_row(row) for row in cursor.fetchall()]
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
@@ -328,6 +417,7 @@ def hydrate_payloads(
 
 
 __all__ = [
+    "CrawlRowQuery",
     "CrawlRunRef",
     "CrawlRunRepository",
     "InMemoryCrawlRunRepository",

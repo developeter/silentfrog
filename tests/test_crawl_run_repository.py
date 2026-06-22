@@ -10,7 +10,12 @@ from typing import Any
 
 import pytest
 
-from silentfrog.crawl_run_repository import CrawlRunRef, InMemoryCrawlRunRepository, hydrate_payloads
+from silentfrog.crawl_run_repository import (
+    CrawlRowQuery,
+    CrawlRunRef,
+    InMemoryCrawlRunRepository,
+    hydrate_payloads,
+)
 from silentfrog.crawl_store import CrawlStore, StoredAudit
 from silentfrog.crawl_types import CrawlPayload
 from silentfrog.site_crawl_types import SiteCrawlResult
@@ -171,3 +176,86 @@ def test_hydrate_payloads_keeps_unrecoverable_none(tmp_path: Path) -> None:
     with CrawlRunRef(db, run_id).open() as repo:
         out = hydrate_payloads([stripped], repo)
     assert out[0].payload is None
+
+
+# --- PR-10: SQL-backed paging / sorting / filtering for the windowed GUI model ---
+
+
+def _seed_rows(db: Path, rows: list[tuple[str, str, str, str, int]]) -> str:
+    """rows = (url, http_status, indexability, title, geo_score). Lightweight only
+    (no payload) — paging/sort/filter operate on the duplicated columns."""
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "list")
+    for url, status, indexability, title, score in rows:
+        store.save_audit(
+            run_id,
+            StoredAudit(url=url, http_status=status, indexability=indexability, title=title, geo_score=score),
+        )
+    store.finish_run(run_id)
+    store.close()
+    return run_id
+
+
+def test_page_results_paging_boundaries(tmp_path: Path) -> None:
+    rows = [(f"https://e.com/{i}", "200", "Indexable", f"T{i}", 80) for i in range(5)]
+    db = tmp_path / "crawl.db"
+    run_id = _seed_rows(db, rows)
+    with CrawlRunRef(db, run_id).open() as repo:
+        q = CrawlRowQuery()
+        first = [r.url for r in repo.page_results(q, offset=0, limit=2)]
+        middle = [r.url for r in repo.page_results(q, offset=2, limit=2)]
+        last = [r.url for r in repo.page_results(q, offset=4, limit=2)]  # partial page
+        past_end = repo.page_results(q, offset=5, limit=2)  # beyond the data
+    assert first == ["https://e.com/0", "https://e.com/1"]
+    assert middle == ["https://e.com/2", "https://e.com/3"]
+    assert last == ["https://e.com/4"]
+    assert past_end == []
+
+
+def test_page_results_stable_sort_with_insertion_tiebreak(tmp_path: Path) -> None:
+    # Equal sort keys (same status) must keep crawl (insertion) order, so paging
+    # is deterministic and never drops or repeats a row across pages.
+    rows = [
+        ("https://e.com/c", "200", "Indexable", "T", 1),
+        ("https://e.com/a", "404", "Not indexable", "T", 2),
+        ("https://e.com/b", "200", "Indexable", "T", 3),
+    ]
+    db = tmp_path / "crawl.db"
+    run_id = _seed_rows(db, rows)
+    with CrawlRunRef(db, run_id).open() as repo:
+        by_status = [r.url for r in repo.page_results(CrawlRowQuery(sort="http_status"), 0, 10)]
+        by_url_desc = [r.url for r in repo.page_results(CrawlRowQuery(sort="url", descending=True), 0, 10)]
+    # 200 rows first (insertion order c, then b), then 404 (a).
+    assert by_status == ["https://e.com/c", "https://e.com/b", "https://e.com/a"]
+    assert by_url_desc == ["https://e.com/c", "https://e.com/b", "https://e.com/a"]
+
+
+def test_filtered_count_and_page_apply_filters(tmp_path: Path) -> None:
+    rows = [
+        ("https://e.com/ok", "200", "Indexable", "Home", 90),
+        ("https://e.com/missing", "404", "Not indexable", "Gone", 0),
+        ("https://e.com/blog", "200", "Indexable", "Blog", 70),
+    ]
+    db = tmp_path / "crawl.db"
+    run_id = _seed_rows(db, rows)
+    with CrawlRunRef(db, run_id).open() as repo:
+        assert repo.filtered_count(CrawlRowQuery()) == 3
+        assert repo.filtered_count(CrawlRowQuery(status="200")) == 2
+        assert repo.filtered_count(CrawlRowQuery(indexability="Not indexable")) == 1
+        assert [r.url for r in repo.page_results(CrawlRowQuery(status="404"), 0, 10)] == ["https://e.com/missing"]
+        # search is a case-insensitive substring over url + title
+        assert [r.url for r in repo.page_results(CrawlRowQuery(search="BLOG"), 0, 10)] == ["https://e.com/blog"]
+
+
+def test_large_count_pages_without_loading_all(tmp_path: Path) -> None:
+    rows = [(f"https://e.com/{i:05d}", "200", "Indexable", f"T{i}", 80) for i in range(2000)]
+    db = tmp_path / "crawl.db"
+    run_id = _seed_rows(db, rows)
+    with CrawlRunRef(db, run_id).open() as repo:
+        assert repo.filtered_count(CrawlRowQuery()) == 2000
+        page = repo.page_results(CrawlRowQuery(sort="url"), offset=0, limit=100)
+        tail = repo.page_results(CrawlRowQuery(sort="url"), offset=1950, limit=100)
+    assert len(page) == 100  # a page, never the whole table
+    assert page[0].url == "https://e.com/00000"
+    assert len(tail) == 50
+    assert tail[-1].url == "https://e.com/01999"

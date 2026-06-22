@@ -6,7 +6,10 @@ from pathlib import Path
 from qtpy import QtCore, QtWidgets
 
 import silentfrog.site_crawl_gui as site_crawl_gui  # type: ignore[reportMissingImports]
+from silentfrog.crawl_diff import diff_reports  # type: ignore[reportMissingImports]
 from silentfrog.crawl_history import CrawlHistoryStore  # type: ignore[reportMissingImports]
+from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
+from silentfrog.crawl_store import CrawlStore, StoredAudit  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
     ACTUAL_WIDTH_COL,
@@ -18,6 +21,7 @@ from silentfrog.site_crawl_gui import (  # type: ignore[reportMissingImports]
     SiteCrawlDetailDialog,
     SiteCrawlTableModel,
     SiteCrawlWindow,
+    StoredCrawlTableModel,
 )
 from silentfrog.site_crawl_types import (  # type: ignore[reportMissingImports]
     DEFAULT_SITE_CRAWL_LIMIT,
@@ -329,6 +333,153 @@ def test_site_crawl_detail_can_analyze_images(monkeypatch, qtbot) -> None:
     assert row[SIZE_COL] == "42 KB"
     assert row[CACHE_COL] == "30m"
     assert updates[-1].images[0][SIZE_COL] == "42 KB"
+
+
+# --- PR-10: SQL-backed paged/sorted/filtered model + diff DB lifecycle ---
+
+
+def _build_store(tmp_path: Path, name: str, rows: list[tuple[str, str, int]]) -> tuple[Path, SiteCrawlReport]:
+    """A file-backed store + store-backed report (rows = url, http_status, score)."""
+    db = tmp_path / name
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    for url, status, score in rows:
+        store.save_audit(
+            run_id, StoredAudit(url=url, http_status=status, indexability="Indexable", title=url, geo_score=score)
+        )
+    store.finish_run(run_id)
+    store.close()
+    report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id),
+        discovered_count=len(rows),
+        crawled_count=len(rows),
+        skipped_count=0,
+        failed_count=0,
+    )
+    return db, report
+
+
+def test_store_backed_report_drives_sql_paged_model(qtbot, tmp_path: Path) -> None:
+    _, report = _build_store(tmp_path, "crawl.db", [(f"https://e.com/{i}", "200", 80) for i in range(5)])
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+
+    win._handle_report(report)
+
+    assert win._stored_model is not None
+    assert win.table.model() is win._stored_model
+    assert win._stored_model.rowCount() == 5
+    assert win.model.rowCount() == 0  # live in-memory rows are freed (no materialisation)
+    urls = {win._stored_model.index(r, 0).data() for r in range(win._stored_model.rowCount())}
+    assert urls == {f"https://e.com/{i}" for i in range(5)}
+
+
+def test_stored_model_filters_and_sorts_via_sql(qtbot, tmp_path: Path) -> None:
+    rows = [("https://e.com/a", "200", 90), ("https://e.com/b", "404", 0), ("https://e.com/c", "200", 70)]
+    _, report = _build_store(tmp_path, "crawl.db", rows)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win._handle_report(report)
+    model = win._stored_model
+
+    win.status_filter.setCurrentText("404")  # routed through the GUI combo
+    assert model.rowCount() == 1
+    assert model.index(0, 0).data() == "https://e.com/b"
+
+    win.status_filter.setCurrentText("All")
+    assert model.rowCount() == 3
+    win.search_edit.setText("e.com/c")
+    assert model.rowCount() == 1
+    assert model.index(0, 0).data() == "https://e.com/c"
+
+    win.search_edit.clear()
+    model.sort(0, QtCore.Qt.SortOrder.DescendingOrder)
+    assert model.index(0, 0).data() == "https://e.com/c"  # url DESC
+
+
+def test_paged_model_keeps_memory_bounded(qtbot, tmp_path: Path) -> None:
+    rows = [(f"https://e.com/{i:05d}", "200", 80) for i in range(1000)]
+    _, report = _build_store(tmp_path, "crawl.db", rows)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win._handle_report(report)
+    model = win._stored_model
+
+    assert model.rowCount() == 1000
+    for row in (0, 150, 350, 550, 750, 999):  # touch rows spread across many pages
+        assert model.index(row, 0).data() is not None
+    assert len(model._pages) <= site_crawl_gui._MAX_CACHED_PAGES  # bounded window, not all rows
+
+
+def test_in_memory_model_caps_live_window() -> None:
+    # The live stream is capped to a rolling window so an in-progress store-backed
+    # crawl never materialises all rows; the most recent rows are kept.
+    model = SiteCrawlTableModel(max_rows=3)
+    for i in range(5):
+        model.add_result(SiteCrawlResult.failed(f"https://e.com/{i}", "x"))
+    assert model.rowCount() == 3
+    assert [model.index(r, 0).data() for r in range(3)] == [f"https://e.com/{i}" for i in (2, 3, 4)]
+
+
+def test_previous_run_retained_so_diff_sees_both(qtbot, tmp_path: Path) -> None:
+    # Repairs the dead "Compare with previous" path: the immediately-previous run's
+    # store must survive the next crawl so the diff can stream both runs. If the
+    # lifecycle regressed to deleting the current store, the previous DB would be
+    # gone and the diff would see an empty "previous" (everything "new").
+    db_a, report_a = _build_store(
+        tmp_path, "a.db", [("https://e.com/gone", "200", 80), ("https://e.com/keep", "200", 80)]
+    )
+    _, report_b = _build_store(tmp_path, "b.db", [("https://e.com/keep", "404", 80), ("https://e.com/new", "200", 80)])
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    win._crawl_store_path = str(db_a)
+    win._roll_store_generation()  # db_a becomes "previous" and must be retained
+
+    assert db_a.exists()
+    assert win._previous_store_path == str(db_a)
+    win._previous_report = report_a
+    win._latest_report = report_b
+    diff = diff_reports(win._previous_report, win._latest_report)
+    assert "https://e.com/gone" in diff.removed_urls
+    assert "https://e.com/new" in diff.new_urls
+    assert any(change.url == "https://e.com/keep" for change in diff.status_changes)
+
+
+def test_roll_store_generation_discards_two_crawls_ago(qtbot, tmp_path: Path) -> None:
+    older = tmp_path / "older.db"
+    older.write_bytes(b"x")  # stand-in for a two-crawls-ago store file
+    previous = tmp_path / "previous.db"
+    previous.write_bytes(b"y")
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._previous_store_path = str(older)
+    win._crawl_store_path = str(previous)
+
+    win._roll_store_generation()
+
+    assert not older.exists()  # two-crawls-ago is discarded
+    assert previous.exists()  # immediately-previous is retained for the diff
+
+
+def test_stored_model_owns_connection_on_building_thread(qtbot, tmp_path: Path) -> None:
+    # The SQL model opens its own read connection on the thread that builds it
+    # (the GUI thread), and reads succeed there without locking out a writer.
+    db, report = _build_store(tmp_path, "crawl.db", [("https://e.com/p", "200", 80)])
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win._handle_report(report)
+
+    assert isinstance(win._stored_model, StoredCrawlTableModel)
+    assert win._stored_model.rowCount() == 1
+    assert win._stored_model.index(0, 0).data() == "https://e.com/p"
+    store2 = CrawlStore(db)  # a separate connection to the same file still works
+    assert store2.count(report.run_ref.run_id) == 1
+    store2.close()
 
 
 def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path: Path) -> None:

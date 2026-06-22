@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from time import monotonic
@@ -16,7 +17,13 @@ from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
 from .crawl_options import CrawlOptions
-from .crawl_run_repository import open_report_repository, stream_report_results
+from .crawl_run_repository import (
+    CrawlRowQuery,
+    CrawlRunRef,
+    SqliteCrawlRunRepository,
+    open_report_repository,
+    stream_report_results,
+)
 from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
 from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
@@ -59,10 +66,30 @@ _SETUP_PAGE = 0
 _RESULTS_PAGE = 1
 
 
-class SiteCrawlTableModel(QtCore.QAbstractTableModel):
+# v2.0 PR-10: when a crawl is store-backed the results table is driven straight
+# from SQLite, one bounded page at a time, so the GUI never materialises all rows.
+_PAGE_SIZE = 100
+_MAX_CACHED_PAGES = 8  # ~800 rows resident at most, regardless of crawl size
+# Live-streaming in-memory rows are capped to a rolling window so an in-progress
+# store-backed crawl also stays flat; the full run is shown SQL-paged on finish.
+_LIVE_ROW_WINDOW = 5000
+# Display column -> sortable SQL (lightweight) column. Columns absent here derive
+# from the payload and keep crawl order (sorting them would load every payload).
+_SORT_COLUMN_BY_INDEX = {0: "url", 1: "http_status", 2: "indexability", 3: "title", 12: "issue_summary"}
+
+
+def _sql_filter_value(value: str) -> str:
+    """The status/indexability combos use 'All' as the no-filter sentinel."""
+    return "" if value == "All" else value
+
+
+class _CrawlTableBase(QtCore.QAbstractTableModel):
+    """Shared columns + status colouring for the two results models (PR-10): an
+    in-memory model for store-less/live crawls and a SQL-paged model for
+    store-backed runs. Subclasses provide ``rowCount`` and ``_result_for_row``."""
+
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
-        self._rows: list[SiteCrawlResult] = []
         dark = current_theme() == "dark"
         brushes = status_brushes(dark)
         self._bad = brushes.bad
@@ -70,19 +97,17 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
         color = "#f8f9fa" if dark else "#202124"
         self._highlight_foreground = QtGui.QBrush(QtGui.QColor(color))
 
-    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._rows)
-
     def columnCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
         return 0 if parent.isValid() else len(SITE_CRAWL_TABLE_HEADERS)
 
     def data(self, index: QtCore.QModelIndex, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        result = self._rows[index.row()]
-        value = result.table_row()[index.column()]
+        result = self._result_for_row(index.row())
+        if result is None:
+            return None
         if role in (QtCore.Qt.ItemDataRole.DisplayRole, QtCore.Qt.ItemDataRole.EditRole):
-            return value
+            return result.table_row()[index.column()]
         if role == QtCore.Qt.ItemDataRole.UserRole:
             return result
         if role == QtCore.Qt.ItemDataRole.BackgroundRole:
@@ -102,37 +127,8 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
             return SITE_CRAWL_TABLE_TOOLTIPS[section]
         return None
 
-    def clear(self) -> None:
-        self.beginResetModel()
-        self._rows = []
-        self.endResetModel()
-
-    def add_result(self, result: SiteCrawlResult) -> None:
-        row = len(self._rows)
-        self.beginInsertRows(QtCore.QModelIndex(), row, row)
-        self._rows.append(result)
-        self.endInsertRows()
-
-    def set_results(self, results: list[SiteCrawlResult]) -> None:
-        self.beginResetModel()
-        self._rows = list(results)
-        self.endResetModel()
-
-    def result_at(self, row: int) -> SiteCrawlResult | None:
-        if 0 <= row < len(self._rows):
-            return self._rows[row]
-        return None
-
-    def update_payload(self, row: int, payload: CrawlPayload) -> None:
-        if not 0 <= row < len(self._rows):
-            return
-        self._rows[row] = replace(self._rows[row], payload=payload)
-        left = self.index(row, 0)
-        right = self.index(row, self.columnCount() - 1)
-        self.dataChanged.emit(left, right, [QtCore.Qt.ItemDataRole.UserRole])
-
-    def results(self) -> list[SiteCrawlResult]:
-        return list(self._rows)
+    def _result_for_row(self, row: int) -> SiteCrawlResult | None:
+        raise NotImplementedError
 
     def _background(self, result: SiteCrawlResult):
         if _is_error_status(result.status):
@@ -145,6 +141,133 @@ class SiteCrawlTableModel(QtCore.QAbstractTableModel):
         if self._background(result) is not None:
             return self._highlight_foreground
         return None
+
+
+class SiteCrawlTableModel(_CrawlTableBase):
+    """In-memory model for store-less crawls (tests + bounded small programmatic
+    runs) and for the live row stream. ``max_rows`` caps the live stream to a
+    rolling window so an in-progress crawl never materialises all rows."""
+
+    def __init__(self, parent: QtCore.QObject | None = None, max_rows: int = 0) -> None:
+        super().__init__(parent)
+        self._rows: list[SiteCrawlResult] = []
+        self._max_rows = max_rows
+
+    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._rows)
+
+    def _result_for_row(self, row: int) -> SiteCrawlResult | None:
+        return self._rows[row] if 0 <= row < len(self._rows) else None
+
+    def clear(self) -> None:
+        self.beginResetModel()
+        self._rows = []
+        self.endResetModel()
+
+    def add_result(self, result: SiteCrawlResult) -> None:
+        if self._max_rows and len(self._rows) >= self._max_rows:
+            self.beginRemoveRows(QtCore.QModelIndex(), 0, 0)
+            self._rows.pop(0)  # drop the oldest row so the window stays bounded
+            self.endRemoveRows()
+        row = len(self._rows)
+        self.beginInsertRows(QtCore.QModelIndex(), row, row)
+        self._rows.append(result)
+        self.endInsertRows()
+
+    def set_results(self, results: list[SiteCrawlResult]) -> None:
+        self.beginResetModel()
+        self._rows = list(results)
+        self.endResetModel()
+
+    def result_at(self, row: int) -> SiteCrawlResult | None:
+        return self._result_for_row(row)
+
+    def update_payload(self, row: int, payload: CrawlPayload) -> None:
+        if not 0 <= row < len(self._rows):
+            return
+        self._rows[row] = replace(self._rows[row], payload=payload)
+        left = self.index(row, 0)
+        right = self.index(row, self.columnCount() - 1)
+        self.dataChanged.emit(left, right, [QtCore.Qt.ItemDataRole.UserRole])
+
+    def results(self) -> list[SiteCrawlResult]:
+        return list(self._rows)
+
+
+class StoredCrawlTableModel(_CrawlTableBase):
+    """SQL-paged model for store-backed runs (PR-10, H2). Rows are read from the
+    run's SQLite store one bounded page at a time and sorted/filtered in SQL, so
+    the GUI holds at most a few pages no matter how large the crawl is. Its own
+    read connection is owned by the thread that builds it (the GUI thread)."""
+
+    def __init__(self, run_ref: CrawlRunRef, parent: QtCore.QObject | None = None) -> None:
+        super().__init__(parent)
+        self._repo = SqliteCrawlRunRepository(run_ref.db_path, run_ref.run_id)
+        self._query = CrawlRowQuery()
+        self._pages: OrderedDict[int, list[SiteCrawlResult]] = OrderedDict()
+        self._row_count = self._repo.filtered_count(self._query)
+
+    def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
+        return 0 if parent.isValid() else self._row_count
+
+    def _result_for_row(self, row: int) -> SiteCrawlResult | None:
+        if not 0 <= row < self._row_count:
+            return None
+        page_index = row // _PAGE_SIZE
+        page = self._pages.get(page_index) or self._load_page(page_index)
+        offset = row - page_index * _PAGE_SIZE
+        return page[offset] if offset < len(page) else None
+
+    def _load_page(self, page_index: int) -> list[SiteCrawlResult]:
+        page = self._repo.page_results(self._query, page_index * _PAGE_SIZE, _PAGE_SIZE)
+        self._pages[page_index] = page
+        self._pages.move_to_end(page_index)
+        while len(self._pages) > _MAX_CACHED_PAGES:
+            self._pages.popitem(last=False)  # evict the least-recently-used page
+        return page
+
+    def result_at(self, row: int) -> SiteCrawlResult | None:
+        return self._result_for_row(row)
+
+    def update_payload(self, row: int, payload: CrawlPayload) -> None:
+        result = self._result_for_row(row)
+        if result is None:
+            return
+        page = self._pages.get(row // _PAGE_SIZE)
+        if page is None:
+            return
+        page[row - (row // _PAGE_SIZE) * _PAGE_SIZE] = replace(result, payload=payload)
+        left = self.index(row, 0)
+        right = self.index(row, self.columnCount() - 1)
+        self.dataChanged.emit(left, right, [QtCore.Qt.ItemDataRole.UserRole])
+
+    def set_search(self, text: str) -> None:
+        self._apply_query(replace(self._query, search=text.strip()))
+
+    def set_status(self, value: str) -> None:
+        self._apply_query(replace(self._query, status=_sql_filter_value(value)))
+
+    def set_indexability(self, value: str) -> None:
+        self._apply_query(replace(self._query, indexability=_sql_filter_value(value)))
+
+    def sort(self, column: int, order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.AscendingOrder) -> None:
+        descending = order == QtCore.Qt.SortOrder.DescendingOrder
+        self._apply_query(replace(self._query, sort=_SORT_COLUMN_BY_INDEX.get(column, ""), descending=descending))
+
+    def refresh(self) -> None:
+        """Re-read the count and drop the page cache — used after the crawl's
+        final flush so newly persisted rows become visible."""
+        self._apply_query(self._query)
+
+    def _apply_query(self, query: CrawlRowQuery) -> None:
+        self.beginResetModel()
+        self._query = query
+        self._pages.clear()
+        self._row_count = self._repo.filtered_count(query)
+        self.endResetModel()
+
+    def close(self) -> None:
+        self._repo.close()
 
 
 class SiteCrawlFilterProxy(QtCore.QSortFilterProxyModel):
@@ -207,13 +330,19 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
         self._active_cancel: threading.Event | None = None
         self._latest_report: SiteCrawlReport | None = None
-        # v2.0 V8: previous crawl kept in memory so "Compare with previous"
-        # can diff the current run against it.
+        # v2.0 V8: previous crawl kept so "Compare with previous" can diff the
+        # current run against it. PR-10: the previous run's on-disk store is
+        # retained (only the run before it is discarded) so the diff can stream
+        # both runs' rows through their CrawlRunRefs.
         self._previous_report: SiteCrawlReport | None = None
         # v2.0 V3.2: streaming store for the live crawl (payloads on disk,
         # loaded on demand for the detail dialog so RAM stays flat at ~1M).
         self._crawl_store_path: str = ""
+        self._previous_store_path: str = ""
         self._crawl_run_id: str = ""
+        # v2.0 PR-10: when the displayed run is store-backed, the table is driven
+        # by this SQL-paged model instead of the in-memory model + proxy.
+        self._stored_model: StoredCrawlTableModel | None = None
         self._discovered_total = 0
         self._completed_count = 0
         self._crawl_started_at: float | None = None
@@ -366,7 +495,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         return row
 
     def _build_table(self) -> QtWidgets.QTableView:
-        self.model = SiteCrawlTableModel(self)
+        self.model = SiteCrawlTableModel(self, max_rows=_LIVE_ROW_WINDOW)
         self.proxy = SiteCrawlFilterProxy(self)
         self.proxy.setSourceModel(self.model)
         self.proxy.setSortCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
@@ -450,9 +579,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
         self.btn_settings.clicked.connect(self._open_crawl_settings)
-        self.search_edit.textChanged.connect(self.proxy.set_search)
-        self.status_filter.currentTextChanged.connect(self.proxy.set_status)
-        self.indexability_filter.currentTextChanged.connect(self.proxy.set_indexability)
+        self.search_edit.textChanged.connect(self._on_search_changed)
+        self.status_filter.currentTextChanged.connect(self._on_status_changed)
+        self.indexability_filter.currentTextChanged.connect(self._on_indexability_changed)
         self.progressSig.connect(self._handle_progress)
         self.reportSig.connect(self._handle_report)
         self.errorSig.connect(self._show_error)
@@ -489,6 +618,56 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_history.setToolTip("Open saved local Site Crawl runs and compare past scans.")
         self.btn_new_crawl.setToolTip("Return to setup for another Site Crawl run.")
 
+    def _active_filter_target(self):
+        """Filtering/search drives the SQL model when store-backed, else the
+        in-memory proxy. Both expose ``set_search``/``set_status``/
+        ``set_indexability``."""
+        return self._stored_model if self._stored_model is not None else self.proxy
+
+    def _on_search_changed(self, text: str) -> None:
+        self._active_filter_target().set_search(text)
+
+    def _on_status_changed(self, value: str) -> None:
+        self._active_filter_target().set_status(value)
+
+    def _on_indexability_changed(self, value: str) -> None:
+        self._active_filter_target().set_indexability(value)
+
+    def _bind_stored_model(self, run_ref: CrawlRunRef) -> None:
+        """Swap the table to a SQL-paged model bound to ``run_ref`` and free the
+        live in-memory rows (PR-10). Current filter selections carry over."""
+        self._teardown_stored_model()
+        self.model.clear()
+        self._stored_model = StoredCrawlTableModel(run_ref, self)
+        self.table.setModel(self._stored_model)
+        self._stored_model.set_status(self.status_filter.currentText())
+        self._stored_model.set_indexability(self.indexability_filter.currentText())
+        self._stored_model.set_search(self.search_edit.text())
+
+    def _teardown_stored_model(self) -> None:
+        if self._stored_model is None:
+            return
+        self.table.setModel(self.proxy)  # back to the in-memory live model
+        self._stored_model.close()
+        self._stored_model = None
+
+    def _roll_store_generation(self) -> None:
+        """Retain the immediately-previous run's store for the diff; discard the
+        run before it (at most two crawl stores live on disk at once)."""
+        self._discard_store(self._previous_store_path)
+        self._previous_store_path = self._crawl_store_path
+        self._crawl_store_path = str(new_crawl_db_path())
+
+    def _discard_store(self, path: str) -> None:
+        """Best-effort unlink of a crawl store and its WAL/SHM siblings."""
+        if not path:
+            return
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                Path(path + suffix).unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def _start_crawl(self) -> None:
         config = self._config_from_ui()
         if not self._valid_config(config):
@@ -504,8 +683,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.progress.setValue(0)
         self.progress.setFormat("Discovering URLs...")
         self._set_running(True)
-        self._discard_previous_store()
-        self._crawl_store_path = str(new_crawl_db_path())
+        self._teardown_stored_model()
+        self._roll_store_generation()
         self._crawl_run_id = ""
         _, self._active_cancel = run_site_crawl(
             config,
@@ -594,11 +773,13 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._crawl_run_id = report.run_ref.run_id if report.run_ref is not None else ""
         self._discovered_total = report.discovered_count
         self._completed_count = report.crawled_count + report.skipped_count
-        # A store-less report carries inline results (small crawls + tests set the
-        # report directly without live "row" events): sync them into the model.
-        # A store-backed report has no per-URL results (H2) — its model was filled
-        # incrementally from "row" events during the crawl, so leave it untouched.
-        if report.results:
+        # PR-10: a store-backed run drives the table from SQLite, one bounded page
+        # at a time (the live in-memory rows are dropped). A store-less report
+        # (small crawls + tests set the report directly) syncs its inline results
+        # into the in-memory model.
+        if report.run_ref is not None:
+            self._bind_stored_model(report.run_ref)
+        elif report.results:
             self.model.set_results(list(report.results))
         self._set_running(False)
         self._update_recap_from_report(report)
@@ -673,8 +854,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._select_result_url(issue.url)
 
     def _select_result_url(self, url: str) -> None:
-        for row in range(self.proxy.rowCount()):
-            index = self.proxy.index(row, 0)
+        view_model = self.table.model()
+        for row in range(view_model.rowCount()):
+            index = view_model.index(row, 0)
             if index.data() == url:
                 self.table.selectRow(row)
                 self.table.scrollTo(index)
@@ -715,8 +897,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.lbl_eta.setText(f"ETA: {_format_duration(seconds)} remaining")
 
     def _open_result_detail(self, index: QtCore.QModelIndex) -> None:
-        source_index = self.proxy.mapToSource(index)
-        result = self.model.result_at(source_index.row())
+        # The store-backed model is shown directly (its index is the source row);
+        # the in-memory model is shown behind a filter proxy that must be mapped.
+        model = self._stored_model if self._stored_model is not None else self.model
+        source_row = index.row() if self._stored_model is not None else self.proxy.mapToSource(index).row()
+        result = model.result_at(source_row)
         if result is None:
             return
         payload = result.payload or self._load_payload_for_detail(result.url)
@@ -726,7 +911,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         dialog = SiteCrawlDetailDialog(
             payload,
             base_url,
-            on_payload_updated=lambda updated, row=source_index.row(): self.model.update_payload(row, updated),
+            on_payload_updated=lambda updated, row=source_row: model.update_payload(row, updated),
             parent=self,
         )
         self._detail_windows.append(dialog)
@@ -791,19 +976,6 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._detail_windows.append(dialog)
         dialog.show()
 
-    def _discard_previous_store(self) -> None:
-        """v2.0 V3.2 — drop the prior crawl's on-disk store so the data dir
-        doesn't accumulate one .db per crawl. Best-effort; ignores WAL/SHM
-        siblings and any in-use file."""
-        previous = self._crawl_store_path
-        if not previous:
-            return
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                Path(previous + suffix).unlink(missing_ok=True)
-            except OSError:
-                pass
-
     def _load_payload_for_detail(self, url: str) -> CrawlPayload | None:
         """Reload a stripped payload on demand for the detail dialog, via the
         displayed report's run-bound repository (its own read connection on the
@@ -856,7 +1028,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self._active_cancel:
             self._active_cancel.set()
-        self._discard_previous_store()
+        self._teardown_stored_model()
+        self._discard_store(self._crawl_store_path)
+        self._discard_store(self._previous_store_path)
         super().closeEvent(event)
 
 
