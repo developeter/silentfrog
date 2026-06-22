@@ -8,9 +8,9 @@ only on demand.
 
 Public surface (all typed):
 
-- ``CrawlStore`` — `start_run`, `save_audit`, `admit`, `flush`,
-  `finish_run`, `iter_lightweight`, `iter_graph_inputs`, `load_payload`,
-  `summary`, `resume_pending`, `close`.
+- ``CrawlStore`` — `start_run`, `save_audit`, `admit`, `claim_pending`,
+  `mark`, `flush`, `finish_run`, `iter_lightweight`, `iter_graph_inputs`,
+  `load_payload`, `summary`, `resume_pending`, `close`.
 - ``StoredAudit`` — what the crawler hands to `save_audit`.
 - ``LightweightAudit`` / ``RunSummary`` — read-side views (no blob).
 """
@@ -161,8 +161,9 @@ class CrawlStore:
     def admit(self, run_id: str, normalized_url: str, source_url: str = "", depth: int = 0) -> bool:
         """Atomically record a URL in the frontier (H3). Returns True when
         newly admitted, False when it was already present (UNIQUE dedup).
-        Batched with audit writes; state transitions + resume land in
-        PR-8/PR-9, so PR-6 only ever writes the default ``pending`` state."""
+        Batched with audit writes; the row starts in the default ``pending``
+        state. The ``in_progress``/``completed`` transitions are driven by
+        ``claim_pending``/``mark`` (PR-8a); resume requeue lands in PR-9."""
         cursor = self._conn.execute(
             "INSERT OR IGNORE INTO frontier (run_id, normalized_url, source_url, depth) VALUES (?, ?, ?, ?)",
             (run_id, normalized_url, source_url, depth),
@@ -171,6 +172,39 @@ class CrawlStore:
         if self._pending_writes >= _BATCH_SIZE:
             self.flush()
         return cursor.rowcount > 0
+
+    def claim_pending(self, run_id: str, limit: int) -> list[tuple[str, int, str]]:
+        """Atomically claim up to ``limit`` ``pending`` frontier rows (PR-8a):
+        transition them ``pending -> in_progress`` and return ``(url, depth,
+        source_url)`` in admission order. The single crawl producer calls this
+        to feed the bounded work queue; ``in_progress`` rows are never returned
+        again, so the same URL is never claimed twice within a run."""
+        rows = self._conn.execute(
+            "SELECT normalized_url, depth, source_url FROM frontier "
+            "WHERE run_id = ? AND state = 'pending' ORDER BY rowid LIMIT ?",
+            (run_id, limit),
+        ).fetchall()
+        if not rows:
+            return []
+        self._set_state(run_id, [str(row[0]) for row in rows], "in_progress")
+        return [(str(row[0]), int(row[1]), str(row[2])) for row in rows]
+
+    def mark(self, run_id: str, normalized_url: str, state: str) -> None:
+        """Set the terminal frontier ``state`` of one claimed URL (PR-8a)."""
+        self._set_state(run_id, [normalized_url], state)
+
+    def _set_state(self, run_id: str, urls: list[str], state: str) -> None:
+        # Parameterised IN-list: only the placeholder COUNT is interpolated,
+        # never values, so this stays injection-safe. ``urls`` is bounded by the
+        # caller's claim batch (a small constant).
+        placeholders = ",".join("?" for _ in urls)
+        self._conn.execute(
+            f"UPDATE frontier SET state = ? WHERE run_id = ? AND normalized_url IN ({placeholders})",
+            (state, run_id, *urls),
+        )
+        self._pending_writes += 1
+        if self._pending_writes >= _BATCH_SIZE:
+            self.flush()
 
     def flush(self) -> None:
         if self._pending_writes:

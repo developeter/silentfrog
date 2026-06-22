@@ -121,6 +121,51 @@ def test_iter_graph_inputs_sources_edges_from_frontier(store: CrawlStore) -> Non
     assert rows["https://e.com/a"] == ("https://e.com/", 70)
 
 
+def test_claim_pending_transitions_and_returns_in_admission_order(store: CrawlStore) -> None:
+    # PR-8a: the producer claims pending rows, which flip to in_progress so the
+    # same URL is never claimed twice. Returned in admission (rowid) order.
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.admit(run_id, "https://e.com/", "", 0)
+    store.admit(run_id, "https://e.com/a", "https://e.com/", 1)
+    claimed = store.claim_pending(run_id, 10)
+    assert claimed == [("https://e.com/", 0, ""), ("https://e.com/a", 1, "https://e.com/")]
+    # All claimed rows are now in_progress, so a second claim yields nothing.
+    assert store.claim_pending(run_id, 10) == []
+
+
+def test_claim_pending_respects_limit_and_advances(store: CrawlStore) -> None:
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    for i in range(5):
+        store.admit(run_id, f"https://e.com/{i}", "", 0)
+    first = [url for url, _depth, _src in store.claim_pending(run_id, 2)]
+    second = [url for url, _depth, _src in store.claim_pending(run_id, 2)]
+    assert first == ["https://e.com/0", "https://e.com/1"]
+    assert second == ["https://e.com/2", "https://e.com/3"]
+
+
+def test_claim_pending_is_isolated_per_run(store: CrawlStore) -> None:
+    run_a = store.start_run("a.com", "https://a.com/", "spider")
+    run_b = store.start_run("b.com", "https://b.com/", "spider")
+    store.admit(run_a, "https://a.com/1", "", 0)
+    store.admit(run_b, "https://b.com/1", "", 0)
+    store.claim_pending(run_a, 10)
+    # Claiming run A must leave run B's pending row untouched.
+    assert [url for url, _depth, _src in store.claim_pending(run_b, 10)] == ["https://b.com/1"]
+
+
+def test_mark_sets_terminal_frontier_state(store: CrawlStore) -> None:
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.admit(run_id, "https://e.com/a", "", 0)
+    store.claim_pending(run_id, 1)
+    store.mark(run_id, "https://e.com/a", "completed")
+    store.flush()
+    row = store._conn.execute(
+        "SELECT state FROM frontier WHERE run_id = ? AND normalized_url = ?",
+        (run_id, "https://e.com/a"),
+    ).fetchone()
+    assert row[0] == "completed"
+
+
 def test_iter_graph_inputs_edgeless_without_frontier_rows(store: CrawlStore) -> None:
     # A crawl predating the frontier table (audits only) stays edgeless, not empty.
     run_id = store.start_run("e.com", "https://e.com/", "list")

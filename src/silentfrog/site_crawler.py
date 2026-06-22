@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, Protocol
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -31,6 +32,15 @@ _COMMON_SITEMAP_PATHS = ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml"
 # Beyond N the payload lives on disk and the in-memory result carries
 # lightweight fields only — bounding RAM at ~1M URLs.
 _PAYLOAD_MEMORY_LIMIT = 2000
+# v2.0 PR-8a: the worker queue is bounded so memory stays flat at ~1M URLs.
+# A single producer claims pending work from the durable frontier and feeds
+# this queue; it blocks (backpressure) when the queue is full. Workers persist
+# their discoveries to the frontier — NOT this queue — so they never block
+# while producing, which is what keeps the bounded queue deadlock-free.
+_WORK_QUEUE_BOUND = 256
+_CLAIM_BATCH = 64
+# Terminal frontier states for a processed URL (default ``completed``).
+_FRONTIER_STATES = {"error": "failed", "skipped": "skipped"}
 
 
 @dataclass(frozen=True)
@@ -103,10 +113,12 @@ async def crawl_site(
     spider = config.spider
     seeds = await _build_seeds(config, timeout)
     frontier = _build_frontier(config)
-    frontier.seed(seeds)
+    admitted_seeds = _admit_seeds(frontier, seeds)
     _emit(on_event, "discovered", discovered=frontier.seen_count, total=frontier.seen_count)
     robots = RobotsCache(config.crawl_options.user_agent, timeout) if spider.respect_robots else None
     run_id = store.start_run(config.base_host, config.base_url, str(spider.mode)) if store else ""
+    work_source = _make_work_source(store, run_id)
+    work_source.seed([(url, 0, "") for url in admitted_seeds])
     ctx = _CrawlContext(
         config=config,
         frontier=frontier,
@@ -119,10 +131,21 @@ async def crawl_site(
         politeness=_PolitenessGate(spider.politeness_delay_ms),
         follows_links=spider.mode.follows_links,
     )
-    results = await _drive_frontier(ctx)
+    results = await _drive_frontier(ctx, work_source)
     if store is not None:
         store.finish_run(run_id)
     return SiteCrawlReport.from_results(results, discovered_count=frontier.seen_count, run_id=run_id)
+
+
+def _admit_seeds(frontier: CrawlFrontier, seeds: list[str]) -> list[str]:
+    """Pass seeds through the in-memory dedup/scope gate (marking them seen) and
+    return the normalized URLs that were newly admitted — the work the producer
+    starts from. The gate, not this list, is the dedup source of truth in PR-8a."""
+    admitted: list[str] = []
+    for url in seeds:
+        if frontier.admit(url, 0):
+            admitted.append(normalize_site_url(url))
+    return admitted
 
 
 def _build_frontier(config: SiteCrawlConfig) -> CrawlFrontier:
@@ -160,65 +183,150 @@ async def _seed_from_sitemap(config: SiteCrawlConfig, timeout: int) -> list[str]
     return _filter_urls(urls, config)
 
 
-def _admit_frontier(ctx: _CrawlContext, url: str, source_url: str, depth: int) -> None:
-    """Record an admitted URL + its discovering page in the durable frontier
-    (H3). The in-memory frontier remains the live dedup gate; this is the
-    persisted parent → child edge the link graph reads (PR-8 moves dedup here)."""
-    if ctx.store is not None:
-        ctx.store.admit(ctx.run_id, url, source_url, depth)
+class _WorkSource(Protocol):
+    """The durable frontier of record the producer claims work from. Two impls
+    mirror the repository's SQLite/in-memory split (locked decisions #2/#4):
+    production crawls use SQLite; store-less tests + bounded small programmatic
+    crawls use an in-memory deque. Items are ``(url, depth, source_url)``."""
+
+    def seed(self, items: list[tuple[str, int, str]]) -> None: ...
+
+    def claim(self, batch: int) -> list[tuple[str, int, str]]: ...
+
+    def put_discovery(self, url: str, source_url: str, depth: int) -> None: ...
+
+    def complete(self, url: str, state: str) -> None: ...
 
 
-async def _drive_frontier(ctx: _CrawlContext) -> list[SiteCrawlResult]:
-    results: list[SiteCrawlResult] = []
-    queue: asyncio.Queue[tuple[str, int, str]] = asyncio.Queue()
-    while not ctx.frontier.is_empty:
-        item = ctx.frontier.pop()
-        if item is None:
-            continue
-        url, depth = item
-        _admit_frontier(ctx, url, "", depth)
-        queue.put_nowait((url, depth, ""))
-    if queue.empty():
-        return results
-    workers = [asyncio.create_task(_frontier_worker(ctx, queue, results)) for _ in range(ctx.concurrency)]
-    await queue.join()
+class _SqliteWorkSource:
+    """SQLite-backed frontier of record (production). The producer claims
+    ``pending`` rows; workers persist discoveries as new ``pending`` rows. Dedup
+    still happens in the in-memory frontier gate in PR-8a; PR-8b makes this
+    table the dedup source of truth."""
+
+    def __init__(self, store: CrawlStore, run_id: str) -> None:
+        self._store = store
+        self._run_id = run_id
+
+    def seed(self, items: list[tuple[str, int, str]]) -> None:
+        for url, depth, source_url in items:
+            self._store.admit(self._run_id, url, source_url, depth)
+
+    def claim(self, batch: int) -> list[tuple[str, int, str]]:
+        return self._store.claim_pending(self._run_id, batch)
+
+    def put_discovery(self, url: str, source_url: str, depth: int) -> None:
+        self._store.admit(self._run_id, url, source_url, depth)
+
+    def complete(self, url: str, state: str) -> None:
+        self._store.mark(self._run_id, url, state)
+
+
+class _MemoryWorkSource:
+    """In-memory frontier of record for store-less crawls (tests + explicitly
+    bounded small programmatic crawls). Holds its own pending deque; the shared
+    in-memory ``CrawlFrontier`` stays the dedup/scope gate."""
+
+    def __init__(self) -> None:
+        self._pending: deque[tuple[str, int, str]] = deque()
+
+    def seed(self, items: list[tuple[str, int, str]]) -> None:
+        self._pending.extend(items)
+
+    def claim(self, batch: int) -> list[tuple[str, int, str]]:
+        claimed: list[tuple[str, int, str]] = []
+        while self._pending and len(claimed) < batch:
+            claimed.append(self._pending.popleft())
+        return claimed
+
+    def put_discovery(self, url: str, source_url: str, depth: int) -> None:
+        self._pending.append((url, depth, source_url))
+
+    def complete(self, url: str, state: str) -> None:
+        pass
+
+
+def _make_work_source(store: CrawlStore | None, run_id: str) -> _WorkSource:
+    if store is None:
+        return _MemoryWorkSource()
+    return _SqliteWorkSource(store, run_id)
+
+
+@dataclass
+class _Drive:
+    """Live state shared by the single producer and the workers within one
+    crawl. Mutated only between ``await`` points, so a plain int + Event are
+    safe without locks on the single crawl event loop."""
+
+    work_source: _WorkSource
+    queue: asyncio.Queue[tuple[str, int, str]]
+    results: list[SiteCrawlResult] = field(default_factory=list)
+    in_flight: int = 0
+    wakeup: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+async def _drive_frontier(ctx: _CrawlContext, work_source: _WorkSource) -> list[SiteCrawlResult]:
+    drive = _Drive(work_source=work_source, queue=asyncio.Queue(maxsize=_WORK_QUEUE_BOUND))
+    workers = [asyncio.create_task(_frontier_worker(ctx, drive)) for _ in range(ctx.concurrency)]
+    await _produce(drive)
     for worker in workers:
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
-    return results
+    return drive.results
 
 
-async def _frontier_worker(
-    ctx: _CrawlContext,
-    queue: asyncio.Queue[tuple[str, int, str]],
-    results: list[SiteCrawlResult],
-) -> None:
+async def _produce(drive: _Drive) -> None:
+    """Single producer: claim pending work from the durable frontier and feed
+    the bounded queue, blocking when it is full (backpressure). Workers persist
+    discoveries back to the frontier, so the producer alone bridges frontier ->
+    queue; nothing else enqueues, which is what makes the bounded queue
+    deadlock-free. Terminates when no pending work remains and nothing claimed
+    is still in flight (so no worker can produce more). The ``wakeup`` is
+    cleared BEFORE claiming so a discovery admitted concurrently cannot be
+    lost between an empty claim and the wait."""
     while True:
-        url, depth, source_url = await queue.get()
+        drive.wakeup.clear()
+        claimed = drive.work_source.claim(_CLAIM_BATCH)
+        if claimed:
+            await _dispatch(drive, claimed)
+            continue
+        if drive.in_flight == 0:
+            return
+        await drive.wakeup.wait()
+
+
+async def _dispatch(drive: _Drive, claimed: list[tuple[str, int, str]]) -> None:
+    # Count claimed work as in flight BEFORE putting, so termination never
+    # concludes early while items wait on a full queue.
+    drive.in_flight += len(claimed)
+    for item in claimed:
+        await drive.queue.put(item)
+
+
+async def _frontier_worker(ctx: _CrawlContext, drive: _Drive) -> None:
+    while True:
+        url, depth, source_url = await drive.queue.get()
         try:
-            await _process_url(ctx, url, depth, source_url, queue, results)
+            await _process_url(ctx, drive, url, depth, source_url)
         finally:
-            queue.task_done()
+            # Discoveries are already admitted (inside _process_url) before this
+            # decrement, so in_flight hitting 0 means no more work can appear.
+            drive.in_flight -= 1
+            drive.wakeup.set()
 
 
-async def _process_url(
-    ctx: _CrawlContext,
-    url: str,
-    depth: int,
-    source_url: str,
-    queue: asyncio.Queue[tuple[str, int, str]],
-    results: list[SiteCrawlResult],
-) -> None:
+async def _process_url(ctx: _CrawlContext, drive: _Drive, url: str, depth: int, source_url: str) -> None:
     await ctx.politeness.wait(url)
     result = await _crawl_one(url, ctx.config, ctx.timeout, ctx.on_event, ctx.cancel_event)
     if ctx.store is not None:
         ctx.store.save_audit(ctx.run_id, _to_stored_audit(result, depth, source_url))
     # Follow links from the FULL payload before any stripping.
     if ctx.follows_links and result.payload is not None:
-        await _enqueue_links(ctx, url, result.payload, depth + 1, queue)
-    kept = _bounded_result(ctx, result, len(results))
-    results.append(kept)
-    _emit(ctx.on_event, "row", result=kept, completed=len(results))
+        await _enqueue_links(ctx, drive, url, result.payload, depth + 1)
+    drive.work_source.complete(url, _FRONTIER_STATES.get(result.status, "completed"))
+    kept = _bounded_result(ctx, result, len(drive.results))
+    drive.results.append(kept)
+    _emit(ctx.on_event, "row", result=kept, completed=len(drive.results))
 
 
 def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, current_count: int) -> SiteCrawlResult:
@@ -233,22 +341,17 @@ def _bounded_result(ctx: _CrawlContext, result: SiteCrawlResult, current_count: 
     return replace(result, payload=None)
 
 
-async def _enqueue_links(
-    ctx: _CrawlContext,
-    source_url: str,
-    payload: Any,
-    depth: int,
-    queue: asyncio.Queue[tuple[str, int, str]],
-) -> None:
+async def _enqueue_links(ctx: _CrawlContext, drive: _Drive, source_url: str, payload: Any, depth: int) -> None:
     for url in _payload_link_urls(payload):
         if not ctx.frontier.in_scope(url, depth):
             continue
         if ctx.robots is not None and not await ctx.robots.allows(url):
             continue
         if ctx.frontier.admit(url, depth):
-            normalized = normalize_site_url(url)
-            _admit_frontier(ctx, normalized, source_url, depth)
-            queue.put_nowait((normalized, depth, source_url))
+            # Persist the discovery to the frontier ONLY (never the bounded
+            # queue): an unbounded, non-blocking write, so recursive production
+            # cannot deadlock the workers.
+            drive.work_source.put_discovery(normalize_site_url(url), source_url, depth)
 
 
 def _payload_link_urls(payload: Any) -> list[str]:

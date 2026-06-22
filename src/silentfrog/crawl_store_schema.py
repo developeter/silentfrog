@@ -13,8 +13,9 @@ Three tables:
   ``UNIQUE(run_id, normalized_url)`` so admission dedups atomically via
   ``INSERT OR IGNORE``. ``source_url`` is the page it was discovered from
   (the durable parent → child edge the link graph reads). ``state``
-  defaults ``pending``; the ``in_progress``/``completed`` transitions and
-  resume requeue land in PR-8/PR-9, not here.
+  defaults ``pending``; ``claim_pending``/``mark`` drive the
+  ``in_progress``/``completed`` transitions (PR-8a); ``in_progress -> pending``
+  resume requeue lands in PR-9, not here.
 
 ``insertion_order`` is an AUTOINCREMENT primary key — it preserves crawl
 order without the O(n²) ``urls.index()`` sort the in-memory list used.
