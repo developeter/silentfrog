@@ -424,7 +424,11 @@ def _social_issues(card: dict[str, Any], kind: str) -> list[str]:
     return issues
 
 
-async def _extract_social_cards(base: str, soup: BeautifulSoup, timeout: int = 5) -> dict[str, dict[str, Any]]:
+async def _extract_social_cards(
+    base: str, soup: BeautifulSoup, timeout: int = 5, *, download_images: bool = True
+) -> dict[str, dict[str, Any]]:
+    # OG/Twitter tags are parsed locally in every profile (H4); ``download_images``
+    # gates only the extra HTTP requests that size the card images.
     def _tag_value(names: tuple[str, ...]) -> str:
         for tag in soup.find_all("meta"):
             prop = _attr(tag, "property").lower()
@@ -469,7 +473,11 @@ async def _extract_social_cards(base: str, soup: BeautifulSoup, timeout: int = 5
             }
         )
 
-    await asyncio.gather(_enrich(og), _enrich(twitter))
+    if download_images:
+        await asyncio.gather(_enrich(og), _enrich(twitter))
+    else:
+        for card in (og, twitter):
+            card.update({"image_width": 0, "image_height": 0, "image_bytes": 0, "image_type": "-"})
     og["issues"] = _social_issues(og, "open graph")
     twitter["issues"] = _social_issues(twitter, "twitter")
     return {"open_graph": og, "twitter": twitter}
@@ -554,7 +562,11 @@ async def _check_canonical(
     soup: BeautifulSoup,
     timeout: int = 5,
     crawl_options: CrawlOptions | None = None,
+    *,
+    probe: bool = True,
 ) -> tuple[str, bool, bool, str]:
+    # The canonical tag is parsed locally in every profile (H4); ``probe`` gates
+    # only the extra HTTP request that resolves the canonical target's status.
     links: list[str] = []
     for link_tag in soup.find_all("link", rel="canonical", href=True):
         href_val = _attr(link_tag, "href").strip()
@@ -565,7 +577,7 @@ async def _check_canonical(
     is_self = canonical_url.rstrip("/") == page_url.rstrip("/")
 
     status = ""
-    if canonical_url:
+    if canonical_url and probe:
         options = crawl_options or CrawlOptions.default()
         async with open_crawl_session(headers=_headers_from_options(options)) as sess:
             response = await _polite_probe_response(
@@ -588,7 +600,11 @@ async def _extract_hreflang(
     soup: BeautifulSoup,
     timeout: int = 5,
     crawl_options: CrawlOptions | None = None,
+    *,
+    probe: bool = True,
 ) -> list[list[str]]:
+    # hreflang tags are parsed locally in every profile (H4); ``probe`` gates the
+    # per-alternate HTTP status check (parse-only profiles report status "-").
     rows: list[list[str]] = []
     rels: dict[str, str] = {}
     for tag in soup.find_all("link", rel="alternate", hreflang=True, href=True):
@@ -598,23 +614,27 @@ async def _extract_hreflang(
             continue
         rels[lang_val.lower()] = urljoin(page_url, href_val)
 
-    options = crawl_options or CrawlOptions.default()
-    async with open_crawl_session(headers=_headers_from_options(options)) as sess:
-        for lang, href in rels.items():
-            response = await _polite_probe_response(
-                sess,
-                href,
-                timeout,
-                options,
-                allow_redirects=True,
-            )
-            status = str(response.status)
-            rows.append([lang, href, status, "Yes" if _HREFLANG_RE.match(lang) else "No", ""])
+    if probe:
+        rows = await _probe_hreflang_rows(rels, timeout, crawl_options)
+    else:
+        rows = [[lang, href, "-", "Yes" if _HREFLANG_RE.match(lang) else "No", ""] for lang, href in rels.items()]
 
     for row in rows:
         lang, href = row[0], row[1]
         row[4] = "Yes" if rels.get(lang) == href else "No"
 
+    return rows
+
+
+async def _probe_hreflang_rows(
+    rels: dict[str, str], timeout: int, crawl_options: CrawlOptions | None
+) -> list[list[str]]:
+    rows: list[list[str]] = []
+    options = crawl_options or CrawlOptions.default()
+    async with open_crawl_session(headers=_headers_from_options(options)) as sess:
+        for lang, href in rels.items():
+            response = await _polite_probe_response(sess, href, timeout, options, allow_redirects=True)
+            rows.append([lang, href, str(response.status), "Yes" if _HREFLANG_RE.match(lang) else "No", ""])
     return rows
 
 

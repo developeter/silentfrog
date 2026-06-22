@@ -14,6 +14,7 @@ from .crawl_http import _headers_from_options
 from .crawl_mode import CrawlMode
 from .crawl_run_repository import CrawlRunRef
 from .crawl_store import CrawlStore, StoredAudit
+from .discovery_files import discovery_scope
 from .frontier import CrawlFrontier, FrontierConfig
 from .http_client import fetch_page
 from .robots_matcher import RobotsCache
@@ -141,7 +142,10 @@ async def crawl_site(
         politeness=_PolitenessGate(spider.politeness_delay_ms),
         follows_links=spider.mode.follows_links,
     )
-    drive = await _drive_frontier(ctx, work_source)
+    # H4: site-wide discovery (robots/sitemap/llms.txt/ai.json) is fetched once
+    # per origin for the whole crawl, in every profile, instead of per page.
+    with discovery_scope():
+        drive = await _drive_frontier(ctx, work_source)
     return _build_report(config, store, run_id, drive, work_source.count(), _is_cancelled(ctx))
 
 

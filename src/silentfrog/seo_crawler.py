@@ -31,7 +31,7 @@ from .crawl_http import (
     _throttle_host,
     _trace_redirects,
 )
-from .crawl_options import CrawlOptions
+from .crawl_options import CrawlOptions, ProfilePolicy
 from .crawl_types import PAYLOAD_SCHEMA_VERSION, CrawlPayload
 from .crawler_utils import _hr_size
 from .custom_extraction import extract as extract_custom
@@ -152,13 +152,19 @@ async def _resolve_link_rows(
     soup: BeautifulSoup,
     timeout: int,
     crawl_options: CrawlOptions,
+    policy: ProfilePolicy,
 ) -> list[list[str]]:
+    # Links are always extracted (local; the frontier needs them). H4 gates only
+    # the HTTP status probing: off in LIGHTWEIGHT, bounded in STANDARD, full in DEEP.
     links_rows = _extract_links(page_url, soup)
+    if not policy.probe_link_status:
+        return links_rows
+    to_probe = links_rows if policy.link_probe_cap == 0 else links_rows[: policy.link_probe_cap]
     headers = _headers_from_options(crawl_options)
     async with open_crawl_session(headers=headers, ssl=False) as session:
-        coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in links_rows]
+        coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in to_probe]
         statuses = await asyncio.gather(*coroutines, return_exceptions=True)
-    _update_link_statuses(links_rows, statuses)
+    _update_link_statuses(to_probe, statuses)
     return links_rows
 
 
@@ -197,29 +203,30 @@ async def _collect_analysis_sections(
     timeout: int,
     crawl_options: CrawlOptions,
     robots_snapshot: dict[str, list[tuple[str, str]]] | None,
+    policy: ProfilePolicy,
 ) -> dict[str, Any]:
     plain_text = _extract_plain_text(soup)
     meta_rows = _extract_meta(soup)
     header_rows = _extract_headers(soup)
     image_rows = _extract_images(response.url, soup)
-    link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options)
+    link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options, policy)
 
     canonical_url, is_self, many_canon, canon_status = await _check_canonical(
         response.url,
         soup,
         timeout=timeout,
         crawl_options=crawl_options,
+        probe=policy.probe_canonical,
     )
-    hops, final_status, hop_count, is_loop = await _trace_redirects(
-        request_url,
-        timeout=timeout,
-        options=crawl_options,
+    hops, final_status, hop_count, is_loop = await _redirect_chain(
+        request_url, response, timeout, crawl_options, policy
     )
     hreflang_rows = await _extract_hreflang(
         response.url,
         soup,
         timeout=timeout,
         crawl_options=crawl_options,
+        probe=policy.probe_hreflang,
     )
     meta_robots = _meta_robots_value(response.headers, soup)
     robots_rules = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
@@ -247,21 +254,38 @@ async def _collect_analysis_sections(
         "serp_audit": _title_audit(serp_snippet["title"], header_rows),
         "keywords": _extract_keywords(soup, plain_text),
         "content_quality": extract_content_quality(soup),
-        "social": await _extract_social_cards(response.url, soup, timeout=timeout),
+        "social": await _extract_social_cards(
+            response.url, soup, timeout=timeout, download_images=policy.download_social
+        ),
         "discovery": discovery.to_dict(),
     }
 
 
+async def _redirect_chain(
+    request_url: str,
+    response: Any,
+    timeout: int,
+    crawl_options: CrawlOptions,
+    policy: ProfilePolicy,
+) -> tuple[list[str], str, int, bool]:
+    """Trace the redirect chain (extra HTTP) only when the profile allows it;
+    otherwise report the page's own status with no hops (H4)."""
+    if policy.trace_redirects:
+        return await _trace_redirects(request_url, timeout=timeout, options=crawl_options)
+    return [request_url], str(response.status), 0, False
+
+
 async def _collect_render_diff_and_vitals(
-    response: Any, crawl_options: CrawlOptions
+    response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Single Playwright launch produces both SSR parity AND CWV.
 
-    Returns ``(render_payload, vitals_payload)``. Both are ``{}`` when
-    the SSR parity flag is off so the rest of the analyse pipeline
-    sees the same defaults M4 documented.
+    Returns ``(render_payload, vitals_payload)``. Both are ``{}`` when the SSR
+    parity flag is off OR the profile does not render (H4 gates rendering to
+    DEEP), so the rest of the analyse pipeline sees the same defaults M4
+    documented.
     """
-    if not crawl_options.ssr_parity_check:
+    if not crawl_options.ssr_parity_check or not policy.render:
         return {}, {}
     rendered = await asyncio.to_thread(render_with_playwright, response.url, 15, True)
     if rendered is None:
@@ -288,10 +312,11 @@ async def _collect_render_diff_and_vitals(
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
     crawl_options = options or CrawlOptions.default()
+    policy = ProfilePolicy.for_profile(crawl_options.profile)
     response, robots_snapshot = await _fetch_analysis_response(url, timeout, crawl_options)
     soup = BeautifulSoup(response.body, "html.parser")
     structured_data = _extract_schema_all(response.body, response.url)
-    performance_metrics = await _collect_performance_metrics(response, soup)
+    performance_metrics = await _collect_performance_metrics(response, soup, probe_resources=policy.probe_resources)
     section_payload = await _collect_analysis_sections(
         url,
         response,
@@ -299,6 +324,7 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         timeout,
         crawl_options,
         robots_snapshot,
+        policy,
     )
 
     eeat = extract_eeat_signals(soup, structured_data, response.url)
@@ -315,12 +341,13 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
         top_keyword_density=top_keyword_density,
     )
     seo_basics = extract_seo_basics(soup, response.url)
-    render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options)
-    crux_payload = await _collect_crux(response.url)
-    ai_citations_payload = await _collect_ai_citations(response.url)
-    google_metrics = await _collect_google_metrics(response.url)
-    semrush_metrics = await _collect_semrush(response.url)
-    rich_results = await _collect_rich_results(structured_data, response.url)
+    render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options, policy)
+    crux_payload, ai_citations_payload, google_metrics, semrush_metrics = await _collect_integrations(
+        response.url, policy
+    )
+    # Rich-result eligibility is schema-derived locally on every profile; only its
+    # optional GSC upgrade is an integration (H4 keeps local parse always on).
+    rich_results = await _collect_rich_results(structured_data, response.url, probe_gsc=policy.run_integrations)
     raw_payload = {
         "payload_schema_version": PAYLOAD_SCHEMA_VERSION,
         "requested_url": url,
@@ -345,6 +372,22 @@ async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = No
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
     return CrawlPayload.from_raw(raw_payload)
+
+
+async def _collect_integrations(
+    url: str, policy: ProfilePolicy
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """External integrations (CrUX / AI citations / GSC+GA4 / Semrush). H4 gates
+    them off entirely in LIGHTWEIGHT; STANDARD/DEEP attempt them, each still
+    self-gated by its own enable flag. Returns (crux, ai_citations, google, semrush)."""
+    if not policy.run_integrations:
+        return {}, {}, {}, {}
+    return (
+        await _collect_crux(url),
+        await _collect_ai_citations(url),
+        await _collect_google_metrics(url),
+        await _collect_semrush(url),
+    )
 
 
 def _collect_tech_stack(response: Any, soup: BeautifulSoup, crawl_options: CrawlOptions) -> dict[str, Any]:
@@ -414,13 +457,15 @@ async def _collect_semrush(url: str) -> dict[str, Any]:
     return metrics.to_dict()
 
 
-async def _collect_rich_results(structured_data: dict[str, Any], url: str) -> dict[str, Any]:
+async def _collect_rich_results(structured_data: dict[str, Any], url: str, *, probe_gsc: bool = True) -> dict[str, Any]:
     """v2.0 V14 — rich-result eligibility. Schema-derived on every audit
     (free, no network); upgraded to Google's verdict when a GSC site is
-    connected. Never raises."""
+    connected AND ``probe_gsc`` is set (H4 gates the GSC call). Never raises."""
     from .integrations.google.rich_results import derive_from_schema, from_url_inspection
 
     report = derive_from_schema(structured_data)
+    if not probe_gsc:
+        return report.to_dict()
     inspection = await _gsc_inspection(url)
     if inspection:
         gsc_report = from_url_inspection(inspection)

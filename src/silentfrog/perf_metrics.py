@@ -738,15 +738,18 @@ def _format_bytes(value: int | float) -> str:
     return f"{number:.1f} TB"
 
 
-async def _collect_performance_metrics(response: Any, soup: Any) -> dict[str, object]:
+async def _collect_performance_metrics(response: Any, soup: Any, *, probe_resources: bool = True) -> dict[str, object]:
     transfer_size = len(response.body.encode("utf-8", errors="ignore"))
     state = _new_collection_state(response.url)
     _collect_link_resources(state, soup)
     _collect_script_resources(state, soup)
     _collect_image_resources(state, soup)
 
-    remote_sizes, url_sizes = await _measure_remote_resources(state.fetch_targets)
-    _merge_remote_resource_sizes(state, remote_sizes, url_sizes)
+    # H4: resource discovery from the HTML is local (always on); ``probe_resources``
+    # gates only the follow-up HTTP fetches that size each remote resource.
+    if probe_resources:
+        remote_sizes, url_sizes = await _measure_remote_resources(state.fetch_targets)
+        _merge_remote_resource_sizes(state, remote_sizes, url_sizes)
 
     opportunities, opportunity_details = _collect_opportunities(
         transfer_size,

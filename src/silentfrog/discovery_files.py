@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -27,6 +29,48 @@ from .transport import open_crawl_session
 
 _BODY_EXCERPT_LIMIT = 400
 _DEFAULT_TIMEOUT = 8
+
+
+# v2.0 H4: site-wide discovery (robots/sitemap/llms.txt/ai.json) is fetched ONCE
+# per origin per crawl, in every profile. A crawl activates ``discovery_scope``;
+# concurrent pages of one origin then share a single in-flight fetch.
+_active_discovery_cache: ContextVar[DiscoveryCache | None] = ContextVar("silentfrog_discovery_cache", default=None)
+
+
+class DiscoveryCache:
+    """Per-origin single-flight cache for ``fetch_discovery_files``. Concurrent
+    pages of the same origin await the first fetch's future instead of each
+    issuing their own discovery requests."""
+
+    def __init__(self) -> None:
+        self._by_origin: dict[str, asyncio.Future[DiscoveryPayload]] = {}
+
+    async def get(self, origin: str, fetch: Callable[[], Awaitable[DiscoveryPayload]]) -> DiscoveryPayload:
+        future = self._by_origin.get(origin)
+        if future is not None:
+            return await future
+        future = asyncio.get_running_loop().create_future()
+        self._by_origin[origin] = future  # set before awaiting: no race on a single loop
+        try:
+            future.set_result(await fetch())
+        except Exception:  # noqa: BLE001 — degrade to empty; never poison the origin or crash the crawl
+            future.set_result(DiscoveryPayload.empty())
+        return await future
+
+    @property
+    def origin_count(self) -> int:
+        return len(self._by_origin)
+
+
+@contextmanager
+def discovery_scope() -> Iterator[DiscoveryCache]:
+    """Activate per-origin discovery caching for the enclosed crawl."""
+    cache = DiscoveryCache()
+    token = _active_discovery_cache.set(cache)
+    try:
+        yield cache
+    finally:
+        _active_discovery_cache.reset(token)
 
 
 @dataclass(frozen=True)
@@ -199,19 +243,37 @@ async def fetch_discovery_files(
     site_root = _site_root(base_url)
     if not site_root:
         return DiscoveryPayload.empty()
+    cache = _active_discovery_cache.get()
+    if cache is None:
+        return await _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options)
+    # Keyed by origin (site_root): fetched once per origin within a crawl scope.
+    return await cache.get(site_root, lambda: _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options))
 
+
+async def _fetch_discovery_uncached(
+    site_root: str,
+    robots_map: Mapping[str, Any] | None,
+    timeout: int,
+    crawl_options: CrawlOptions | None,
+) -> DiscoveryPayload:
     urls = _discovery_urls(site_root)
     headers = _headers_from_options(crawl_options or CrawlOptions.default())
     sitemap_candidates = _sitemap_urls_from_robots(robots_map or {})
     sitemap_target, sitemap_source = _resolve_sitemap_target(site_root, sitemap_candidates)
 
-    async with open_crawl_session(headers=headers) as session:
-        llms, llms_full, well_known, sitemap_entry = await asyncio.gather(
-            _probe(session, urls["llms_txt"], timeout, parser="llms-txt"),
-            _probe(session, urls["llms_full_txt"], timeout, parser="llms-txt"),
-            _probe(session, urls["well_known_ai_json"], timeout, parser="json"),
-            _sitemap_entry(session, sitemap_target, sitemap_source, sitemap_candidates, timeout),
-        )
+    # Module contract: never raises. The individual probes are exception-safe, but
+    # session/connector construction is not — degrade the whole origin to empty so
+    # a discovery failure never crashes a page audit (and never poisons the cache).
+    try:
+        async with open_crawl_session(headers=headers) as session:
+            llms, llms_full, well_known, sitemap_entry = await asyncio.gather(
+                _probe(session, urls["llms_txt"], timeout, parser="llms-txt"),
+                _probe(session, urls["llms_full_txt"], timeout, parser="llms-txt"),
+                _probe(session, urls["well_known_ai_json"], timeout, parser="json"),
+                _sitemap_entry(session, sitemap_target, sitemap_source, sitemap_candidates, timeout),
+            )
+    except Exception:  # noqa: BLE001 — discovery is best-effort; degrade to empty
+        return DiscoveryPayload.empty()
 
     return DiscoveryPayload(
         llms_txt=llms,
@@ -374,9 +436,11 @@ def ai_json_agent_policies(discovery: Mapping[str, Any] | None) -> dict[str, str
 
 
 __all__ = [
+    "DiscoveryCache",
     "DiscoveryEntry",
     "DiscoveryPayload",
     "ai_json_agent_policies",
     "build_discovery_checks",
+    "discovery_scope",
     "fetch_discovery_files",
 ]
