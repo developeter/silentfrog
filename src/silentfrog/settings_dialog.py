@@ -195,6 +195,15 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.txt_custom_extraction.setFixedHeight(90)
         self.txt_custom_extraction.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.txt_custom_extraction)
+
+        self.chk_allow_insecure_tls = QtWidgets.QCheckBox("Allow insecure TLS (skip certificate verification)")
+        self.chk_allow_insecure_tls.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_allow_insecure_tls.setToolTip(
+            "Off by default. Skips TLS certificate verification for this crawl's fetches so you can audit "
+            "trusted self-signed or intranet hosts. This exposes the crawl to man-in-the-middle tampering — "
+            "enable only for hosts you control and trust."
+        )
+        adv_layout.addWidget(self.chk_allow_insecure_tls)
         return self.adv_group
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
@@ -223,6 +232,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         else:
             self.chk_ssr_parity.setChecked(False)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
+        self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
         profile_index = self.profile_combo.findData(options.profile.value)
         self.profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
         self._initialize_semrush()
@@ -326,6 +336,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             tech_stack_detection=self.chk_tech_stack.isChecked(),
             # Hidden selector (single-page) keeps the incoming profile (DEEP).
             profile=self.profile_combo.currentData(),
+            allow_insecure_tls=self.chk_allow_insecure_tls.isChecked(),
         )
 
     def accept(self) -> None:

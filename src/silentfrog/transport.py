@@ -1,4 +1,4 @@
-"""Central transport seam for crawler-controlled URL fetches (v2.0 E1).
+"""Central transport seam for crawler-controlled URL fetches (v2.0 E1/H7).
 
 Every HTTP request silentfrog issues *on behalf of a crawl* — the page
 fetch, the link/canonical/hreflang/redirect probes, resource sizing,
@@ -10,13 +10,17 @@ Out of scope, governed separately and NOT routed through here: external
 SDK/API traffic (Google, Semrush, Brave, PageSpeed Insights) and
 updater/bootstrap downloads — those carry their own auth and trust policy.
 
-E1 only centralises session construction and adds the request-count hook;
-it forwards each caller's current TLS posture verbatim so behaviour is
-unchanged. H7 hardens the policy in this one place.
+H7 TLS policy (PR-16): the seam verifies certificates against the certifi
+CA bundle at OpenSSL security level >= 2 by default. Verification is
+skipped only inside an explicit, off-by-default :func:`insecure_tls`
+scope, which logs a visible warning so the insecure posture is never
+silent. The scope is read at session-open time and fails *closed* (stays
+verified) if it never propagates to a fetch.
 """
 
 from __future__ import annotations
 
+import logging
 import ssl as ssl_lib
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -24,6 +28,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
+import certifi
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,6 +46,12 @@ class RequestCounter:
 # which would be invisible to the parent.
 _active_counter: ContextVar[RequestCounter | None] = ContextVar("silentfrog_request_counter", default=None)
 
+# Crawl-scoped TLS posture. Default False = verify. A ContextVar (not a flag
+# threaded through every fetch) so the standalone probe helpers inherit the
+# crawl's choice across asyncio.gather, and so a fetch that runs outside the
+# scope fails closed (verified).
+_insecure_tls: ContextVar[bool] = ContextVar("silentfrog_insecure_tls", default=False)
+
 
 @contextmanager
 def count_requests() -> Iterator[RequestCounter]:
@@ -49,6 +62,42 @@ def count_requests() -> Iterator[RequestCounter]:
         yield counter
     finally:
         _active_counter.reset(token)
+
+
+@contextmanager
+def insecure_tls(*, enabled: bool = True) -> Iterator[None]:
+    """Disable TLS verification for crawler fetches in this scope (H7 opt-in).
+
+    Off by default and explicit: a crawl enters this scope only when the
+    operator has chosen to trust self-signed / intranet targets. Entering it
+    emits a visible warning so the insecure posture is never silent.
+    ``enabled=False`` is a no-op, letting callers forward an opt-in flag
+    without branching.
+    """
+    if not enabled:
+        yield
+        return
+    logger.warning(
+        "TLS certificate verification is DISABLED for this crawl scope "
+        "(insecure opt-in). Use only for trusted self-signed / intranet hosts."
+    )
+    token = _insecure_tls.set(True)
+    try:
+        yield
+    finally:
+        _insecure_tls.reset(token)
+
+
+def secure_ssl_context() -> ssl_lib.SSLContext:
+    """Verified TLS context for crawler fetches.
+
+    certifi CA bundle, hostname checking, certificate required, and OpenSSL
+    security level >= 2 (rejects weak ciphers, SHA-1 signatures, and RSA/DH
+    keys below 2048 bits). This is the default for every crawl fetch.
+    """
+    ctx = ssl_lib.create_default_context(cafile=certifi.where())
+    ctx.set_ciphers("DEFAULT:@SECLEVEL=2")
+    return ctx
 
 
 async def _on_request_start(_session: object, _ctx: object, _params: object) -> None:
@@ -63,21 +112,23 @@ def _counting_trace() -> aiohttp.TraceConfig:
     return trace
 
 
-def open_crawl_session(
-    *,
-    headers: dict[str, str] | None = None,
-    ssl: ssl_lib.SSLContext | bool = True,
-) -> aiohttp.ClientSession:
+def open_crawl_session(*, headers: dict[str, str] | None = None) -> aiohttp.ClientSession:
     """Open an instrumented aiohttp session for crawler-controlled fetches.
 
-    ``ssl`` is forwarded verbatim to the connector to preserve the caller's
-    current posture: ``True`` is aiohttp's default verified context (the
-    historical default for sessions built without an explicit connector),
-    ``False`` disables verification, or pass an explicit ``SSLContext``. H7
-    will centralise the policy here.
+    TLS is verified against the certifi CA bundle at OpenSSL SECLEVEL>=2.
+    Verification is skipped only inside an active :func:`insecure_tls` scope
+    (explicit per-crawl opt-in, off by default). H7 SSRF protection layers
+    onto this seam in PR-17.
     """
-    connector = aiohttp.TCPConnector(ssl=ssl)
+    ssl_ctx: ssl_lib.SSLContext | bool = False if _insecure_tls.get() else secure_ssl_context()
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     return aiohttp.ClientSession(headers=headers, connector=connector, trace_configs=[_counting_trace()])
 
 
-__all__ = ["RequestCounter", "count_requests", "open_crawl_session"]
+__all__ = [
+    "RequestCounter",
+    "count_requests",
+    "insecure_tls",
+    "open_crawl_session",
+    "secure_ssl_context",
+]

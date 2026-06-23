@@ -62,7 +62,7 @@ from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
 from .tech_stack import detect_tech
-from .transport import open_crawl_session
+from .transport import insecure_tls, open_crawl_session
 
 # re-export host delay map for tests
 _HOST_DELAYS = crawl_http._HOST_DELAYS
@@ -161,7 +161,7 @@ async def _resolve_link_rows(
         return links_rows
     to_probe = links_rows if policy.link_probe_cap == 0 else links_rows[: policy.link_probe_cap]
     headers = _headers_from_options(crawl_options)
-    async with open_crawl_session(headers=headers, ssl=False) as session:
+    async with open_crawl_session(headers=headers) as session:
         coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in to_probe]
         statuses = await asyncio.gather(*coroutines, return_exceptions=True)
     _update_link_statuses(to_probe, statuses)
@@ -311,7 +311,14 @@ async def _collect_render_diff_and_vitals(
 
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
+    """Audit one URL. TLS is verified by default; a crawl that opted into
+    ``allow_insecure_tls`` skips verification for this scope only (H7)."""
     crawl_options = options or CrawlOptions.default()
+    with insecure_tls(enabled=crawl_options.allow_insecure_tls):
+        return await _analyse(url, timeout, crawl_options)
+
+
+async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> CrawlPayload:
     policy = ProfilePolicy.for_profile(crawl_options.profile)
     response, robots_snapshot = await _fetch_analysis_response(url, timeout, crawl_options)
     soup = BeautifulSoup(response.body, "html.parser")
@@ -542,7 +549,7 @@ async def _collect_crux(url: str) -> dict[str, Any]:
 
 
 async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) -> list[list[str]]:
-    async with open_crawl_session(ssl=False) as sess:
+    async with open_crawl_session() as sess:
         coros = [_image_info(sess, urljoin(base, row[0]), timeout) for row in rows]
         out = await asyncio.gather(*coros, return_exceptions=True)
 

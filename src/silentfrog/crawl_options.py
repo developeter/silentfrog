@@ -119,6 +119,11 @@ class CrawlOptions:
     # the mechanism, behaviour-neutral). PR-13 flips the site-crawl default to
     # STANDARD via Crawl Settings; single-page audits stay DEEP.
     profile: AuditProfile = AuditProfile.DEEP
+    # v2.0 H7 (PR-16): opt out of TLS certificate verification for this crawl.
+    # Off by default — crawler fetches verify against the certifi CA bundle at
+    # SECLEVEL>=2. Enable only to audit trusted self-signed / intranet hosts;
+    # the transport seam logs a visible warning while it is active.
+    allow_insecure_tls: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -133,6 +138,7 @@ class CrawlOptions:
             custom_extraction=CustomExtractionConfig(),
             tech_stack_detection=False,
             profile=AuditProfile.DEEP,
+            allow_insecure_tls=False,
         )
 
     @classmethod
@@ -150,6 +156,7 @@ class CrawlOptions:
         custom_rules_text: str = "",
         tech_stack_detection: bool | None = None,
         profile: AuditProfile | str | None = None,
+        allow_insecure_tls: bool | None = None,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -170,6 +177,7 @@ class CrawlOptions:
             custom_extraction=parse_rules_text(custom_rules_text or ""),
             tech_stack_detection=bool(tech_stack_detection),
             profile=base.profile if profile is None else AuditProfile.from_value(profile),
+            allow_insecure_tls=bool(allow_insecure_tls),
         )
 
 

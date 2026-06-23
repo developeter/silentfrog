@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import ssl
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Optional
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
-import certifi
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .crawl_options import DEFAULT_USER_AGENT
@@ -21,13 +19,6 @@ class HttpResponse:
     headers: dict[str, str]
     ttfb_ms: float
     total_ms: float
-
-
-def _ssl_context() -> ssl.SSLContext:
-    cafile = certifi.where()
-    ssl_ctx = ssl.create_default_context(cafile=cafile)
-    ssl_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
-    return ssl_ctx
 
 
 async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
@@ -59,7 +50,7 @@ async def fetch_page(url: str, timeout: int = 10, headers: Optional[dict[str, st
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    async with open_crawl_session(headers=base_headers, ssl=_ssl_context()) as session:
+    async with open_crawl_session(headers=base_headers) as session:
         return await fetch(session, url, timeout)
 
 

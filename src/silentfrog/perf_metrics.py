@@ -710,7 +710,7 @@ async def _measure_remote_resources(
     timeout = ClientTimeout(total=_RESOURCE_BYTES_TIMEOUT)
     semaphore = asyncio.Semaphore(6)
 
-    async with open_crawl_session(ssl=False) as session:
+    async with open_crawl_session() as session:
         results = await asyncio.gather(
             *(
                 _probe_remote_resource(session, semaphore, resource_type, url, timeout)

@@ -34,6 +34,17 @@ def test_settings_dialog_profile_selector_roundtrips(qtbot) -> None:
     assert dialog.options().profile is AuditProfile.LIGHTWEIGHT  # user choice flows out
 
 
+def test_settings_dialog_insecure_tls_opt_in_roundtrips(qtbot) -> None:
+    # H7 (PR-16): the insecure-TLS opt-in is off by default and only flows out
+    # of the dialog when the operator explicitly checks it.
+    dialog = CrawlSettingsDialog(CrawlOptions.default(), show_profile=False)
+    qtbot.addWidget(dialog)
+    assert dialog.chk_allow_insecure_tls.isChecked() is False
+    assert dialog.options().allow_insecure_tls is False
+    dialog.chk_allow_insecure_tls.setChecked(True)
+    assert dialog.options().allow_insecure_tls is True
+
+
 def test_settings_dialog_hidden_selector_preserves_deep(qtbot) -> None:
     # Single-page dialog: no selector shown, the DEEP profile is preserved so a
     # single-page audit can never silently downgrade its coverage.
