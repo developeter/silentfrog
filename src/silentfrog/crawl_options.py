@@ -124,6 +124,11 @@ class CrawlOptions:
     # SECLEVEL>=2. Enable only to audit trusted self-signed / intranet hosts;
     # the transport seam logs a visible warning while it is active.
     allow_insecure_tls: bool = False
+    # v2.0 H7 (PR-17): opt out of SSRF protection for this crawl. Off by default
+    # — the transport seam rejects fetches that resolve to loopback / intranet /
+    # link-local / reserved hosts. Enable only to audit trusted intranet hosts;
+    # the seam logs a visible warning while it is active.
+    allow_private_network: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -139,6 +144,7 @@ class CrawlOptions:
             tech_stack_detection=False,
             profile=AuditProfile.DEEP,
             allow_insecure_tls=False,
+            allow_private_network=False,
         )
 
     @classmethod
@@ -157,6 +163,7 @@ class CrawlOptions:
         tech_stack_detection: bool | None = None,
         profile: AuditProfile | str | None = None,
         allow_insecure_tls: bool | None = None,
+        allow_private_network: bool | None = None,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -178,6 +185,7 @@ class CrawlOptions:
             tech_stack_detection=bool(tech_stack_detection),
             profile=base.profile if profile is None else AuditProfile.from_value(profile),
             allow_insecure_tls=bool(allow_insecure_tls),
+            allow_private_network=bool(allow_private_network),
         )
 
 

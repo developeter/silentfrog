@@ -6,11 +6,14 @@ import asyncio
 import ssl
 from pathlib import Path
 
+import aiohttp  # type: ignore[reportMissingImports]
 import pytest
 from aiohttp import web  # type: ignore[reportMissingImports]
 
 import silentfrog
+from silentfrog.ssrf import SsrfBlockedError
 from silentfrog.transport import (
+    allow_private_network,
     count_requests,
     insecure_tls,
     open_crawl_session,
@@ -40,8 +43,9 @@ async def _hit(session, url: str) -> int:
 @pytest.mark.asyncio
 async def test_seam_counts_every_request_across_fanout(ok_server) -> None:
     # The per-page probes fan out with asyncio.gather; the counter must see
-    # every request even though each runs in its own gathered task.
-    with count_requests() as counter:
+    # every request even though each runs in its own gathered task. The test
+    # server is on loopback, so the fetches need the private-network opt-in.
+    with count_requests() as counter, allow_private_network():
         async with open_crawl_session() as session:
             statuses = await asyncio.gather(*(_hit(session, ok_server) for _ in range(5)))
     assert statuses == [200, 200, 200, 200, 200]
@@ -50,11 +54,12 @@ async def test_seam_counts_every_request_across_fanout(ok_server) -> None:
 
 @pytest.mark.asyncio
 async def test_seam_counts_only_within_its_scope(ok_server) -> None:
-    async with open_crawl_session() as session:
-        assert await _hit(session, ok_server) == 200  # no active scope -> not counted
-    with count_requests() as counter:
+    with allow_private_network():
         async with open_crawl_session() as session:
-            await _hit(session, ok_server)
+            assert await _hit(session, ok_server) == 200  # no active counter -> not counted
+        with count_requests() as counter:
+            async with open_crawl_session() as session:
+                await _hit(session, ok_server)
     assert counter.count == 1
 
 
@@ -82,8 +87,9 @@ async def test_insecure_tls_is_an_explicit_off_by_default_opt_in(ok_server) -> N
     # Default posture: a verified context, never False.
     async with open_crawl_session() as default_session:
         assert default_session.connector._ssl is not False
-    # Explicit opt-in scope: verification disabled, and fetches still work.
-    with count_requests() as counter, insecure_tls():
+    # Explicit opt-in scope: verification disabled, and fetches still work
+    # (the loopback test server also needs the private-network opt-in).
+    with count_requests() as counter, insecure_tls(), allow_private_network():
         async with open_crawl_session() as insecure_session:
             assert insecure_session.connector._ssl is False
             assert await _hit(insecure_session, ok_server) == 200
@@ -91,6 +97,31 @@ async def test_insecure_tls_is_an_explicit_off_by_default_opt_in(ok_server) -> N
     # Leaving the scope restores verification (the control fails closed).
     async with open_crawl_session() as restored_session:
         assert restored_session.connector._ssl is not False
+
+
+@pytest.mark.asyncio
+async def test_seam_blocks_private_targets_by_default(ok_server) -> None:
+    # H7 (PR-17): the seam guards SSRF on every fetch by default. The loopback
+    # test server is a private target, so a fetch with no opt-in must be refused
+    # (the SsrfBlockedError surfaces as a client connector error). The explicit
+    # opt-in lets the same fetch through.
+    async with open_crawl_session() as session:
+        with pytest.raises(aiohttp.ClientError) as excinfo:
+            await _hit(session, ok_server)
+    assert isinstance(excinfo.value.__cause__, SsrfBlockedError)
+    with allow_private_network():
+        async with open_crawl_session() as session:
+            assert await _hit(session, ok_server) == 200
+
+
+@pytest.mark.asyncio
+async def test_allow_private_network_disabled_flag_is_a_noop(ok_server) -> None:
+    # enabled=False lets a caller forward an opt-in flag without branching;
+    # the guard stays on, so a loopback fetch is still refused.
+    with allow_private_network(enabled=False):
+        async with open_crawl_session() as session:
+            with pytest.raises(aiohttp.ClientError):
+                await _hit(session, ok_server)
 
 
 @pytest.mark.asyncio

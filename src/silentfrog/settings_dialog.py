@@ -204,6 +204,15 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "enable only for hosts you control and trust."
         )
         adv_layout.addWidget(self.chk_allow_insecure_tls)
+
+        self.chk_allow_private_network = QtWidgets.QCheckBox("Allow private-network targets (disable SSRF protection)")
+        self.chk_allow_private_network.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_allow_private_network.setToolTip(
+            "Off by default. Lets this crawl reach loopback / intranet / link-local hosts that the SSRF guard "
+            "normally blocks, so you can audit internal sites. A crawled page can then steer fetches at your "
+            "internal network — enable only for hosts you control and trust."
+        )
+        adv_layout.addWidget(self.chk_allow_private_network)
         return self.adv_group
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
@@ -233,6 +242,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             self.chk_ssr_parity.setChecked(False)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
+        self.chk_allow_private_network.setChecked(options.allow_private_network)
         profile_index = self.profile_combo.findData(options.profile.value)
         self.profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
         self._initialize_semrush()
@@ -337,6 +347,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             # Hidden selector (single-page) keeps the incoming profile (DEEP).
             profile=self.profile_combo.currentData(),
             allow_insecure_tls=self.chk_allow_insecure_tls.isChecked(),
+            allow_private_network=self.chk_allow_private_network.isChecked(),
         )
 
     def accept(self) -> None:

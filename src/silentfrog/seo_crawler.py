@@ -62,7 +62,7 @@ from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
 from .structure_signals import extract_structure_signals
 from .tech_stack import detect_tech
-from .transport import insecure_tls, open_crawl_session
+from .transport import allow_private_network, insecure_tls, open_crawl_session
 
 # re-export host delay map for tests
 _HOST_DELAYS = crawl_http._HOST_DELAYS
@@ -311,10 +311,14 @@ async def _collect_render_diff_and_vitals(
 
 
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
-    """Audit one URL. TLS is verified by default; a crawl that opted into
-    ``allow_insecure_tls`` skips verification for this scope only (H7)."""
+    """Audit one URL. TLS is verified and SSRF is guarded by default; a crawl
+    that opted into ``allow_insecure_tls`` / ``allow_private_network`` relaxes
+    that posture for this scope only (H7)."""
     crawl_options = options or CrawlOptions.default()
-    with insecure_tls(enabled=crawl_options.allow_insecure_tls):
+    with (
+        insecure_tls(enabled=crawl_options.allow_insecure_tls),
+        allow_private_network(enabled=crawl_options.allow_private_network),
+    ):
         return await _analyse(url, timeout, crawl_options)
 
 

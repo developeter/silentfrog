@@ -17,6 +17,7 @@ from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
 )
 from silentfrog.robots_simulator import parse_robots  # type: ignore[reportMissingImports]
 from silentfrog.seo_crawler import analyse, analyse_images  # type: ignore[reportMissingImports]
+from silentfrog.transport import allow_private_network  # type: ignore[reportMissingImports]
 
 # ------------------------------------------------------------------
 # Silence third-party warning inside pyRdfa only
@@ -43,6 +44,14 @@ PNG_BYTES = (
 CSS_BYTES = b"body{color:#333;background:#fff;margin:0;}\n"
 JS_BYTES = b"console.log('fixture');"
 FONT_BYTES = b"wOFF2fixture-font-data"
+
+
+@pytest.fixture(autouse=True)
+async def _allow_loopback_test_servers():
+    """Every test here audits a loopback aiohttp test server, which the H7 SSRF
+    guard blocks by default; opt the whole module into private-network access."""
+    with allow_private_network():
+        yield
 
 
 @pytest.fixture

@@ -6,6 +6,7 @@ from aiohttp import web  # type: ignore[reportMissingImports]
 from silentfrog import site_crawler  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlConfig  # type: ignore[reportMissingImports]
+from silentfrog.transport import allow_private_network  # type: ignore[reportMissingImports]
 
 
 def _payload(url: str, title: str = "Example Title") -> CrawlPayload:
@@ -97,7 +98,9 @@ async def test_resolve_site_urls_parses_sitemap_index_filters_and_caps(aiohttp_s
         limit=1,
     )
 
-    urls = await site_crawler.resolve_site_urls(config, timeout=5)
+    # The sitemap is served from a loopback test server; opt past the SSRF guard.
+    with allow_private_network():
+        urls = await site_crawler.resolve_site_urls(config, timeout=5)
 
     assert urls == [str(server.make_url("/design/table/"))]
 
@@ -122,7 +125,8 @@ async def test_resolve_site_urls_discovers_sitemap_from_robots(aiohttp_server):
 
     config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")), include_text="/design/")
 
-    urls = await site_crawler.resolve_site_urls(config, timeout=5)
+    with allow_private_network():
+        urls = await site_crawler.resolve_site_urls(config, timeout=5)
 
     assert urls == [str(server.make_url("/design/table/"))]
 
@@ -141,7 +145,8 @@ async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
     server = await aiohttp_server(app)
     config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")))
 
-    urls = await site_crawler.resolve_site_urls(config, timeout=5)
+    with allow_private_network():
+        urls = await site_crawler.resolve_site_urls(config, timeout=5)
 
     assert urls == [str(server.make_url("/page-one/"))]
 

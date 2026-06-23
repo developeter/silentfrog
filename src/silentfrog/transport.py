@@ -16,6 +16,13 @@ skipped only inside an explicit, off-by-default :func:`insecure_tls`
 scope, which logs a visible warning so the insecure posture is never
 silent. The scope is read at session-open time and fails *closed* (stays
 verified) if it never propagates to a fetch.
+
+H7 SSRF policy (PR-17): the seam connects through a :class:`GuardedConnector`
+that vets every resolved/literal address and rejects non-public ones, so a
+crawled link cannot reach loopback, intranet, link-local cloud-metadata, or
+reserved hosts. The guard is on for every fetch by default and is relaxed
+only inside an explicit, off-by-default :func:`allow_private_network` scope
+(same read-at-open, fail-closed contract as :func:`insecure_tls`).
 """
 
 from __future__ import annotations
@@ -29,6 +36,8 @@ from dataclasses import dataclass
 
 import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 import certifi
+
+from .ssrf import GuardedConnector
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +60,12 @@ _active_counter: ContextVar[RequestCounter | None] = ContextVar("silentfrog_requ
 # crawl's choice across asyncio.gather, and so a fetch that runs outside the
 # scope fails closed (verified).
 _insecure_tls: ContextVar[bool] = ContextVar("silentfrog_insecure_tls", default=False)
+
+# Crawl-scoped SSRF posture. Default False = vet every address (guard on). Same
+# ContextVar contract as the TLS posture: probe helpers inherit the crawl's
+# choice across asyncio.gather, and a fetch outside any scope fails closed
+# (guarded).
+_allow_private_network: ContextVar[bool] = ContextVar("silentfrog_allow_private_network", default=False)
 
 
 @contextmanager
@@ -88,6 +103,31 @@ def insecure_tls(*, enabled: bool = True) -> Iterator[None]:
         _insecure_tls.reset(token)
 
 
+@contextmanager
+def allow_private_network(*, enabled: bool = True) -> Iterator[None]:
+    """Relax the SSRF guard for crawler fetches in this scope (H7 opt-in).
+
+    Off by default and explicit: a crawl enters this scope only when the
+    operator has chosen to audit trusted intranet / loopback targets.
+    Entering it emits a visible warning so the relaxed posture is never
+    silent. ``enabled=False`` is a no-op, letting callers forward an opt-in
+    flag without branching.
+    """
+    if not enabled:
+        yield
+        return
+    logger.warning(
+        "SSRF protection is DISABLED for this crawl scope (private-network "
+        "opt-in). Crawled links may reach loopback / intranet hosts. Use only "
+        "for hosts you control and trust."
+    )
+    token = _allow_private_network.set(True)
+    try:
+        yield
+    finally:
+        _allow_private_network.reset(token)
+
+
 def secure_ssl_context() -> ssl_lib.SSLContext:
     """Verified TLS context for crawler fetches.
 
@@ -117,16 +157,18 @@ def open_crawl_session(*, headers: dict[str, str] | None = None) -> aiohttp.Clie
 
     TLS is verified against the certifi CA bundle at OpenSSL SECLEVEL>=2.
     Verification is skipped only inside an active :func:`insecure_tls` scope
-    (explicit per-crawl opt-in, off by default). H7 SSRF protection layers
-    onto this seam in PR-17.
+    (explicit per-crawl opt-in, off by default). The connector vets every
+    address for SSRF, rejecting non-public hosts unless an active
+    :func:`allow_private_network` scope opts in (also off by default).
     """
     ssl_ctx: ssl_lib.SSLContext | bool = False if _insecure_tls.get() else secure_ssl_context()
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    connector = GuardedConnector(ssl=ssl_ctx, allow_private=_allow_private_network.get())
     return aiohttp.ClientSession(headers=headers, connector=connector, trace_configs=[_counting_trace()])
 
 
 __all__ = [
     "RequestCounter",
+    "allow_private_network",
     "count_requests",
     "insecure_tls",
     "open_crawl_session",
