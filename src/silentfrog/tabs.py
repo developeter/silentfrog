@@ -1296,6 +1296,9 @@ class SchemaTab(QtWidgets.QTextEdit):
         }
         header = (
             "<div style='margin-top:10px;font-weight:bold'>Eligibility summary</div>"
+            f"<div style='font-size:11px;color:{theme['foreground']};margin-top:2px'>"
+            "&quot;Eligible&quot; means the markup is syntactically valid for a Google rich-result type — "
+            "not a guarantee Google will show a rich result.</div>"
             "<table style='width:100%;border-collapse:collapse;margin-top:6px'>"
             "<tr>"
             f"<th style='text-align:left;border:1px solid {theme['block_border']};padding:4px;background:{theme['block_bg']}'>Type</th>"

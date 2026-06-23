@@ -162,6 +162,74 @@ Silentfrog classifies each recommendation into exactly one class:
 - **Does not support:** that presence in Common Crawl causes citation by any
   specific AI engine.
 
+## Silentfrog heuristic thresholds
+
+These numeric cut-offs are **Silentfrog editorial heuristics**, not external
+standards or measured effect sizes. They are labelled as such wherever they
+appear and never presented as research findings. Most are configurable.
+
+| Threshold | Value (default) | Where | Config |
+|---|---|---|---|
+| Readability band | Flesch / Gulpease ≥ 60 | `citation_readability` | — |
+| Vocabulary diversity | type-token ratio ≥ 0.5 | `citation_vocabulary_diversity` | — |
+| Keyword-stuffing warning | top keyword density > 4% | `citation_no_keyword_stuffing` | `SILENTFROG_KEYWORD_WARN_DENSITY` |
+| Authoritative-tone band | first/second-person pronouns ≥ 0.2% of tokens | `citation_authoritative_tone` | — |
+| E-E-A-T freshness window | updated within 365 days | `eeat_update_freshness` | `SILENTFROG_EEAT_FRESHNESS_DAYS` |
+| Good CTR | ≥ ~2% | `gsc_ctr_above_average` | — |
+| Top-position band | average position ≤ 10 | `gsc_position_in_top_10` | — |
+| Good engagement | ≥ 30 s avg engagement | `ga4_engagement_above_median` | — |
+| High bounce | > 70% | `ga4_bounce_below_threshold` | — |
+| Good Lighthouse score | ≥ 90 / 100 | `lighthouse_*_above_90` | — |
+| Semrush authority floor | Authority Score > 30 | `semrush_domain_authority_above_30` | — |
+| **STANDARD link-probe cap** | **25 links/page** | crawl profile (H4) | `crawl_options._STANDARD_LINK_PROBE_CAP` |
+| **Auto-suggest LIGHTWEIGHT** | **above 50,000 target URLs** | crawl profile (H4) | `crawl_options._AUTO_LIGHTWEIGHT_THRESHOLD` |
+
+The last two (added in H4) bound a site crawl's per-page request fan-out: a
+STANDARD crawl probes at most 25 internal links per page for HTTP status, and a
+STANDARD crawl over more than 50,000 target URLs auto-suggests the LIGHTWEIGHT
+profile. They are operational guards, not visibility claims.
+
+## Effect-size audit (PR-15)
+
+What changed when the user-facing effect sizes were audited against the primary
+sources, so the record is explicit:
+
+**Retained and cited** (`GEO-AGGARWAL-2024`):
+
+- "GEO methods improved generative-engine visibility by **up to ~40%**" — the
+  paper's headline result.
+- Quotation addition was the **most effective** method tested.
+- Keyword stuffing **reduced visibility below baseline** (it can hurt).
+- Easy-to-understand text and an authoritative tone were **among the methods
+  that helped**; unique-word variation was **among the least effective**.
+
+**Removed as unsupported** (not present in the paper or any resolvable source —
+the number was deleted rather than re-cited):
+
+- "FAQPage schema → +40% AI visibility / largest schema-driven boost." The paper
+  studies **text content**, not schema markup types. FAQPage is now framed as a
+  relevance-driven schema choice, not a visibility multiplier.
+- "30-day updates → 3.2× more ChatGPT citations." No source. Freshness is now a
+  labelled Silentfrog heuristic window.
+- "Bing weights < 2 s LCP for AI Answer eligibility." No source; removed.
+- Per-method exact percentages presented as constants (`+30% / +20% / +15% /
+  −10% / +25%`). The paper's per-method numbers are benchmark-specific and
+  domain-varying; the direction is retained and cited, the invented constants
+  removed.
+- "Perplexity prioritises FAQ-shaped content (Princeton signal)." No source for
+  the per-engine claim; removed.
+
+**Re-worded for accuracy:**
+
+- "Brave is Claude's primary index / a URL absent from Brave is invisible to
+  Claude" → caveated as **reported, not officially confirmed** (`BRAVE-CLAUDE-
+  TECHCRUNCH-2025`); Brave indexing is a useful but not guaranteed proxy.
+- Rich-results "Eligible" → clarified as **syntactically valid for a Google
+  rich-result type, not a guarantee Google will show a rich result**; Person and
+  WebSite flagged as valid types that are not standalone rich results.
+
+No check status, verdict threshold, or scoring weight was changed by this audit.
+
 ## Maintenance
 
 When adding or changing a citation:

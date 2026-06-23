@@ -1,21 +1,23 @@
-"""Princeton GEO method coverage — quotations, readability, vocabulary, anti-stuffing.
+"""GEO content-method coverage — quotations, readability, vocabulary, anti-stuffing.
 
-Closes 4 of the 9 Princeton GEO methods that M0-M4 didn't touch
-(see docs/geo_roadmap.md v1.1 §1.5):
+Covers content-level methods inspired by the Princeton GEO study (Aggarwal et
+al., KDD 2024, arXiv:2311.09735), which found GEO methods improved
+generative-engine visibility by up to ~40% overall — quotation addition was the
+most effective and keyword stuffing reduced visibility below baseline (see
+docs/RESEARCH_CITATIONS.md, source GEO-AGGARWAL-2024):
 
-- ``citation_quotations`` (Princeton +30%)
-- ``citation_readability`` (Princeton +20%)
-- ``citation_vocabulary_diversity`` (Princeton +15%)
-- ``citation_no_keyword_stuffing`` (Princeton -10% if present; we
-  reuse the existing ``SILENTFROG_KEYWORD_WARN_DENSITY`` threshold
-  and surface a dedicated row).
-- ``citation_authoritative_tone`` (Princeton +25%) — heuristic based
-  on first/second-person pronoun density.
+- ``citation_quotations`` (the study's most effective method)
+- ``citation_readability`` (heuristic ≥ 60 band; "easy-to-understand" helped)
+- ``citation_vocabulary_diversity`` (heuristic TTR ≥ 0.5 band; the study found
+  unique-word variation among its least effective methods)
+- ``citation_no_keyword_stuffing`` (heuristic ``SILENTFROG_KEYWORD_WARN_DENSITY``
+  threshold; the study found stuffing hurts)
+- ``citation_authoritative_tone`` — heuristic first/second-person pronoun density
 
-All four are myth-friendly: absent → ``info``; present → ``good``.
-Only ``citation_no_keyword_stuffing`` can warn (when density exceeds
-the threshold). Readability has a language-guard fallback (other
-languages → ``info``).
+Numeric thresholds are Silentfrog heuristics, not measured effect sizes. All
+rows are myth-friendly: absent → ``info``; present → ``good``. Only
+``citation_no_keyword_stuffing`` can warn (when density exceeds the threshold).
+Readability has a language-guard fallback (other languages → ``info``).
 """
 
 from __future__ import annotations
@@ -311,32 +313,32 @@ _CHECK_META: dict[str, tuple[str, str, str]] = {
     "citation_quotations": (
         "Citation readiness",
         "Page contains quotations with named attribution",
-        "Add a small number of expert quotes with attribution; Princeton 2024 measured "
-        "+30% AI visibility from quotation addition. Quality, not quantity.",
+        "Add a small number of expert quotes with attribution; the Princeton GEO study "
+        "(KDD 2024) found quotation addition the most effective method tested. Quality, not quantity.",
     ),
     "citation_readability": (
         "Citation readiness",
         "Readability sits in the AI-friendly band",
-        "Aim for ≥ 60 on Flesch (EN) or ≥ 60 on Gulpease (IT). Princeton 2024 measured "
-        "+20% AI visibility from easier-to-understand text.",
+        "Aim for ≥ 60 on Flesch (EN) or Gulpease (IT) — a Silentfrog heuristic band. "
+        "Easier-to-understand text was among the methods that helped in the Princeton GEO study (KDD 2024).",
     ),
     "citation_vocabulary_diversity": (
         "Citation readiness",
         "Vocabulary diversity (type-token ratio) is healthy",
-        "Vary phrasing where natural; Princeton 2024 measured +15% AI visibility from "
-        "unique-word density. TTR ≥ 0.5 is a healthy band for editorial prose.",
+        "Vary phrasing where natural; TTR ≥ 0.5 is a Silentfrog heuristic band for editorial prose "
+        "(the Princeton GEO study found unique-word variation among its least effective methods).",
     ),
     "citation_no_keyword_stuffing": (
         "Citation readiness",
         "Top keyword density stays below the anti-stuffing threshold",
-        "Keep the top keyword density below SILENTFROG_KEYWORD_WARN_DENSITY (default 4%). "
-        "Princeton 2024 measured -10% AI visibility from keyword stuffing — actively penalised.",
+        "Keep the top keyword density below SILENTFROG_KEYWORD_WARN_DENSITY (heuristic default 4%). "
+        "The Princeton GEO study (KDD 2024) found keyword stuffing reduced visibility below baseline.",
     ),
     "citation_authoritative_tone": (
         "Citation readiness",
         "Authoritative tone — first/second-person pronoun density",
-        "Lean into a confident editorial voice (we / you / our). Princeton 2024 measured "
-        "+25% AI visibility from authoritative-tone framing.",
+        "Lean into a confident editorial voice (we / you / our). An authoritative tone was among the "
+        "methods that helped in the Princeton GEO study (KDD 2024).",
     ),
 }
 
@@ -385,8 +387,8 @@ def _stuffing_status(payload: AdvancedCitationPayload) -> tuple[str, str]:
     if payload.word_count < 50:
         return "info", "Text too short to evaluate keyword stuffing."
     if payload.keyword_warning:
-        return "warning", f"Top keyword density above {threshold}% threshold — Princeton penalty risk."
-    return "good", f"Top keyword density at or below {threshold}% threshold."
+        return "warning", f"Top keyword density above the {threshold}% Silentfrog heuristic threshold."
+    return "good", f"Top keyword density at or below the {threshold}% Silentfrog heuristic threshold."
 
 
 def _tone_status(payload: AdvancedCitationPayload) -> tuple[str, str]:

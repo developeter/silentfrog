@@ -105,8 +105,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Checks whether the audited AI and search-facing agents can fetch the page URL.\n\n"
         "Best practice: allow the official user-agent tokens you want in robots.txt and avoid "
         "blocking them with conflicting path rules.\n\n"
-        "Claude note: Claude uses Brave Search's index, not Google's. Verify Brave indexing separately "
-        "if Claude citations matter (Princeton 2024 seo-geo signal)."
+        "Claude note: Anthropic's Claude web search appears to draw on Brave's index per reporting "
+        "(TechCrunch, Mar 2025) — reported, not officially confirmed, and subject to change. If Claude "
+        "citations matter, verify Brave indexing separately."
     ),
     "access_controls": (
         "Checks whether standard Google search controls or nonstandard AI directives may limit reuse.\n\n"
@@ -139,8 +140,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "citation_schema": (
         "Checks whether supported structured data helps machines interpret the page and its main entity.\n\n"
         "Best practice: provide valid Organization, Article, Product, FAQ, or Breadcrumb schema when relevant.\n\n"
-        "Breadcrumb note: Lighthouse's SEO audit categorises Breadcrumb schema as a high-priority structured "
-        "data signal (Addy Osmani web-quality skill)."
+        "Breadcrumb note: BreadcrumbList is a Google rich-result type (Google Search Central) — valid "
+        "breadcrumb markup is eligible for the breadcrumb rich result."
     ),
     "citation_social": (
         "Checks whether social metadata is complete enough to represent the page consistently outside the body copy.\n\n"
@@ -159,8 +160,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Checks whether entity-supporting schema is present for the kind of page being audited.\n\n"
         "Best practice: add the most relevant entity schema type, such as Organization, LocalBusiness, "
         "Product, Article, Service, or Person.\n\n"
-        "FAQPage note: Princeton 2024 GEO research measured FAQPage schema correlating with +40% AI "
-        "visibility — the largest schema-driven boost. Perplexity in particular prioritises FAQPage-shaped content."
+        "FAQPage note: FAQPage marks up question/answer content for machines (schema.org). The Princeton "
+        "GEO study measured text-level methods, not schema types, so treat schema choice as relevance-driven "
+        "— adding FAQPage is not a guaranteed visibility multiplier."
     ),
     "hreflang_return_tag_complete": (
         "Checks whether every hreflang alternate links back to this page (return-tag reciprocity).\n\n"
@@ -215,8 +217,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "eeat_update_freshness": (
         "Checks whether the page was updated within the configured freshness window.\n\n"
         "Best practice: maintain dateModified (or a visible last-update marker) and refresh evergreen pages "
-        "within the SILENTFROG_EEAT_FRESHNESS_DAYS threshold (default 365).\n\n"
-        "ChatGPT note: Princeton 2024 measured 30-day updates correlating with 3.2x more citations from ChatGPT."
+        "within the SILENTFROG_EEAT_FRESHNESS_DAYS window (default 365). This window is a Silentfrog "
+        "heuristic, not a measured citation multiplier."
     ),
     "eeat_author_bio": (
         "Checks whether the author has a discoverable bio or sameAs link.\n\n"
@@ -249,11 +251,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     ),
     "citation_question_headings": (
         "Checks whether H2/H3 headings are phrased as questions that the body answers.\n\n"
-        "Per Google's AI Optimization Guide you do NOT need to rewrite content specifically for "
+        "Per Google's AI features guidance you do NOT need to rewrite content specifically for "
         "generative AI search; question-form headings are a positive signal where they fit the natural "
-        "editorial style. Present => good; absent => info. Never warned.\n\n"
-        "Perplexity note: Perplexity in particular prioritises FAQ-shaped content with question-form "
-        "headings for AI citation (Princeton 2024 seo-geo signal)."
+        "editorial style. Present => good; absent => info. Never warned."
     ),
     "citation_stats_density": (
         "Checks whether the page contains specific numbers, dates, and units AI engines can quote.\n\n"
@@ -273,8 +273,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "affect the verdict. Enable in Crawl settings after installing silentfrog[geo-render]."
     ),
     "perf_lcp": (
-        "Largest Contentful Paint — lab measurement via Playwright CDP. Google's threshold: <2.5s good, "
-        "<4s warn, >=4s critical. Bing also weights <2s for AI Answer eligibility (Princeton seo-geo signal).\n\n"
+        "Largest Contentful Paint — lab measurement via Playwright CDP. Google's Core Web Vitals threshold: "
+        "<2.5s good, <4s warn, >=4s critical.\n\n"
         "Best practice: preload the LCP image, inline critical CSS, defer non-critical JS."
     ),
     "perf_inp": (
@@ -321,31 +321,34 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     # v1.1 N2 — Princeton GEO method coverage.
     "citation_quotations": (
         "Checks whether the page contains quotations with named attribution (blockquote, q, or attribution dash).\n\n"
-        "Princeton 2024 GEO research measured +30% AI visibility from QUOTATION ADDITION (quality over quantity). "
+        "The Princeton GEO study (KDD 2024, arXiv:2311.09735) found quotation addition the most effective "
+        "method tested; its GEO methods improved generative-engine visibility by up to ~40% overall. "
         "Quote experts with attribution where it fits the editorial voice. Absent => info; present => good."
     ),
     "citation_readability": (
         "Checks the page's readability score against the AI-friendly band.\n\n"
         "English uses Flesch Reading Ease (target >= 60). Italian uses Indice Gulpease (target >= 60). "
-        "Princeton 2024 measured +20% AI visibility from easier-to-understand text. "
+        "The >= 60 band is a Silentfrog heuristic; easier-to-understand text was among the methods that "
+        "improved visibility in the Princeton GEO study (KDD 2024). "
         "Other languages route to info — language-guard fallback."
     ),
     "citation_vocabulary_diversity": (
         "Checks vocabulary diversity via type-token ratio (unique tokens / total tokens).\n\n"
-        "Princeton 2024 GEO research measured +15% AI visibility from UNIQUE WORDS — increased "
-        "vocabulary diversity and distinctive phrasing. TTR >= 0.5 is a healthy band for editorial prose. "
-        "Absent => info; present => good."
+        "TTR >= 0.5 is a Silentfrog heuristic band for editorial prose. Note: the Princeton GEO study "
+        "(KDD 2024) found unique-word variation among its least effective methods, so this is a light, "
+        "never-penalising signal. Absent => info; present => good."
     ),
     "citation_no_keyword_stuffing": (
         "Checks whether the page's top keyword density stays below the anti-stuffing threshold.\n\n"
-        "Princeton 2024 GEO research measured -10% AI visibility from KEYWORD STUFFING — actively "
-        "penalised by AI engines. Default threshold 4% (env: SILENTFROG_KEYWORD_WARN_DENSITY). "
-        "Above threshold => warning; at or below => good."
+        "The Princeton GEO study (KDD 2024) found keyword stuffing reduced visibility below baseline — "
+        "it can hurt, not help. Silentfrog warns above a heuristic 4% top-keyword-density threshold "
+        "(env: SILENTFROG_KEYWORD_WARN_DENSITY). Above threshold => warning; at or below => good."
     ),
     "citation_authoritative_tone": (
         "Checks first/second-person pronoun density as a proxy for authoritative editorial voice.\n\n"
-        "Princeton 2024 GEO research measured +25% AI visibility from AUTHORITATIVE TONE. "
-        "Healthy band: >=0.2% of tokens are we/you/our/your. Below threshold => info; never warned."
+        "An authoritative tone was among the methods that improved visibility in the Princeton GEO study "
+        "(KDD 2024). Silentfrog uses a heuristic band: >=0.2% of tokens are we/you/our/your. "
+        "Below threshold => info; never warned."
     ),
     "seo_viewport_mobile": (
         "Checks whether the page declares a mobile-responsive viewport meta tag.\n\n"
@@ -364,9 +367,10 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     "ai_citations_brave": (
         "Probes Brave Search to see whether the URL is indexed AND whether Brave's AI summary mentions "
         "the netloc.\n\n"
-        "Brave is Claude's primary search index. If a URL isn't in Brave it's effectively invisible to "
-        "Claude regardless of other SEO work. Gated behind SILENTFROG_AI_CITATIONS_ENABLE + "
-        "SILENTFROG_BRAVE_API_KEY env vars. Brave free tier: 2,000 queries/month per key. "
+        "Anthropic's Claude web search appears to draw on Brave's index per reporting (TechCrunch, "
+        "Mar 2025) — reported, not officially confirmed, and subject to change. Brave indexing is therefore "
+        "a useful but not guaranteed proxy for Claude visibility. Gated behind SILENTFROG_AI_CITATIONS_ENABLE "
+        "+ SILENTFROG_BRAVE_API_KEY env vars. Brave free tier: 2,000 queries/month per key. "
         "Not measured => info; indexed => good; absent from Brave => warning."
     ),
     "ai_citations_common_crawl": (
@@ -431,6 +435,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     ),
     "rich_results_eligible": (
         "Whether the page has rich-result-eligible structured data.\n\n"
+        "'Eligible' means the markup is syntactically valid for a Google rich-result type — it is NOT a "
+        "guarantee Google will show a rich result (eligibility is necessary, not sufficient; per Google "
+        "Search Central). Some valid types (e.g. Person, WebSite) are not standalone rich results. "
         "Derived from the page's own schema (Google retired the public Rich Results Test API), upgraded "
         "to Google's real verdict when the site is Search-Console-connected. No eligible markup => info, "
         "never a penalty (§1.5)."

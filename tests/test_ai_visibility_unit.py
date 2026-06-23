@@ -663,16 +663,17 @@ def test_n2_myth_keys_never_warn_when_absent(key: str) -> None:
     assert row.status not in {"warning", "critical"}
 
 
-def test_n2_tooltip_enrichments_carry_princeton_references() -> None:
-    for key, required in (
-        ("eeat_update_freshness", "Princeton"),
-        ("entity_schema", "+40%"),
-        ("citation_schema", "Lighthouse"),
-        ("access_agents", "Brave"),
-        ("citation_question_headings", "Perplexity"),
-    ):
-        tooltip = ai_visibility_check_tooltip(key)
-        assert required in tooltip, f"missing '{required}' in {key} tooltip"
+def test_geo_tooltips_drop_fabricated_effect_sizes() -> None:
+    # H6/PR-15: fabricated/unsupported effect sizes were removed; what remains is
+    # grounded (Silentfrog heuristic labels or the cited Princeton GEO study).
+    freshness = ai_visibility_check_tooltip("eeat_update_freshness")
+    assert "3.2" not in freshness and "heuristic" in freshness.lower()
+    assert "+40%" not in ai_visibility_check_tooltip("entity_schema")
+    assert "Princeton" not in ai_visibility_check_tooltip("citation_question_headings")
+    # The Brave -> Claude relationship is now caveated as reported, not asserted.
+    brave_tip = ai_visibility_check_tooltip("access_agents")
+    assert "Brave" in brave_tip
+    assert "reported" in brave_tip.lower() or "not officially confirmed" in brave_tip.lower()
 
 
 def test_ai_visibility_keyword_stuffing_warns_when_density_above_threshold() -> None:

@@ -21,14 +21,33 @@ import re
 from pathlib import Path
 from typing import Any
 
-from silentfrog.ai_visibility import _AI_VISIBILITY_CHECK_TOOLTIPS, build_ai_visibility_checks
+from silentfrog.ai_visibility import (
+    _AI_VISIBILITY_CHECK_TOOLTIPS,
+    ai_visibility_check_tooltip,
+    build_ai_visibility_checks,
+)
 from silentfrog.crawl_types import AiVisibilityCheck
 from silentfrog.research_evidence import (
     CHECK_EVIDENCE,
     EVIDENCE_CLASSES,
+    EVIDENCE_HEURISTIC,
+    EVIDENCE_RESEARCH,
     EVIDENCE_SOURCES,
     SOURCED_CLASSES,
     attach_evidence,
+)
+
+# An "effect-size" claim = a signed percentage (+30%, -10%), a multiplier
+# (3.2x / 3.2×), or an "up to N%" magnitude. Bare threshold percentages
+# ("4%", "2% CTR", "70%"), score bands ("≥ 60", "90+"), and section refs
+# ("§1.5 x-default") are NOT effect sizes and must not trip the guard — hence the
+# ascii "x" multiplier must be attached to the digits (no intervening space).
+_EFFECT_SIZE_RE = re.compile(
+    r"[+\-−]\s?\d+(?:\.\d+)?\s?%"  # signed percentage
+    r"|\d+(?:\.\d+)?\s?×"  # unicode multiplier
+    r"|\d+(?:\.\d+)?x\b"  # ascii multiplier, attached
+    r"|up to\s?~?\d+(?:\.\d+)?\s?%",  # "up to ~40%"
+    re.IGNORECASE,
 )
 
 _DOC_PATH = Path(__file__).resolve().parents[1] / "docs" / "RESEARCH_CITATIONS.md"
@@ -261,3 +280,57 @@ def test_enrichment_is_status_neutral() -> None:
     )
     assert stamped.evidence_class == "research"
     assert stamped.evidence_source_ids == ("GEO-AGGARWAL-2024",)
+
+
+# --- PR-15 focused guard: effect sizes cited; sourced claims resolve ---------
+
+
+def _built_checks() -> list[AiVisibilityCheck]:
+    return build_ai_visibility_checks(comprehensive_audit_raw())
+
+
+def test_all_built_check_sources_resolve() -> None:
+    # Every sourced claim on a real built check resolves to a registered ID.
+    for check in _built_checks():
+        for source_id in check.evidence_source_ids:
+            assert source_id in EVIDENCE_SOURCES, f"{check.key}: unresolved source {source_id!r}"
+        if check.evidence_class in SOURCED_CLASSES:
+            assert check.evidence_source_ids, f"{check.key}: sourced check cites no source"
+
+
+def test_effect_sizes_only_in_cited_research_checks() -> None:
+    # Any user-facing effect size (recommendation, details, or tooltip) must
+    # belong to a research-classed check that resolves a research source.
+    research_sources = {sid for sid, s in EVIDENCE_SOURCES.items() if s.evidence_class == EVIDENCE_RESEARCH}
+    for check in _built_checks():
+        text = " ".join((check.recommendation, check.details, ai_visibility_check_tooltip(check.key)))
+        match = _EFFECT_SIZE_RE.search(text)
+        if not match:
+            continue
+        assert check.evidence_class == EVIDENCE_RESEARCH, (
+            f"{check.key}: effect size {match.group()!r} in a non-research check ({check.evidence_class})"
+        )
+        assert set(check.evidence_source_ids) & research_sources, (
+            f"{check.key}: effect size {match.group()!r} without a resolvable research source"
+        )
+
+
+def test_heuristic_threshold_checks_are_labelled_heuristic() -> None:
+    # The numeric-threshold GEO/engagement checks are Silentfrog heuristics, not
+    # external standards or research effect sizes.
+    for key in (
+        "citation_readability",
+        "citation_vocabulary_diversity",
+        "citation_no_keyword_stuffing",
+        "citation_authoritative_tone",
+        "gsc_ctr_above_average",
+        "ga4_engagement_above_median",
+        "ga4_bounce_below_threshold",
+    ):
+        assert CHECK_EVIDENCE[key][0] == EVIDENCE_HEURISTIC, key
+
+
+def test_doc_records_h4_operational_thresholds() -> None:
+    text = _DOC_PATH.read_text(encoding="utf-8")
+    assert "50,000" in text  # auto-suggest LIGHTWEIGHT threshold
+    assert "25 links/page" in text  # STANDARD link-probe cap

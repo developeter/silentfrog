@@ -255,9 +255,10 @@ async def fetch_ai_citations(
 _CHECK_META: dict[str, tuple[str, str, str]] = {
     "ai_citations_brave": (
         "AI Citations",
-        "Brave Search indexes the URL (used by Claude, Brave AI)",
-        "Brave is Claude's primary index. If a URL isn't in Brave it's effectively invisible to "
-        "Claude regardless of other SEO work. Submit the sitemap to Brave + verify indexing.",
+        "Brave Search indexes the URL (Brave AI; reportedly Claude web search)",
+        "Anthropic's Claude web search appears to draw on Brave's index per reporting (TechCrunch, "
+        "Mar 2025) — reported, not officially confirmed, and subject to change. Brave indexing is a "
+        "useful but not guaranteed proxy for Claude visibility; submit the sitemap to Brave + verify indexing.",
     ),
     "ai_citations_common_crawl": (
         "AI Citations",
