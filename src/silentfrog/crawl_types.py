@@ -1128,6 +1128,12 @@ class SocialPayload:
         return {"open_graph": self.open_graph.to_dict(), "twitter": self.twitter.to_dict()}
 
 
+def _evidence_source_ids(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
 @dataclass(frozen=True)
 class AiVisibilityCheck:
     area: str
@@ -1136,6 +1142,13 @@ class AiVisibilityCheck:
     details: str
     recommendation: str
     key: str = ""
+    # v2.0 H6: evidence taxonomy (additive, metadata only — never affects the
+    # GEO score). ``evidence_class`` tags how the recommendation is grounded
+    # (official standard / research / correlation / Silentfrog heuristic /
+    # Silentfrog scoring / descriptive). ``evidence_source_ids`` are stable IDs
+    # that resolve against docs/RESEARCH_CITATIONS.md. See research_evidence.py.
+    evidence_class: str = ""
+    evidence_source_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_raw(cls, value: Mapping[str, Any]) -> AiVisibilityCheck:
@@ -1146,9 +1159,11 @@ class AiVisibilityCheck:
             details=str(value.get("details", "")).strip(),
             recommendation=str(value.get("recommendation", "")).strip(),
             key=str(value.get("key", "")).strip(),
+            evidence_class=str(value.get("evidence_class", "")).strip(),
+            evidence_source_ids=_evidence_source_ids(value.get("evidence_source_ids")),
         )
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "area": self.area,
             "check": self.check,
@@ -1156,6 +1171,8 @@ class AiVisibilityCheck:
             "details": self.details,
             "recommendation": self.recommendation,
             "key": self.key,
+            "evidence_class": self.evidence_class,
+            "evidence_source_ids": list(self.evidence_source_ids),
         }
 
 

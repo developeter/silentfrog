@@ -35,6 +35,7 @@ from .integrations.semrush.types import SemrushMetrics
 from .perf_crux import CruxData
 from .perf_vitals import WebVitals, build_performance_checks
 from .render_diff import RenderDiff, build_render_diff_check
+from .research_evidence import attach_evidence
 from .seo_basics import SeoBasicsPayload, build_seo_basics_checks
 from .structure_signals import StructurePayload, build_structure_checks
 
@@ -903,7 +904,9 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         checks.extend(build_rich_results_checks(rich_results))
     if lighthouse.measured:
         checks.extend(build_lighthouse_checks(lighthouse))
-    return checks
+    # H6: stamp every check with its evidence class + source IDs at the single
+    # aggregation seam. Additive metadata only — never touches status or score.
+    return [attach_evidence(check) for check in checks]
 
 
 def _render_diff_from_raw(value: Any) -> RenderDiff | None:
