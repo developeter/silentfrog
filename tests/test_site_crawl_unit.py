@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from aiohttp import web  # type: ignore[reportMissingImports]
 
 from silentfrog import site_crawler  # type: ignore[reportMissingImports]
+from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_types import SiteCrawlConfig  # type: ignore[reportMissingImports]
-from silentfrog.transport import allow_private_network  # type: ignore[reportMissingImports]
+from silentfrog.transport import allow_private_network, open_crawl_session  # type: ignore[reportMissingImports]
 
 
 def _payload(url: str, title: str = "Example Title") -> CrawlPayload:
@@ -162,6 +165,32 @@ async def test_resolve_site_urls_uses_base_url_when_sitemap_detection_finds_noth
     urls = await site_crawler.resolve_site_urls(config, timeout=5)
 
     assert urls == ["https://example.com/"]
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_posture_wraps_discovery(monkeypatch):
+    # H7 follow-up: the crawl's TLS/SSRF opt-ins must wrap the whole
+    # orchestration, so seed / robots / sitemap discovery runs under the
+    # configured posture — not only analyse(). Spy the posture the seam would
+    # apply at the very first discovery step (_build_seeds).
+    seen: dict[str, object] = {}
+
+    async def spy_build_seeds(config, timeout):
+        async with open_crawl_session() as session:
+            seen["allow_private"] = session.connector._allow_private
+            seen["tls_verified"] = session.connector._ssl is not False
+        return []  # no seeds -> the crawl ends immediately
+
+    monkeypatch.setattr(site_crawler, "_build_seeds", spy_build_seeds)
+
+    # Secure defaults: discovery vets SSRF and verifies TLS.
+    await site_crawler.crawl_site(SiteCrawlConfig.from_text(base_url="https://example.com"))
+    assert seen == {"allow_private": False, "tls_verified": True}
+
+    # Explicit opt-ins reach discovery, not only the per-URL analyse().
+    opts = dataclasses.replace(CrawlOptions.default(), allow_insecure_tls=True, allow_private_network=True)
+    await site_crawler.crawl_site(SiteCrawlConfig.from_text(base_url="https://example.com", crawl_options=opts))
+    assert seen == {"allow_private": True, "tls_verified": False}
 
 
 @pytest.mark.asyncio

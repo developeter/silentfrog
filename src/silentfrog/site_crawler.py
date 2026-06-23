@@ -25,6 +25,7 @@ from .site_crawl_types import (
     SiteCrawlResult,
     normalize_site_url,
 )
+from .transport import allow_private_network, insecure_tls
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 _MAX_SITEMAP_DEPTH = 3
@@ -120,7 +121,30 @@ async def crawl_site(
     its ``in_progress`` rows are returned to ``pending`` and the crawl re-runs
     only its unfinished URLs (PR-9). ``cancel_event`` requests a cooperative
     stop — in-flight requests finish, claimed-but-unstarted URLs stay
-    ``in_progress`` for a later resume, and the partial run stays queryable."""
+    ``in_progress`` for a later resume, and the partial run stays queryable.
+
+    The crawl's TLS/SSRF posture (``CrawlOptions.allow_insecure_tls`` /
+    ``allow_private_network``, both off by default) wraps the *whole*
+    orchestration — seed building, robots and sitemap discovery, and every
+    page fetch — so an explicit opt-in reaches discovery, not only
+    ``analyse()``. With the defaults it is a no-op: verification on, SSRF
+    guarded."""
+    opts = config.crawl_options
+    with (
+        insecure_tls(enabled=opts.allow_insecure_tls),
+        allow_private_network(enabled=opts.allow_private_network),
+    ):
+        return await _orchestrate_crawl(config, timeout, on_event, cancel_event, store, resume_run_id)
+
+
+async def _orchestrate_crawl(
+    config: SiteCrawlConfig,
+    timeout: int,
+    on_event: ProgressCallback | None,
+    cancel_event: threading.Event | None,
+    store: CrawlStore | None,
+    resume_run_id: str | None,
+) -> SiteCrawlReport:
     spider = config.spider
     seeds = await _build_seeds(config, timeout)
     frontier = _build_frontier(config)
