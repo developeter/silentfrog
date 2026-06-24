@@ -36,9 +36,9 @@ jobs:
         run: poetry install --with dev
 
       - name: Quality gates
-        # mypy is opt-in during the gradual ramp (plan §N3b). Drop the
-        # --skip-mypy flag once the codebase is fully typed.
-        run: poetry run python tools/quality_gates.py --skip-mypy
+        # H5: mypy runs on the per-module allowlist (tools/mypy_gate.py), so
+        # the gate is on by default. The allowlist expands as modules are typed.
+        run: poetry run python tools/quality_gates.py
 
       - name: Upload coverage.xml
         if: always()

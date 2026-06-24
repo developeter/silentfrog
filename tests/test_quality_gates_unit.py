@@ -41,21 +41,23 @@ def _stub_run(monkeypatch, exit_codes: list[int]) -> list[list[str]]:
 
 
 def test_run_gates_all_pass(monkeypatch, tmp_path) -> None:
-    # 0=lock, 1=ruff check, 2=ruff format, 3=mypy, 4=pytest, 5=git rev-parse (diff-cover branch lookup), 6=diff-cover
-    captured = _stub_run(monkeypatch, [0, 0, 0, 0, 0, 0, 0])
+    # 0=lock, 1=dep-policy, 2=ruff check, 3=ruff format, 4=mypy, 5=pytest,
+    # 6=git rev-parse (diff-cover branch lookup), 7=diff-cover
+    captured = _stub_run(monkeypatch, [0, 0, 0, 0, 0, 0, 0, 0])
     # coverage.xml stub so the diff-cover step runs
     monkeypatch.setattr("tools.quality_gates._COVERAGE_XML", tmp_path / "coverage.xml")
     (tmp_path / "coverage.xml").write_text("<coverage/>", encoding="utf-8")
 
     results = run_gates(tmp_path, GateConfig())
 
-    # 5 invocable gates were called; the git rev-parse call ALSO went through
-    # the stub but it isn't a "gate" — confirm at least lock/ruff/format/mypy/pytest/diff ran.
+    # Every invocable gate ran; the git rev-parse call ALSO went through the
+    # stub but it isn't a "gate" — confirm the H5 gates are present and on.
     names = [r.name for r in results]
     assert "poetry lock-check" in names
+    assert "dependency-policy" in names
     assert "ruff check" in names
     assert "ruff format --check" in names
-    assert "mypy" in names
+    assert "mypy (allowlist)" in names  # H5 mypy gate is always on
     assert "pytest + coverage" in names
     assert "diff-cover" in names
     assert all(r.ok for r in results)
@@ -65,8 +67,8 @@ def test_run_gates_all_pass(monkeypatch, tmp_path) -> None:
 
 
 def test_run_gates_first_failure_propagates(monkeypatch, tmp_path) -> None:
-    # ruff check (2nd gate) fails.
-    _stub_run(monkeypatch, [0, 1, 0, 0, 0, 0, 0])
+    # ruff check (3rd gate, after lock + dependency-policy) fails.
+    _stub_run(monkeypatch, [0, 0, 1, 0, 0, 0, 0, 0])
     monkeypatch.setattr("tools.quality_gates._COVERAGE_XML", tmp_path / "coverage.xml")
     (tmp_path / "coverage.xml").write_text("<coverage/>", encoding="utf-8")
 
@@ -75,16 +77,6 @@ def test_run_gates_first_failure_propagates(monkeypatch, tmp_path) -> None:
     failed = [r for r in results if not r.ok]
     assert len(failed) == 1
     assert failed[0].name == "ruff check"
-
-
-def test_run_gates_skip_mypy_omits_step(monkeypatch, tmp_path) -> None:
-    _stub_run(monkeypatch, [0, 0, 0, 0, 0, 0])
-    monkeypatch.setattr("tools.quality_gates._COVERAGE_XML", tmp_path / "coverage.xml")
-    (tmp_path / "coverage.xml").write_text("<coverage/>", encoding="utf-8")
-
-    results = run_gates(tmp_path, GateConfig(skip_mypy=True))
-
-    assert all(r.name != "mypy" for r in results)
 
 
 def test_skip_diff_cover_when_compare_branch_missing(monkeypatch, tmp_path) -> None:

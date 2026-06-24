@@ -4,11 +4,12 @@ Order matches docs/geo_roadmap.md v1.1 §N3b plus the §4.5
 supply-chain check:
 
     0. poetry lock --check           (lock-file drift)
-    1. ruff check                    (lint)
-    2. ruff format --check           (format drift)
-    3. mypy src/silentfrog            (strict_optional only)
-    4. pytest --cov=src/silentfrog    (test + coverage XML)
-    5. diff-cover --fail-under=85    (per-touched-file coverage)
+    1. dependency-policy             (approved base deps + lock tracked)
+    2. ruff check                    (lint)
+    3. ruff format --check           (format drift)
+    4. mypy (allowlist)              (H5 per-module ramp, zero errors)
+    5. pytest --cov=src/silentfrog    (test + coverage XML)
+    6. diff-cover --fail-under=85    (per-touched-file coverage)
 
 Returns 0 only when every step exits 0.
 
@@ -29,6 +30,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _COVERAGE_XML = _REPO_ROOT / "coverage.xml"
 _DEFAULT_COMPARE_BRANCH = "origin/dev"
 _DEFAULT_COVERAGE_THRESHOLD = 85
+
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools import mypy_gate  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -92,11 +98,15 @@ def _ruff_format_check(cwd: Path) -> GateResult:
 
 
 def _mypy(cwd: Path) -> GateResult:
-    return _run(
-        "mypy",
-        ["poetry", "run", "mypy", "src/silentfrog"],
-        cwd,
-    )
+    # H5: per-module allowlist (tools/mypy_gate.py), not the whole package —
+    # only already-clean non-GUI domain modules, enforced at zero errors.
+    return _run("mypy (allowlist)", mypy_gate.gate_command(["poetry", "run", "mypy"]), cwd)
+
+
+def _dependency_policy(cwd: Path) -> GateResult:
+    # Deterministic supply-chain gate (tools/dependency_policy.py): approved
+    # base-dep set + poetry.lock tracked. stdlib-only, so run it directly.
+    return _run("dependency-policy", [sys.executable, "tools/dependency_policy.py"], cwd)
 
 
 def _pytest_with_coverage(cwd: Path) -> GateResult:
@@ -157,21 +167,22 @@ def _skip_diff_cover_on_first_run(cwd: Path, compare_branch: str) -> bool:
 
 @dataclass
 class GateConfig:
-    skip_mypy: bool = False
     skip_diff_cover: bool = False
     compare_branch: str = _DEFAULT_COMPARE_BRANCH
     coverage_threshold: int = _DEFAULT_COVERAGE_THRESHOLD
 
 
 def run_gates(cwd: Path, config: GateConfig) -> list[GateResult]:
+    # H5: the mypy step is the per-module allowlist gate — always on (it is
+    # fast and zero-error scoped), so there is no transitional skip flag.
     results: list[GateResult] = [
         _poetry_lock_check(cwd),
+        _dependency_policy(cwd),
         _ruff_check(cwd),
         _ruff_format_check(cwd),
+        _mypy(cwd),
+        _pytest_with_coverage(cwd),
     ]
-    if not config.skip_mypy:
-        results.append(_mypy(cwd))
-    results.append(_pytest_with_coverage(cwd))
     if config.skip_diff_cover or _skip_diff_cover_on_first_run(cwd, config.compare_branch):
         print("[gate] diff-cover: SKIPPED")
     else:
@@ -181,7 +192,6 @@ def run_gates(cwd: Path, config: GateConfig) -> list[GateResult]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--skip-mypy", action="store_true", help="skip the mypy step (transitional)")
     parser.add_argument("--skip-diff-cover", action="store_true", help="skip the per-file coverage gate")
     parser.add_argument(
         "--compare-branch",
@@ -200,7 +210,6 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     config = GateConfig(
-        skip_mypy=args.skip_mypy,
         skip_diff_cover=args.skip_diff_cover,
         compare_branch=args.compare_branch,
         coverage_threshold=args.coverage_threshold,

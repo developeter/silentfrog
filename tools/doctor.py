@@ -149,8 +149,12 @@ def _run_ruff_quick() -> None:
 
 
 def _run_quality_gates(skip_diff_cover: bool) -> None:
-    """v1.1 N3b: full mode runs the whole gate orchestrator after tests."""
-    cmd = [sys.executable, "tools/quality_gates.py", "--skip-mypy"]
+    """v1.1 N3b: full mode runs the whole gate orchestrator after tests.
+
+    H5: mypy now runs on the per-module allowlist (tools/mypy_gate.py), so the
+    transitional --skip-mypy is gone; the gate is fast and zero-error scoped.
+    """
+    cmd = [sys.executable, "tools/quality_gates.py"]
     if skip_diff_cover:
         cmd.append("--skip-diff-cover")
     _run(cmd, "Quality gates")
