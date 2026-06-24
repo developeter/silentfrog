@@ -9,6 +9,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import hashlib  # noqa: E402
+
+from minisign_fixture import manifest_bytes, public_key_text, signature_text  # noqa: E402
+
+import tools.update_silentfrog as us  # noqa: E402
+from silentfrog.update_trust import parse_public_key  # noqa: E402
+from silentfrog.updater import InstallMode, LocalRevision  # noqa: E402
 from tools.update_silentfrog import (  # noqa: E402
     _ensure_executable_launchers,
     _install_runtime_deps,
@@ -17,6 +24,91 @@ from tools.update_silentfrog import (  # noqa: E402
     _sync_site_packages,
     _venv_site_packages,
 )
+
+_PUBKEY = parse_public_key(public_key_text())
+
+
+class _CopySpy:
+    def __init__(self) -> None:
+        self.called = False
+
+    def __call__(self, *args, **kwargs):
+        self.called = True
+        return []
+
+
+def _no_swap_spy(monkeypatch) -> _CopySpy:
+    spy = _CopySpy()
+    monkeypatch.setattr(us, "copy_source_files", spy)
+    return spy
+
+
+def test_main_refuses_when_no_signing_key_is_pinned(monkeypatch, tmp_path, capsys) -> None:
+    # Shipped state with no pinned key: a user install must refuse to update
+    # (fail closed), never swap.
+    monkeypatch.setattr(us, "find_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        us, "read_local_revision", lambda _root: LocalRevision(sha="v1", mode=InstallMode.USER, repo_root=tmp_path)
+    )
+    monkeypatch.setattr(us, "pinned_public_key", lambda: None)
+    spy = _no_swap_spy(monkeypatch)
+    assert us.main(["--revision", "v2.0.0"]) == us.EXIT_UNVERIFIED
+    assert spy.called is False
+
+
+def test_fetch_verify_install_refuses_tampered_manifest(monkeypatch, tmp_path) -> None:
+    good = manifest_bytes("silentfrog.zip", "a" * 64)
+    sig = signature_text(good)
+    tampered = good.replace(b"silentfrog.zip", b"evil.zip")  # body no longer matches the signature
+    monkeypatch.setattr(us, "fetch_release_manifest", lambda *a, **k: (tampered, sig))
+    spy = _no_swap_spy(monkeypatch)
+    code = us._fetch_verify_install("v2.0.0", tmp_path / "repo", tmp_path / "work", _PUBKEY)
+    assert code == us.EXIT_UNVERIFIED
+    assert spy.called is False
+
+
+def test_fetch_verify_install_refuses_hash_mismatch(monkeypatch, tmp_path) -> None:
+    # Manifest is correctly signed but commits to a hash the downloaded archive
+    # does not have: refuse, no swap.
+    manifest = manifest_bytes("silentfrog.zip", "a" * 64)
+    sig = signature_text(manifest)
+    monkeypatch.setattr(us, "fetch_release_manifest", lambda *a, **k: (manifest, sig))
+
+    def fake_download(plan, destination, log=lambda _m: None):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"not the archive the manifest commits to")
+        return destination
+
+    monkeypatch.setattr(us, "download_archive", fake_download)
+    spy = _no_swap_spy(monkeypatch)
+    code = us._fetch_verify_install("v2.0.0", tmp_path / "repo", tmp_path / "work", _PUBKEY)
+    assert code == us.EXIT_UNVERIFIED
+    assert spy.called is False
+
+
+def test_fetch_verify_install_proceeds_only_after_verification(monkeypatch, tmp_path) -> None:
+    archive_payload = b"the genuine signed release archive"
+    digest = hashlib.sha256(archive_payload).hexdigest()
+    manifest = manifest_bytes("silentfrog.zip", digest)
+    sig = signature_text(manifest)
+    monkeypatch.setattr(us, "fetch_release_manifest", lambda *a, **k: (manifest, sig))
+
+    def fake_download(plan, destination, log=lambda _m: None):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(archive_payload)
+        return destination
+
+    monkeypatch.setattr(us, "download_archive", fake_download)
+    installed: dict[str, object] = {}
+
+    def fake_install(archive_path, repo_root, workdir, tag):
+        installed["tag"] = tag
+        return us.EXIT_OK
+
+    monkeypatch.setattr(us, "_install_verified_archive", fake_install)
+    code = us._fetch_verify_install("v2.0.0", tmp_path / "repo", tmp_path / "work", _PUBKEY)
+    assert code == us.EXIT_OK
+    assert installed["tag"] == "v2.0.0"  # install reached only after verification passed
 
 
 def _make_user_install(root: Path) -> None:

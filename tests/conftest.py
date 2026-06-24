@@ -13,6 +13,12 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+# Let test modules import shared, non-fixture helpers by bare name (e.g.
+# ``import minisign_fixture``) regardless of pytest's import mode.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
 os.environ.setdefault("QT_API", "pyside6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("SILENTFROG_DATA_DIR", tempfile.mkdtemp(prefix="silentfrog-tests-"))

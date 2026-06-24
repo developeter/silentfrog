@@ -25,6 +25,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from silentfrog.update_trust import (  # noqa: E402
+    TrustError,
+    ensure_archive_matches,
+    pinned_public_key,
+    verify_manifest,
+)
 from silentfrog.updater import (  # noqa: E402
     GITHUB_OWNER,
     GITHUB_REPO,
@@ -39,6 +45,7 @@ from tools.source_update import (  # noqa: E402
     copy_source_files,
     download_archive,
     extract_archive,
+    fetch_release_manifest,
     pyproject_changed,
     validate_archive,
 )
@@ -48,6 +55,7 @@ EXIT_USAGE_ERROR = 1
 EXIT_DEVELOPER_MODE = 2
 EXIT_DOWNLOAD_ERROR = 3
 EXIT_INSTALL_ERROR = 4
+EXIT_UNVERIFIED = 5  # signature/manifest/hash failed, or no key pinned: refuse, no swap
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,28 +66,63 @@ def main(argv: list[str] | None = None) -> int:
         print("[update] Developer install detected. Use `git pull` instead.")
         return EXIT_DEVELOPER_MODE
 
-    plan = build_update_plan(args.revision, GITHUB_OWNER, GITHUB_REPO)
-    print(f"[update] Pulling {args.revision[:7]} from {plan.archive_url}")
+    public_key = pinned_public_key()
+    if public_key is None:
+        print("[update] Refused: this build has no update-signing key pinned, so updates cannot be verified.")
+        return EXIT_UNVERIFIED
+
     with tempfile.TemporaryDirectory(prefix="silentfrog-update-") as workdir_str:
-        workdir = Path(workdir_str)
-        archive_path = workdir / "silentfrog.zip"
-        try:
-            download_archive(plan, archive_path, log=print)
-        except OSError as exc:
-            print(f"[update] download failed: {exc}")
-            return EXIT_DOWNLOAD_ERROR
-        extracted_root = extract_archive(archive_path, workdir / "extracted")
-        validate_archive(extracted_root)
-        deps_changed = pyproject_changed(repo_root, extracted_root)
-        copied = copy_source_files(extracted_root, repo_root)
-        print(f"[update] Wrote {len(copied)} files")
+        outcome = _fetch_verify_install(args.revision, repo_root, Path(workdir_str), public_key)
+    return outcome
+
+
+def _fetch_verify_install(tag: str, repo_root: Path, workdir: Path, public_key) -> int:
+    """Download the signed release for ``tag``, verify it against the pinned
+    key and the manifest hash, and only then swap the source into place. Any
+    verification failure returns ``EXIT_UNVERIFIED`` with nothing written."""
+    print(f"[update] Fetching signed release {tag}")
+    archive_path = workdir / "silentfrog.zip"
+    try:
+        manifest_bytes, signature_text = fetch_release_manifest(GITHUB_OWNER, GITHUB_REPO, tag, log=print)
+    except OSError as exc:
+        print(f"[update] download failed: {exc}")
+        return EXIT_DOWNLOAD_ERROR
+
+    try:
+        manifest = verify_manifest(manifest_bytes, signature_text, public_key)
+    except TrustError as exc:
+        print(f"[update] Refused: {exc}")
+        return EXIT_UNVERIFIED
+
+    plan = build_update_plan(tag, GITHUB_OWNER, GITHUB_REPO, manifest.archive_name)
+    try:
+        download_archive(plan, archive_path, log=print)
+    except OSError as exc:
+        print(f"[update] download failed: {exc}")
+        return EXIT_DOWNLOAD_ERROR
+
+    try:
+        ensure_archive_matches(manifest, archive_path)
+    except TrustError as exc:
+        print(f"[update] Refused: {exc}")
+        return EXIT_UNVERIFIED
+
+    return _install_verified_archive(archive_path, repo_root, workdir, tag)
+
+
+def _install_verified_archive(archive_path: Path, repo_root: Path, workdir: Path, tag: str) -> int:
+    extracted_root = extract_archive(archive_path, workdir / "extracted")
+    validate_archive(extracted_root)
+    deps_changed = pyproject_changed(repo_root, extracted_root)
+    copied = copy_source_files(extracted_root, repo_root)
+    print(f"[update] Wrote {len(copied)} files")
 
     installer_exit = _refresh_install(repo_root, deps_changed=deps_changed)
     if installer_exit != 0:
         return EXIT_INSTALL_ERROR
 
-    revision_path = write_revision_file(repo_root, args.revision)
-    print(f"[update] Recorded {args.revision[:7]} in {revision_path.name}")
+    revision_path = write_revision_file(repo_root, tag)
+    print(f"[update] Recorded {tag} in {revision_path.name}")
     return EXIT_OK
 
 
@@ -88,7 +131,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--revision",
         required=True,
-        help="Target commit sha (or tag) to fetch from GitHub.",
+        help="Target signed release tag (e.g. v2.0.0) to fetch and verify.",
     )
     return parser.parse_args(argv)
 

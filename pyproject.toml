@@ -145,6 +145,9 @@ extend-exclude = [
     "build",
     "deploy",
     ".claude/worktrees",
+    # Vendored third-party crypto reference (Ed25519, RFC 8032). Kept verbatim
+    # for auditability against upstream; not subject to our house style.
+    "src/silentfrog/_vendor",
 ]
 
 [tool.ruff.lint]
@@ -207,6 +210,7 @@ exclude = [
     "^deploy/",
     "^\\.venv/",
     "^\\.claude/worktrees/",
+    "^src/silentfrog/_vendor/",
 ]
 
 [tool.coverage.run]
@@ -215,6 +219,10 @@ branch = true
 omit = [
     "src/silentfrog/__main__.py",
     "src/silentfrog/gui.py",  # GUI bootstrapping: covered by manual smoke
+    # Vendored Ed25519 reference: validated by RFC 8032 known-answer vectors
+    # in tests/test_vendor_ed25519.py rather than line coverage of its
+    # arithmetic helpers.
+    "src/silentfrog/_vendor/*",
 ]
 
 [tool.coverage.report]

@@ -27,7 +27,6 @@ _LOGGER = logging.getLogger(__name__)
 
 GITHUB_OWNER = "developeter"
 GITHUB_REPO = "silentfrog"
-UPDATE_BRANCH = "dev"
 
 REVISION_FILE_NAME = ".silentfrog_revision"
 
@@ -37,8 +36,12 @@ _GITHUB_HEADERS = {
 }
 
 
-def commit_api_url(branch: str = UPDATE_BRANCH) -> str:
-    return f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/{branch}"
+def latest_release_api_url() -> str:
+    """The GitHub API URL for the repo's latest published Release.
+
+    H7/PR-18: updates target the latest *signed* Release (derived from a
+    ``v*`` tag), never the mutable, unsigned ``dev`` branch."""
+    return f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
 
 def default_ssl_context() -> ssl.SSLContext:
@@ -152,50 +155,48 @@ def _new_session() -> aiohttp.ClientSession:
 
 
 async def fetch_remote_revision(
-    branch: str = UPDATE_BRANCH,
     timeout_seconds: int = 8,
     session: Optional[aiohttp.ClientSession] = None,
 ) -> Optional[RemoteRevision]:
-    """Fetch the latest commit on ``branch`` from GitHub.
+    """Fetch the latest signed Release (tag) from GitHub.
 
-    Returns ``None`` on any network or parse error so the caller can map
-    that into ``UpdateStatus.OFFLINE`` without exception handling
-    leaking into the GUI layer.
+    Returns ``None`` on any network/parse error or when the repo has no
+    published release yet, so the caller maps that to
+    ``UpdateStatus.OFFLINE``/``UNKNOWN`` without exception handling leaking
+    into the GUI layer.
     """
-    url = commit_api_url(branch)
+    url = latest_release_api_url()
     own_session = session is None
     client = session or _new_session()
     try:
         async with client.get(url, timeout=ClientTimeout(total=timeout_seconds)) as response:
             if response.status != 200:
-                _LOGGER.warning("GitHub commit API returned status %s for %s", response.status, url)
+                _LOGGER.warning("GitHub release API returned status %s for %s", response.status, url)
                 return None
             payload = await response.text()
     except Exception as exc:
-        _LOGGER.warning("GitHub commit API unreachable for %s: %s", url, exc)
+        _LOGGER.warning("GitHub release API unreachable for %s: %s", url, exc)
         return None
     finally:
         if own_session:
             await client.close()
-    return _parse_commit_payload(payload)
+    return _parse_release_payload(payload)
 
 
-def _parse_commit_payload(payload: str) -> Optional[RemoteRevision]:
+def _parse_release_payload(payload: str) -> Optional[RemoteRevision]:
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
         return None
-    sha = data.get("sha")
-    commit = data.get("commit") or {}
-    author = commit.get("author") or {}
-    iso_date = author.get("date")
-    message = commit.get("message") or ""
-    if not isinstance(sha, str) or not isinstance(iso_date, str):
+    tag = data.get("tag_name")
+    published = data.get("published_at") or data.get("created_at")
+    name = data.get("name") or tag or ""
+    if not isinstance(tag, str) or not isinstance(published, str):
         return None
     return RemoteRevision(
-        sha=sha,
-        committed_at=_parse_iso8601_utc(iso_date),
-        message=str(message),
+        sha=tag,
+        committed_at=_parse_iso8601_utc(published),
+        message=str(name),
     )
 
 

@@ -40,13 +40,13 @@ def test_download_archive_passes_certifi_ssl_context(monkeypatch, tmp_path: Path
         return _FakeResponse()
 
     monkeypatch.setattr("tools.source_update.urlopen", fake_urlopen)
-    plan = build_update_plan("abc1234", "developeter", "silentfrog")
+    plan = build_update_plan("v2.0.0", "developeter", "silentfrog", "silentfrog-2.0.0.zip")
     download_archive(plan, tmp_path / "archive.zip")
     import ssl
 
     assert isinstance(captured["context"], ssl.SSLContext)
     assert captured["context"].cert_store_stats()["x509_ca"] > 0
-    assert captured["url"].endswith("/abc1234.zip")
+    assert captured["url"].endswith("/releases/download/v2.0.0/silentfrog-2.0.0.zip")
     assert captured["timeout"] == 60
 
 
@@ -71,10 +71,14 @@ def _make_fake_silentfrog_tree(root: Path, *, version: str = "1.0.0") -> None:
     (root / "README.md").write_text("old readme\n", encoding="utf-8")
 
 
-def test_build_update_plan_targets_developeter_archive() -> None:
-    plan = build_update_plan("abc1234", "developeter", "silentfrog")
-    assert plan.revision == "abc1234"
-    assert plan.archive_url == ("https://github.com/developeter/silentfrog/archive/abc1234.zip")
+def test_build_update_plan_targets_signed_release_asset() -> None:
+    # H7/PR-18: the source archive is a named asset on the signed Release, not
+    # a mutable branch/commit archive.
+    plan = build_update_plan("v2.0.0", "developeter", "silentfrog", "silentfrog-2.0.0.zip")
+    assert plan.revision == "v2.0.0"
+    assert plan.archive_url == (
+        "https://github.com/developeter/silentfrog/releases/download/v2.0.0/silentfrog-2.0.0.zip"
+    )
 
 
 def test_extract_archive_returns_single_inner_directory(tmp_path: Path) -> None:

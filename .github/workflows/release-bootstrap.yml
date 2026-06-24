@@ -6,6 +6,19 @@ name: Release Bootstrap
 # platform. The workflow is intentionally lightweight: no build step, no
 # matrix; the bootstrap scripts are plain text already committed in
 # `bootstrap/`.
+#
+# H7/PR-18 — signed-update assets (added by the maintainer, NOT this
+# workflow): the in-app updater (tools/update_silentfrog.py) targets the
+# latest signed Release and refuses to install unless the release carries a
+# minisign-signed manifest verified against the public key pinned in
+# src/silentfrog/update_trust.py. The signing key never touches CI: the
+# maintainer signs the manifest OFFLINE and attaches three more assets to
+# this (draft) release before publishing it —
+#   * <source-archive>.zip   (the exact archive the manifest hashes)
+#   * manifest.json          (format 1: tag + source/installer SHA-256)
+#   * manifest.json.minisig  (minisign signature of manifest.json)
+# Until a key is pinned and a release is signed, the updater fails closed
+# (refuses every update). See the release procedure in docs / the PR notes.
 
 on:
   workflow_dispatch:

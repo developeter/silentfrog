@@ -125,6 +125,10 @@ def collect_functions(paths: Iterable[Path]) -> list[FunctionShape]:
     functions: list[FunctionShape] = []
     for root in paths:
         for path in sorted(root.rglob("*.py")):
+            # Vendored third-party code (e.g. the Ed25519 reference) is kept
+            # verbatim for auditability and is exempt from house code-shape.
+            if "_vendor" in path.parts:
+                continue
             tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
             analyzer = _FunctionAnalyzer(path)
             analyzer.visit(tree)

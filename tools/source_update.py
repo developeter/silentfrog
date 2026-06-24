@@ -26,6 +26,13 @@ import certifi
 # on every supported Python install.
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
+# Release assets live at a predictable URL, so the apply path never has to
+# trust the GitHub API's asset listing — it fetches the signed manifest and
+# the archive named *inside* that manifest directly. H7/PR-18.
+_RELEASE_ASSET_URL = "https://github.com/{owner}/{repo}/releases/download/{tag}/{name}"
+MANIFEST_NAME = "manifest.json"
+MANIFEST_SIGNATURE_NAME = "manifest.json.minisig"
+
 
 # File and directory names at the install root that ``copy_source_files``
 # must never overwrite. ``.silentfrog_revision`` is also preserved here
@@ -45,14 +52,40 @@ _PRESERVED_NAMES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class UpdatePlan:
-    revision: str
+    revision: str  # the release tag (e.g. "v2.0.0")
     archive_url: str
 
 
-def build_update_plan(revision: str, owner: str, repo: str) -> UpdatePlan:
-    """Compose the archive URL for a given GitHub commit sha or tag."""
-    url = f"https://github.com/{owner}/{repo}/archive/{revision}.zip"
-    return UpdatePlan(revision=revision, archive_url=url)
+def release_asset_url(owner: str, repo: str, tag: str, name: str) -> str:
+    """The stable download URL of a named asset on a tag's GitHub Release."""
+    return _RELEASE_ASSET_URL.format(owner=owner, repo=repo, tag=tag, name=name)
+
+
+def build_update_plan(tag: str, owner: str, repo: str, archive_name: str) -> UpdatePlan:
+    """Compose the download URL for the signed release's source archive.
+
+    ``archive_name`` is read from the *verified* manifest, never guessed, so a
+    crawl can only ever fetch the archive the signature commits to."""
+    return UpdatePlan(revision=tag, archive_url=release_asset_url(owner, repo, tag, archive_name))
+
+
+def fetch_release_manifest(
+    owner: str,
+    repo: str,
+    tag: str,
+    log: Callable[[str], None] = lambda _msg: None,
+) -> tuple[bytes, str]:
+    """Download the signed manifest and its detached minisign signature."""
+    manifest_url = release_asset_url(owner, repo, tag, MANIFEST_NAME)
+    signature_url = release_asset_url(owner, repo, tag, MANIFEST_SIGNATURE_NAME)
+    log(f"[update] fetching signed manifest {manifest_url}")
+    return _fetch_bytes(manifest_url), _fetch_bytes(signature_url).decode("utf-8")
+
+
+def _fetch_bytes(url: str) -> bytes:
+    request = Request(url, headers={"Accept": "application/octet-stream"})
+    with urlopen(request, timeout=60, context=_SSL_CONTEXT) as response:
+        return response.read()
 
 
 def download_archive(

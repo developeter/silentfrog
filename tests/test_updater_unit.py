@@ -10,15 +10,14 @@ import pytest
 
 from silentfrog.updater import (  # type: ignore[reportMissingImports]
     REVISION_FILE_NAME,
-    UPDATE_BRANCH,
     InstallMode,
     LocalRevision,
     RemoteRevision,
     UpdateStatus,
-    commit_api_url,
     compare,
     default_ssl_context,
     fetch_remote_revision,
+    latest_release_api_url,
     read_local_revision,
     write_revision_file,
 )
@@ -130,20 +129,19 @@ def test_compare_status_matrix(
     assert compare(local, remote_rev) is expected
 
 
-def test_commit_api_url_is_pinned_to_developeter_repo() -> None:
-    url = commit_api_url()
-    assert url == ("https://api.github.com/repos/developeter/silentfrog/commits/" + UPDATE_BRANCH)
+def test_latest_release_api_url_is_pinned_to_developeter_repo() -> None:
+    # H7/PR-18: the updater checks the signed Release, not the dev branch.
+    url = latest_release_api_url()
+    assert url == "https://api.github.com/repos/developeter/silentfrog/releases/latest"
 
 
 @pytest.mark.asyncio
-async def test_fetch_remote_revision_parses_github_payload(monkeypatch) -> None:
+async def test_fetch_remote_revision_parses_release_payload(monkeypatch) -> None:
     payload = json.dumps(
         {
-            "sha": "f" * 40,
-            "commit": {
-                "author": {"date": "2026-05-19T08:15:30Z"},
-                "message": "Test commit\n\nbody",
-            },
+            "tag_name": "v2.0.0",
+            "name": "Silentfrog 2.0.0",
+            "published_at": "2026-05-19T08:15:30Z",
         }
     )
 
@@ -165,9 +163,9 @@ async def test_fetch_remote_revision_parses_github_payload(monkeypatch) -> None:
 
     remote = await fetch_remote_revision(session=FakeSession())  # type: ignore[arg-type]
     assert remote is not None
-    assert remote.sha == "f" * 40
+    assert remote.sha == "v2.0.0"  # the signed tag is the target revision
     assert remote.committed_at.year == 2026
-    assert remote.message.startswith("Test commit")
+    assert remote.message == "Silentfrog 2.0.0"
 
 
 @pytest.mark.asyncio
