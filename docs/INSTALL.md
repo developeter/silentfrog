@@ -26,7 +26,10 @@ and drops a Desktop launcher.
 
 After the first install, updates happen from inside the app via
 **Help → Check for Updates…** — no need to download bootstrap files
-again.
+again. In-app updates install only a minisign-signed GitHub Release
+(verified against a pinned key, fail-closed). The first-time bootstrap
+download itself is HTTPS-only and not yet signature-verified — a known
+gap noted in [`SECURITY.md`](../SECURITY.md).
 
 ### macOS (Apple Silicon or Intel)
 

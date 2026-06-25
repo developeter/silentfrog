@@ -25,6 +25,15 @@ Both scripts perform the same five steps:
 A previous install is upgraded in place: the `.venv` is preserved when
 possible, so a repeat run is fast.
 
+## Security note
+
+These bootstrap scripts download the latest `dev` source archive over
+HTTPS and are **not yet minisign signature-verified** — this is a known
+later-scope gap (see [`SECURITY.md`](../SECURITY.md)). Signature
+verification currently covers **in-app updates** only: after install,
+**Help → Check for Updates…** installs a minisign-signed GitHub Release
+verified against the pinned public key and fails closed otherwise.
+
 ## How to run
 
 ### Windows

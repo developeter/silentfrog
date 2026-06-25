@@ -67,19 +67,23 @@ Logs land at `~/Library/Logs/Silentfrog-bootstrap.log`.
 
 ### Updating
 
-Open Silentfrog and go to **Help → Check for Updates…**. If a new
-commit is available on `dev`, you'll see "Update available" with an
-**Apply and restart** button. The whole update takes 10–30 seconds —
-no recompile, no download of new dependencies unless `pyproject.toml`
-itself changed.
+Open Silentfrog and go to **Help → Check for Updates…**. The in-app
+updater installs only a **signed GitHub Release**: it downloads that
+release's `manifest.json` and `manifest.json.minisig`, verifies the
+signature against the minisign public key pinned in
+`src/silentfrog/update_trust.py`, checks the source archive's SHA-256
+against the signed manifest, and only then offers **Apply and restart**.
+Verification **fails closed** — a missing, unsigned, or tampered release
+is refused and nothing is swapped. Updates target signed release tags,
+never an unsigned `dev` commit. If a signed release cannot be retrieved,
+no update is offered.
 
 Developer clones (machines with a `.git` directory) see a "Use
-`git pull` instead" message in that dialog — the in-app updater never
-touches a working tree under git control.
+`git pull` instead" message — the in-app updater never touches a working
+tree under git control.
 
-For maintainers: see `bootstrap/README.md` for the bootstrap design and
-`tools/update_silentfrog.py` for the executor that the Apply button
-drives.
+For maintainers: see *6. Releasing* below for the signing flow, and
+`tools/update_silentfrog.py` for the executor the Apply button drives.
 
 ---
 
@@ -230,11 +234,23 @@ The project metadata allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the 
 
 ## Support & project status
 
-- Silentfrog is Open source and currently developed by a single maintainer using GitHub + Codex-style tooling; there is **no commercial or priority support**.
-- Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs, feature requests, or security reports. Everything is tracked publicly.
+- Silentfrog is Open source and currently developed by a single maintainer; there is **no commercial or priority support**, no response-time SLA, and no bug-bounty program.
+- Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs and feature requests (tracked publicly).
+- **Security issues go through private reporting, not public issues** — see [`SECURITY.md`](SECURITY.md).
 - Code is written from scratch for this project; if you suspect unintentional reuse, open an issue and it will be addressed.
-- The `dev` branch reflects ongoing work, while `main` only contains tagged releases.
+- `feature/v2.0` carries the in-progress v2.0 hardening; `dev` holds the shipped v1.1 line. No tagged releases are published yet.
 - The runtime migration targets **QtPy + PySide6**. `PyQt5` remains available only as an optional fallback backend while the transition stabilizes.
+
+## Security & privacy
+
+Silentfrog runs locally and crawls URLs you provide. The v2.0 hardening work set these defaults:
+
+- **TLS verification is on by default** (certifi CA bundle, OpenSSL security level ≥ 2). Skipping certificate checks is an explicit, off-by-default per-crawl opt-in for trusted self-signed / intranet hosts.
+- **SSRF protection is on by default**: crawled addresses that resolve to loopback, private, link-local, or reserved ranges are refused, the connection is pinned to the vetted IP, and redirects are re-validated. Reaching private/intranet hosts is an explicit, off-by-default opt-in.
+- **Signed updates** — the in-app updater verifies a minisign-signed release manifest against a pinned key (see *Updating*).
+- **Known limitation:** the first-time bootstrap installers download source over HTTPS but are **not yet signature-verified**; signature verification currently covers in-app updates only (see `bootstrap/README.md`).
+
+Integrations (Google, Semrush, AI providers) are off by default and never run on a stock audit. Full policy: [`SECURITY.md`](SECURITY.md).
 
 ## Exporting reports
 
@@ -304,9 +320,19 @@ Defaults are intentionally conservative:
 - speed: **Gentle crawl**
 - per-host concurrency: **2**
 - robots crawl-delay: respected when available
-- recursive link discovery: **off** in v1
+- recursive link discovery: **off** by default
 
 Leaving the sitemap field empty lets Silentfrog auto-detect sitemaps from the base URL. If no sitemap yields URLs, Silentfrog falls back to auditing the base URL only.
+
+#### Site Crawl hardening (v2.0)
+
+Recent v2.0 work hardened large-site crawling:
+
+- **Storage:** production Site Crawls are SQLite-backed; results stream from the store rather than being held in RAM.
+- **Audit profiles:** a **Lightweight / Standard / Deep** selector gates per-page *network* cost (extra HTTP probes, rendering, integrations) — local HTML parsing always runs. Site crawls default to **Standard**, single-page audits use **Deep**, and very large URL lists auto-suggest **Lightweight**.
+- **Resume:** a crawl that is cancelled or interrupted can resume and re-run only the unfinished URLs (the SQLite frontier tracks per-URL state).
+- **Results table:** sorting, filtering, and paging run in SQL against the store, so the GUI stays responsive on large runs.
+- **Scale:** memory is measured against a synthetic gate up to **100k URLs**. **~1M-URL crawling is a future, post-gate goal — it is not a verified or supported production scale yet.**
 
 The setup form and results table are separate screens. After **Start crawl**, the setup form is hidden and the results screen shows the discovered URL count, filters, table, export action, and crawl progress.
 
@@ -534,13 +560,18 @@ silentfrog/
 
 ## 6. Releasing
 
+The in-app updater only trusts a **signed** GitHub Release. The signing key is held offline by the maintainer and never enters CI or the repo; only the matching **public** key is pinned (`src/silentfrog/update_trust.py`).
+
 | Step | Command / action |
 | --- | --- |
 | Tag the release | `git tag v<version> && git push --tags` |
-| Bootstrap files attached to Release | `.github/workflows/release-bootstrap.yml` runs on tag push and attaches `Get-Silentfrog.{ps1,bat,command}` as draft assets. |
+| CI attaches bootstrap files | `.github/workflows/release-bootstrap.yml` runs on the tag and attaches `Get-Silentfrog.{ps1,bat,command}` to a **draft** Release. |
+| Sign the manifest (offline) | Build `manifest.json` (release tag + source/installer SHA-256) and sign it with the minisign private key, producing `manifest.json.minisig`. The private key never touches CI. |
+| Attach signed assets | Add the source archive, `manifest.json`, and `manifest.json.minisig` to the draft Release. |
+| Publish | Publish the Release. The in-app updater verifies it against the pinned key and offers the update. |
 | End-user gets updates after install | **Help → Check for Updates…** inside Silentfrog. |
 
-The Nuitka packaging path has been retired; see `experimental/packaging/README.md` for the rationale.
+Until a release is signed and published, the updater fails closed (offers no update). The Nuitka packaging path has been retired; see `experimental/packaging/README.md` for the rationale.
 
 ---
 

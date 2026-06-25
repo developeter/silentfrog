@@ -1,6 +1,6 @@
 # Silentfrog Handoff
 
-Last updated: 2026-06-15
+Last updated: 2026-06-25
 
 ## Working Rules
 
@@ -34,8 +34,10 @@ Last updated: 2026-06-15
 
 ## v2.0 State (source of truth: `.claude/plans/` active plan + `docs/v2_beat_screaming_frog_roadmap.md`)
 
-v2.0 targets ~1M-URL whole-site crawling + parity-plus vs Screaming
-Frog/Sitebulb. Milestone status:
+v2.0 targets large-scale whole-site crawling + parity-plus vs Screaming
+Frog/Sitebulb. Memory is verified against a synthetic 100k-URL gate;
+~1M is a post-gate follow-up, not a supported production scale yet.
+Milestone status:
 
 - **Shipped (V1–V17, minus the dropped ones):** V1 fetcher strategy, V2
   streaming SQLite store, V3 hybrid spider crawl, V4 render pool, V5 LLM
@@ -56,6 +58,33 @@ Frog/Sitebulb. Milestone status:
   every heavy/external dep behind an optional extra (zero new base deps —
   V14 reuses base aiohttp, V17's `[semrush]` extra reuses the `[google]`
   keyring pin).
+
+### Hardening gate (H0–H7) — shipped on `feature/v2.0`
+
+The H0–H7 hardening gate precedes V19 and is now landed:
+
+- **H0–H1:** lossless `CrawlPayload` round-trip (`requested_url`/`final_url`
+  + field registry); `CrawlRunRef` + run-bound `CrawlRunRepository`
+  (SQLite for production, in-memory for tests). Production Site Crawls are
+  always SQLite-backed.
+- **H2:** bounded-memory streaming + SQL-backed paging/sort/filter in the
+  results model; synthetic perf harness with a committed baseline, ±15%
+  RSS/throughput gates and a **100k** peak-RSS ceiling
+  (`tools/perf_harness.py`, `tools/perf_baseline.json`). **1M is a
+  post-gate follow-up (disk frontier + Bloom), not yet supported.**
+- **H3:** exact SQLite frontier (`UNIQUE(run_id, normalized_url)`, atomic
+  admission, `in_progress→pending` resume), persisted `discovered_from`
+  edges, unified robots engine, cooperative cancellation.
+- **H4:** `AuditProfile` (LIGHTWEIGHT/STANDARD/DEEP) gating network/render/
+  integrations only; per-origin discovery; single-page = DEEP.
+- **H5:** source-first coverage, single test run, per-module mypy allowlist
+  (`tools/mypy_gate.py`) + dependency-policy gate (`tools/dependency_policy.py`).
+- **H6:** evidence taxonomy + `docs/RESEARCH_CITATIONS.md`; unsourced
+  effect sizes removed; heuristic thresholds labelled.
+- **H7:** TLS verify + SECLEVEL≥2 and SSRF guard on by default (per-crawl
+  insecure/private opt-ins, off by default); minisign-signed updater with
+  a pinned key (fail-closed); `SECURITY.md` private disclosure via GitHub
+  PVR. Known gap: the bootstrap installer is not yet signature-verified.
 
 ### v2.0 build/test quirk on this Windows box
 
@@ -135,8 +164,11 @@ Not yet implemented:
 End-user installs go through the bootstrap scripts in `bootstrap/`,
 which detect / install Python and run the source installer. Updates
 happen from inside the app via **Help → Check for Updates…**, which
-downloads the latest commit on `dev` and swaps source files in place.
-The Nuitka-based packaged path has been archived under
+(since H7/PR-18) installs only a **minisign-signed GitHub Release**: it
+verifies the release `manifest.json` against the public key pinned in
+`src/silentfrog/update_trust.py`, checks the source archive SHA-256, and
+fails closed otherwise. It targets signed release tags, not `dev`. The
+Nuitka-based packaged path has been archived under
 `experimental/packaging/`; see that directory's `README.md` for why.
 
 Three install / update layers, by audience:
@@ -149,19 +181,23 @@ Three install / update layers, by audience:
      if missing → fetch latest commit on `dev` → extract to
      `%LOCALAPPDATA%\Silentfrog\app` (Win) or `~/Silentfrog/app`
      (macOS) → run `install_silentfrog.py --revision <sha>`.
+   - **Known later-scope gap:** this first-install path is HTTPS-only and
+     fetches the unsigned `dev` source — it is **not** minisign-verified
+     (only the in-app updater below is). Tracked in `SECURITY.md`.
    - Logs to platform-appropriate location, see `bootstrap/README.md`.
 
 2. **In-app updater (everyone after install)**
    - `Help → Check for Updates…` (added by `src/silentfrog/gui.py`).
    - Dialog defined in `src/silentfrog/update_gui.py`.
    - Domain logic in `src/silentfrog/updater.py` (typed dataclasses,
-     `aiohttp` for the GitHub commits API, no Qt imports).
-   - Apply button launches `tools/update_silentfrog.py --revision <sha>`
-     via `QProcess`, then restarts the app via
-     `QProcess.startDetached(sys.executable, sys.argv)`.
-   - Dev clones (`.git` directory present) are detected and routed to
-     a "use `git pull` instead" message — the in-app updater never
-     touches a working tree under git control.
+     targets the latest signed GitHub **Release** tag, no Qt imports).
+   - Trust: `src/silentfrog/update_trust.py` verifies the release
+     `manifest.json` + `manifest.json.minisig` against the pinned minisign
+     public key and checks the archive SHA-256 — fail-closed.
+   - Apply launches `tools/update_silentfrog.py` via `QProcess`, then
+     restarts the app via `QProcess.startDetached(sys.executable, sys.argv)`.
+   - Dev clones (`.git` directory present) are routed to a "use `git pull`
+     instead" message — the updater never touches a git working tree.
 
 3. **Source installer (developers + bootstrap callee)**
    - `install_silentfrog.py` → `tools/source_install.py::main()`.
@@ -231,6 +267,13 @@ silent installer entirely, and goes straight to the source download.
 Expect the install to complete in 15-30 seconds total.
 
 ### Smoke-test the in-app updater
+
+> **Note (H7/PR-18):** the updater now installs only minisign-signed
+> Releases (verified against the pinned key, fail-closed), not `dev`
+> commits. The dated walkthrough below predates that change; the
+> `.silentfrog_revision` / `dev`-sha steps describe the old model and a
+> realistic test now needs a signed Release. The dev-clone path (use
+> `git pull`) is unchanged.
 
 On a user-mode install (no `.git`):
 
@@ -453,11 +496,13 @@ as a separate task.
 - `tools/source_uninstall.py`
   - Cross-platform uninstaller. `--purge` flag for local crawl history.
 - `src/silentfrog/updater.py`
-  - Update-check domain logic: typed dataclasses, dev-vs-user mode detection, GitHub commits API client. Qt-free, fully unit-testable.
+  - Update-check domain logic: typed dataclasses, dev-vs-user mode detection, targets the latest signed Release tag (not `dev`). Qt-free, fully unit-testable.
+- `src/silentfrog/update_trust.py`
+  - Vendored minisign/ed25519 verifier + pinned public key. Verifies the signed release manifest and archive SHA-256; fails closed when the key is missing or a signature/hash check fails.
 - `src/silentfrog/update_gui.py`
   - `AboutDialog` and `UpdateDialog` opened from the Help menu in `HomeWindow`. `UpdateDialog` runs the check on a `QThread`, renders one of five states, and drives the Apply-and-restart subprocess.
 - `tools/update_silentfrog.py`
-  - CLI executor invoked by the GUI Apply button. Downloads the target sha, swaps source files (preserving `.venv`, `.git`, `.env*`, `secrets.local.json`), refreshes pip when `pyproject.toml` changed, updates `.silentfrog_revision`.
+  - CLI executor invoked by the GUI Apply button. Downloads the signed release's verified source archive, swaps source files (preserving `.venv`, `.git`, `.env*`, `secrets.local.json`), refreshes pip when `pyproject.toml` changed, updates `.silentfrog_revision`.
 - `tools/source_update.py`
   - Pure-Python file-level helpers used by `update_silentfrog.py`. Separated so the orchestration script reads as prose and the copy/extract logic can be unit-tested without subprocesses.
 - `bootstrap/Get-Silentfrog.{ps1,bat,command}`
@@ -489,7 +534,15 @@ Site Crawl currently supports:
 - cached per-page detail dialogs
 - image analysis from the per-page detail dialog
 
-Site Crawl v1 intentionally does not recursively follow all links.
+v2.0 hardening (see *Hardening gate* above) added on top of this:
+
+- production runs are SQLite-backed (`CrawlRunRef` + run-bound repository);
+- an `AuditProfile` selector (LIGHTWEIGHT/STANDARD/DEEP) gating per-page network cost;
+- a resumable SQLite frontier (`in_progress→pending` on resume) with persisted `discovered_from` edges;
+- SQL-backed paging/sort/filter for the results table;
+- a synthetic memory gate verified to **100k URLs** (1M remains a post-gate goal).
+
+The conservative URL cap and gentle defaults still apply; Site Crawl does not aggressively follow every link by default.
 
 ## Local History Browser
 
