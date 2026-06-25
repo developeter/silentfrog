@@ -19,6 +19,7 @@ from .crawl_options import CrawlOptions
 from .crawl_types import CrawlPayload
 from .exporters import export_page_analysis, export_page_for_llm, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
+from .tab_buckets import RECAP_SOURCE_TABS, TabEntry, build_bucketed_tabs
 from .tabs import (
     AiVisibilityTab,
     BotMatrixTab,
@@ -131,23 +132,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
-
-_RECAP_SOURCE_TABS = {
-    "Meta": "Meta tag",
-    "Headers": "Header H1-H6",
-    "Images": "Images",
-    "Links": "Link",
-    "Redirect": "Redirect",
-    "Canonical": "Canonical",
-    "Indexability": "Indexability",
-    "Robots": "Robots",
-    "Hreflang": "Hreflang",
-    "Structured data": "Structured data",
-    "Structured eligibility": "Structured data",
-    "Content quality": "Content quality",
-    "AI Visibility": "AI Visibility",
-    "Performance": "Performance",
-}
 
 
 class WebpageSeoWindow(QtWidgets.QWidget):
@@ -270,43 +254,49 @@ class WebpageSeoWindow(QtWidgets.QWidget):
     def _populate_tabs(self) -> None:
         self.recap_tab = AuditRecapWidget("Page recap")
         self.recap_tab.issueActivated.connect(self._focus_recap_issue)
-        self.tabs.addTab(self.recap_tab, "Recap")
         self.meta_tab = MetaTab()
-        self.tabs.addTab(self.meta_tab, "Meta tag")
         self.headers_tab = HeadersTab()
-        self.tabs.addTab(self.headers_tab, "Header H1-H6")
         self.images_tab = ImagesTab()
         self.social_tab = SocialTab()
-        self.tabs.addTab(self.images_tab, "Images")
-        self.tabs.addTab(self.social_tab, "Social")
         self.links_tab = LinksTab()
-        self.tabs.addTab(self.links_tab, "Link")
         self.redirect_tab = RedirectTab()
-        self.tabs.addTab(self.redirect_tab, "Redirect")
         self.canonical_tab = CanonicalTab()
-        self.tabs.addTab(self.canonical_tab, "Canonical")
         self.indexability_tab = IndexabilityTab()
-        self.tabs.addTab(self.indexability_tab, "Indexability")
         self.robots_tab = RobotsTab()
-        self.tabs.addTab(self.robots_tab, "Robots")
         self.hreflang_tab = HreflangTab()
-        self.tabs.addTab(self.hreflang_tab, "Hreflang")
         self.schema_tab = SchemaTab()
-        self.tabs.addTab(self.schema_tab, "Structured data")
         self.content_quality_tab = ContentQualityTab()
-        self.tabs.addTab(self.content_quality_tab, "Content quality")
         self.keywords_tab = KeywordsTab()
-        self.tabs.addTab(self.keywords_tab, "Keywords")
         # v1.1 N5a-fix: AI crawl tab dropped; Bot Matrix is the sole
         # per-bot view (heatmap + drill-down preserves all 7 columns).
         self.bot_matrix_tab = BotMatrixTab()
         self.ai_visibility_tab = AiVisibilityTab()
         self.performance_tab = PerformanceTab()
-        self.tabs.addTab(self.bot_matrix_tab, "Bot Matrix")
-        self.tabs.addTab(self.ai_visibility_tab, "AI Visibility")
-        self.tabs.addTab(self.performance_tab, "Performance")
         self.serp_tab = SerpTab()
-        self.tabs.addTab(self.serp_tab, "SERP")
+        # v2.0 V19-A1: the flat tabs are regrouped into 5 user-goal buckets
+        # (+ a top-level Recap/Overview). The tab instances and their
+        # .update()/signal wiring are unchanged; only the nesting changes.
+        entries = (
+            TabEntry("Recap", self.recap_tab),
+            TabEntry("Meta tag", self.meta_tab),
+            TabEntry("Header H1-H6", self.headers_tab),
+            TabEntry("Images", self.images_tab),
+            TabEntry("Social", self.social_tab),
+            TabEntry("Link", self.links_tab),
+            TabEntry("Redirect", self.redirect_tab),
+            TabEntry("Canonical", self.canonical_tab),
+            TabEntry("Indexability", self.indexability_tab),
+            TabEntry("Robots", self.robots_tab),
+            TabEntry("Hreflang", self.hreflang_tab),
+            TabEntry("Structured data", self.schema_tab),
+            TabEntry("Content quality", self.content_quality_tab),
+            TabEntry("Keywords", self.keywords_tab),
+            TabEntry("Bot Matrix", self.bot_matrix_tab),
+            TabEntry("AI Visibility", self.ai_visibility_tab),
+            TabEntry("Performance", self.performance_tab),
+            TabEntry("SERP", self.serp_tab),
+        )
+        self._bucketed = build_bucketed_tabs(self.tabs, entries)
 
     def _build_controls_row(self) -> QtWidgets.QHBoxLayout:
         controls = QtWidgets.QHBoxLayout()
@@ -763,18 +753,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         )
 
     def _focus_recap_issue(self, issue: AuditIssue) -> None:
-        label = _RECAP_SOURCE_TABS.get(issue.source)
-        if not label:
-            return
-        index = self._tab_index(label)
-        if index >= 0:
-            self.tabs.setCurrentIndex(index)
-
-    def _tab_index(self, label: str) -> int:
-        for index in range(self.tabs.count()):
-            if self.tabs.tabText(index) == label:
-                return index
-        return -1
+        label = RECAP_SOURCE_TABS.get(issue.source)
+        if label:
+            self._bucketed.focus(label)
 
     def _update_intro_colors(self) -> None:
         if not hasattr(self, "_intro_title"):

@@ -548,16 +548,18 @@ TABLE_TAB_CASES: tuple[
 )
 
 
-def test_seo_window_exposes_expected_tabs(qtbot):
+def test_seo_window_groups_tabs_into_buckets(qtbot):
     win = WebpageSeoWindow()
     qtbot.addWidget(win)
     win.show()
 
-    # v1.1 N5a-fix: AI crawl tab dropped; Bot Matrix takes its slot.
-    assert win.tabs.count() == 18
-    labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
-    assert labels == [
-        "Recap",
+    # v2.0 V19-A1: the flat tab strip is regrouped into a top-level Recap
+    # (Overview) plus 5 user-goal buckets, each an inner QTabWidget.
+    outer_labels = [win.tabs.tabText(index) for index in range(win.tabs.count())]
+    assert outer_labels == ["Recap", "Indexability", "Content", "Speed", "Trust", "AI/GEO"]
+
+    # Every original leaf tab must remain reachable under exactly one bucket.
+    expected_leaves = [
         "Meta tag",
         "Header H1-H6",
         "Images",
@@ -576,6 +578,13 @@ def test_seo_window_exposes_expected_tabs(qtbot):
         "Performance",
         "SERP",
     ]
+    leaves = [
+        win.tabs.widget(i).tabText(j) for i in range(1, win.tabs.count()) for j in range(win.tabs.widget(i).count())
+    ]
+    assert sorted(leaves) == sorted(expected_leaves)
+    for label in expected_leaves:
+        assert win._bucketed.contains(label)
+    assert win._bucketed.contains("Recap")
 
 
 def test_recent_urls_persisted_and_ordered(qtbot, tmp_path: Path) -> None:
@@ -1006,7 +1015,10 @@ def test_recap_issue_activation_opens_matching_detail_tab(qtbot) -> None:
     item = _recap_item_containing(win, "title tag")
     win.recap_tab.action_list.itemActivated.emit(item)
 
-    assert win.tabs.tabText(win.tabs.currentIndex()) == "Meta tag"
+    # V19-A1: recap navigation now selects the bucket and its sub-tab.
+    assert win.tabs.tabText(win.tabs.currentIndex()) == "Content"
+    content_bucket = win.tabs.currentWidget()
+    assert content_bucket.tabText(content_bucket.currentIndex()) == "Meta tag"
 
 
 @pytest.mark.parametrize(("tab_cls", "args", "resize_modes"), TABLE_TAB_CASES)
