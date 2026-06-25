@@ -38,6 +38,7 @@ from .site_crawl_types import (
     SiteCrawlResult,
     SpiderConfig,
 )
+from .tab_buckets import RECAP_SOURCE_TABS, TabEntry, build_bucketed_tabs
 from .tabs import (
     AiVisibilityTab,
     BotMatrixTab,
@@ -1085,23 +1086,30 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
         return row
 
     def _populate_tabs(self, payload: CrawlPayload) -> None:
+        # V19-A2: reuse the shared bucket builder so the per-page detail dialog
+        # groups the same tab classes under the same 5 buckets as the Single
+        # Page window. Tab construction and .update() wiring are unchanged.
         data = payload.to_mapping()
-        self._add_recap_tab(payload)
-        self._add_table_tabs(data)
-        self._add_special_tabs(payload, data)
+        entries = (
+            self._recap_entry(payload),
+            *self._table_entries(data),
+            *self._special_entries(payload, data),
+        )
+        self._bucketed = build_bucketed_tabs(self.tabs, entries)
+        self.recap_tab.issueActivated.connect(self._focus_recap_issue)
 
-    def _add_recap_tab(self, payload: CrawlPayload) -> None:
+    def _recap_entry(self, payload: CrawlPayload) -> TabEntry:
         self.recap_tab = AuditRecapWidget("Page recap")
         self.recap_tab.update_issues(
             issues_for_payload(self._base_url, payload),
             item_count=1,
             item_label="page",
         )
-        self.tabs.addTab(self.recap_tab, "Recap")
+        return TabEntry("Recap", self.recap_tab)
 
-    def _add_table_tabs(self, data: dict[str, Any]) -> None:
+    def _table_entries(self, data: dict[str, Any]) -> tuple[TabEntry, ...]:
         self.images_tab = ImagesTab()
-        tab_specs = [
+        single_value_specs = [
             ("Meta tag", MetaTab(), data.get("meta", [])),
             ("Images", self.images_tab, data.get("images", [])),
             ("Social", SocialTab(), data.get("social", {})),
@@ -1114,14 +1122,16 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
             ("Performance", PerformanceTab(), data.get("performance", {})),
             ("Structured data", SchemaTab(), data.get("schema", {})),
         ]
-        for label, tab, value in tab_specs:
+        entries: list[TabEntry] = []
+        for label, tab, value in single_value_specs:
             tab.update(value)
-            self.tabs.addTab(tab, label)
+            entries.append(TabEntry(label, tab))
         headers_tab = HeadersTab()
         headers_tab.update(data.get("headers", []), _title_from_meta(data.get("meta", [])))
-        self.tabs.insertTab(1, headers_tab, "Header H1-H6")
+        entries.append(TabEntry("Header H1-H6", headers_tab))
+        return tuple(entries)
 
-    def _add_special_tabs(self, payload: CrawlPayload, data: dict[str, Any]) -> None:
+    def _special_entries(self, payload: CrawlPayload, data: dict[str, Any]) -> tuple[TabEntry, ...]:
         redirect_tab = RedirectTab()
         redirect_tab.update(data.get("redirect", {}))
         canonical_tab = CanonicalTab()
@@ -1134,14 +1144,18 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
         robots_tab.update(payload.meta_robots, payload.robots)
         serp_tab = SerpTab()
         serp_tab.update(data.get("serp", {}), data.get("serp_audit", {}))
-        for label, tab in [
-            ("Redirect", redirect_tab),
-            ("Canonical", canonical_tab),
-            ("Indexability", indexability_tab),
-            ("Robots", robots_tab),
-            ("SERP", serp_tab),
-        ]:
-            self.tabs.addTab(tab, label)
+        return (
+            TabEntry("Redirect", redirect_tab),
+            TabEntry("Canonical", canonical_tab),
+            TabEntry("Indexability", indexability_tab),
+            TabEntry("Robots", robots_tab),
+            TabEntry("SERP", serp_tab),
+        )
+
+    def _focus_recap_issue(self, issue: AuditIssue) -> None:
+        label = RECAP_SOURCE_TABS.get(issue.source)
+        if label:
+            self._bucketed.focus(label)
 
     def _start_image_analysis(self) -> None:
         rows = self.images_tab.rows()

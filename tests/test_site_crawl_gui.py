@@ -6,6 +6,11 @@ from pathlib import Path
 from qtpy import QtCore, QtWidgets
 
 import silentfrog.site_crawl_gui as site_crawl_gui  # type: ignore[reportMissingImports]
+from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
+    AuditIssue,
+    IssueCategory,
+    IssueSeverity,
+)
 from silentfrog.crawl_diff import diff_reports  # type: ignore[reportMissingImports]
 from silentfrog.crawl_history import CrawlHistoryStore  # type: ignore[reportMissingImports]
 from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
@@ -302,10 +307,53 @@ def test_row_detail_uses_cached_payload(qtbot) -> None:
     win._open_result_detail(index)
 
     assert win._detail_windows
-    assert isinstance(win._detail_windows[-1], SiteCrawlDetailDialog)
-    assert win._detail_windows[-1].tabs.count() == 18
-    assert win._detail_windows[-1].tabs.tabText(0) == "Recap"
-    assert win._detail_windows[-1].btn_img_dl.text() == "Analyze images"
+    detail = win._detail_windows[-1]
+    assert isinstance(detail, SiteCrawlDetailDialog)
+    # V19-A2: the detail dialog groups the same tab classes into Overview + 5 buckets.
+    outer_labels = [detail.tabs.tabText(i) for i in range(detail.tabs.count())]
+    assert outer_labels == ["Recap", "Indexability", "Content", "Speed", "Trust", "AI/GEO"]
+    for label in [
+        "Meta tag",
+        "Header H1-H6",
+        "Images",
+        "Social",
+        "Link",
+        "Redirect",
+        "Canonical",
+        "Indexability",
+        "Robots",
+        "Hreflang",
+        "Structured data",
+        "Content quality",
+        "Keywords",
+        "Bot Matrix",
+        "AI Visibility",
+        "Performance",
+        "SERP",
+    ]:
+        assert detail._bucketed.contains(label)
+    assert detail.btn_img_dl.text() == "Analyze images"
+
+
+def test_site_crawl_detail_recap_navigates_to_bucketed_tab(qtbot) -> None:
+    # V19-A2: the detail dialog's recap is now wired to bucketed navigation.
+    dialog = SiteCrawlDetailDialog(_payload(), "https://example.com/page")
+    qtbot.addWidget(dialog)
+    issue = AuditIssue(
+        issue_id="perf_demo",
+        category=IssueCategory.PERFORMANCE,
+        severity=IssueSeverity.CRITICAL,
+        source="Performance",
+        reason="demo",
+        recommendation="demo",
+        evidence=(),
+    )
+
+    dialog.recap_tab.issueActivated.emit(issue)
+
+    assert dialog.tabs.tabText(dialog.tabs.currentIndex()) == "Speed"
+    speed_bucket = dialog.tabs.currentWidget()
+    assert speed_bucket.tabText(speed_bucket.currentIndex()) == "Performance"
 
 
 def test_site_crawl_detail_can_analyze_images(monkeypatch, qtbot) -> None:
