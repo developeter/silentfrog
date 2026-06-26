@@ -25,9 +25,20 @@ class LinksModel(GenericModel):
         )
         self._brushes: StatusBrushPalette = status_brushes()
 
+    # A link with no HTTP status was never probed (e.g. the Standard audit
+    # profile bounds per-page link probing; Lightweight skips it). That is
+    # "not measured", NOT an error — so it stays neutral and reads "Not probed",
+    # distinct from a probed failure (status "0" / note "Fetch error", red).
+    _STATUS_COLUMN = 4
+    _NOTE_COLUMN = 5
+    _UNPROBED_LABEL = "Not probed"
+
     def _status_brush(self, value: object):
+        text = str(value).strip()
+        if not text:
+            return None  # not probed — neutral, not an error
         try:
-            code = int(value)
+            code = int(text)
         except (TypeError, ValueError):
             return self._brushes.bad
         if 200 <= code < 300:
@@ -53,13 +64,16 @@ class LinksModel(GenericModel):
         role: int = Qt.ItemDataRole.DisplayRole,
     ):
         if role == Qt.ItemDataRole.DisplayRole:
+            if index.isValid() and index.column() == self._STATUS_COLUMN:
+                if not str(self._rows[index.row()][self._STATUS_COLUMN]).strip():
+                    return self._UNPROBED_LABEL
             return super().data(index, role)
         if role != Qt.ItemDataRole.BackgroundRole:
             return None
         column = index.column()
         value = self._rows[index.row()][column]
-        if column == 4:
+        if column == self._STATUS_COLUMN:
             return self._status_brush(value)
-        if column == 5:
+        if column == self._NOTE_COLUMN:
             return self._note_brush(value)
         return None
