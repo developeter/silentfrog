@@ -89,6 +89,62 @@ def test_missing_database_is_not_created_on_read(tmp_path: Path) -> None:
     assert not missing.exists()
 
 
+def _seeded_multi_store(tmp_path: Path) -> tuple[Path, str]:
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "list")
+    for audit in (
+        StoredAudit(url="https://e.com/a", http_status="200", geo_score=90, indexability="Indexable"),
+        StoredAudit(url="https://e.com/b", http_status="200", geo_score=40, indexability="Indexable"),
+        StoredAudit(url="https://e.com/c", http_status="404", geo_score=0, indexability="Not indexable"),
+        StoredAudit(url="https://e.com/d", http_status="error", geo_score=0, indexability="Failed"),
+        StoredAudit(url="https://e.com/e", http_status="skipped", geo_score=0, indexability="Skipped"),
+    ):
+        store.save_audit(run_id, audit)
+    store.finish_run(run_id)
+    store.close()
+    return db, run_id
+
+
+def test_sqlite_status_and_indexability_distribution(tmp_path: Path) -> None:
+    db, run_id = _seeded_multi_store(tmp_path)
+    with CrawlRunRef(db, run_id).open() as repo:
+        assert repo.status_distribution() == {"200": 2, "404": 1, "error": 1, "skipped": 1}
+        assert repo.indexability_distribution() == {
+            "Indexable": 2,
+            "Not indexable": 1,
+            "Failed": 1,
+            "Skipped": 1,
+        }
+
+
+def test_sqlite_score_values_exclude_error_and_skipped(tmp_path: Path) -> None:
+    db, run_id = _seeded_multi_store(tmp_path)
+    with CrawlRunRef(db, run_id).open() as repo:
+        # error/skipped rows carry no real score and must not pollute the chart.
+        assert sorted(repo.score_values()) == [0, 40, 90]
+
+
+def test_missing_database_aggregates_degrade_to_empty(tmp_path: Path) -> None:
+    missing = tmp_path / "nope.db"
+    with CrawlRunRef(missing, "run-x").open() as repo:
+        assert repo.score_values() == []
+        assert repo.status_distribution() == {}
+        assert repo.indexability_distribution() == {}
+    assert not missing.exists()
+
+
+def test_in_memory_aggregates_exclude_failed_skipped_from_scores() -> None:
+    results = [
+        SiteCrawlResult.from_payload("https://e.com/a", _payload("https://e.com/a")),
+        SiteCrawlResult.failed("https://e.com/b", "boom"),
+        SiteCrawlResult.skipped("https://e.com/c", "skip"),
+    ]
+    repo = InMemoryCrawlRunRepository(results)
+    assert sum(repo.status_distribution().values()) == 3
+    assert len(repo.score_values()) == 1  # only the successful row contributes a score
+
+
 def test_missing_run_returns_none(tmp_path: Path) -> None:
     db, _real_run = _seeded_store(tmp_path, "https://e.com/p")
     with CrawlRunRef(db, "no-such-run").open() as repo:

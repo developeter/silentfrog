@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import Counter
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -48,6 +49,13 @@ _STREAM_BATCH = 500
 # issues, ...) are not here and fall back to crawl (insertion) order — sorting
 # them would require loading every payload, defeating the bounded window.
 _SORTABLE_COLUMNS = frozenset({"url", "http_status", "indexability", "title", "geo_score", "issue_summary"})
+
+# Lightweight columns the V19 crawl-level distribution charts may GROUP BY. Kept
+# allowlisted so the column name is never interpolated from untrusted input.
+_DISTRIBUTION_COLUMNS = frozenset({"http_status", "indexability"})
+# Statuses with no real GEO score, excluded from the score distribution. Matches
+# ``CrawlStore.summary`` so the chart and the summary agree.
+_NO_SCORE_STATUSES = ("error", "skipped")
 
 
 @dataclass(frozen=True)
@@ -171,6 +179,12 @@ class CrawlRunRepository(Protocol):
 
     def count(self) -> int: ...
 
+    def score_values(self) -> list[int]: ...
+
+    def status_distribution(self) -> dict[str, int]: ...
+
+    def indexability_distribution(self) -> dict[str, int]: ...
+
     def close(self) -> None: ...
 
     def __enter__(self) -> CrawlRunRepository: ...
@@ -265,6 +279,41 @@ class SqliteCrawlRunRepository:
             return 0
         return int(row[0]) if row else 0
 
+    def score_values(self) -> list[int]:
+        """GEO scores of every successfully-audited URL (no payload load), for the
+        crawl-level score distribution chart. Failed/skipped rows are excluded."""
+        if self._conn is None:
+            return []
+        placeholders = ", ".join("?" for _ in _NO_SCORE_STATUSES)
+        try:
+            cursor = self._conn.execute(
+                f"SELECT geo_score FROM audits WHERE run_id = ? AND http_status NOT IN ({placeholders})",
+                (self._run_id, *_NO_SCORE_STATUSES),
+            )
+        except sqlite3.Error:
+            return []
+        return [int(row[0]) for row in cursor.fetchall()]
+
+    def status_distribution(self) -> dict[str, int]:
+        """Audited-URL count per HTTP status (read-only GROUP BY, no payloads)."""
+        return self._count_by("http_status")
+
+    def indexability_distribution(self) -> dict[str, int]:
+        """Audited-URL count per indexability verdict (read-only GROUP BY)."""
+        return self._count_by("indexability")
+
+    def _count_by(self, column: str) -> dict[str, int]:
+        if self._conn is None or column not in _DISTRIBUTION_COLUMNS:
+            return {}
+        try:
+            cursor = self._conn.execute(
+                f"SELECT {column}, COUNT(*) FROM audits WHERE run_id = ? GROUP BY {column}",
+                (self._run_id,),
+            )
+        except sqlite3.Error:
+            return {}
+        return {str(row[0]): int(row[1]) for row in cursor.fetchall()}
+
     def filtered_count(self, query: CrawlRowQuery) -> int:
         """Number of rows matching ``query`` — the windowed GUI model's row count
         (PR-10). O(1)-ish in memory: SQL counts, nothing is materialised."""
@@ -337,6 +386,15 @@ class InMemoryCrawlRunRepository:
 
     def count(self) -> int:
         return len(self._results)
+
+    def score_values(self) -> list[int]:
+        return [r.geo_score for r in self._results if r.status not in _NO_SCORE_STATUSES]
+
+    def status_distribution(self) -> dict[str, int]:
+        return dict(Counter(r.status for r in self._results))
+
+    def indexability_distribution(self) -> dict[str, int]:
+        return dict(Counter(r.indexability for r in self._results))
 
     def close(self) -> None:
         pass

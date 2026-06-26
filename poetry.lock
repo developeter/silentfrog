@@ -2974,6 +2974,22 @@ files = [
 ]
 
 [[package]]
+name = "pyqtgraph"
+version = "0.13.7"
+description = "Scientific Graphics and GUI Library for Python"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"charts\""
+files = [
+    {file = "pyqtgraph-0.13.7-py3-none-any.whl", hash = "sha256:7754edbefb6c367fa0dfb176e2d0610da3ada20aa7a5318516c74af5fb72bf7a"},
+    {file = "pyqtgraph-0.13.7.tar.gz", hash = "sha256:64f84f1935c6996d0e09b1ee66fe478a7771e3ca6f3aaa05f00f6e068321d9e3"},
+]
+
+[package.dependencies]
+numpy = ">=1.22.0"
+
+[[package]]
 name = "pyrdfa3"
 version = "3.6.2"
 description = "pyRdfa distiller/parser library"
@@ -3861,6 +3877,7 @@ multidict = ">=4.0"
 propcache = ">=0.2.1"
 
 [extras]
+charts = ["pyqtgraph"]
 geo-render = ["playwright"]
 google = ["google-api-python-client", "google-auth", "google-auth-oauthlib", "keyring"]
 pyqt5-backend = ["pyqt5", "pyqt5-sip"]
@@ -3870,4 +3887,4 @@ stealth = ["curl_cffi", "scrapling"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "dc850d9cf54a7718c0169d120b2c10d72b96d04b400b1da7868b7d379b70ac0d"
+content-hash = "34ca276e093f08ad03f8cce60fce4b1943da5b44e1bb91f3ec545d01f52c3f54"

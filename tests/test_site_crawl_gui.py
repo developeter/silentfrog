@@ -356,6 +356,33 @@ def test_site_crawl_detail_recap_navigates_to_bucketed_tab(qtbot) -> None:
     assert speed_bucket.tabText(speed_bucket.currentIndex()) == "Performance"
 
 
+def test_site_crawl_results_charts_populate_from_report(qtbot) -> None:
+    # V19-A3: the results screen renders crawl-level distribution charts fed by
+    # read-only repository aggregates (the in-memory seam for a store-less report).
+    from silentfrog.charts import DistributionChart, charts_available
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    results = [
+        SiteCrawlResult.from_payload("https://e.com/a", _payload()),
+        SiteCrawlResult.failed("https://e.com/b", "boom"),
+    ]
+    report = SiteCrawlReport.from_results(results, discovered_count=2, base_url="https://e.com/")
+
+    assert win._charts_strip.isHidden()  # 6a: hidden during discovery / before data
+
+    win._update_charts(report)
+
+    assert not win._charts_strip.isHidden()  # shown once populated
+    assert isinstance(win._status_chart, DistributionChart)
+    assert isinstance(win._score_chart, DistributionChart)
+    if not charts_available():
+        status_text = " ".join(lbl.text() for lbl in win._status_chart.findChildren(QtWidgets.QLabel))
+        score_text = " ".join(lbl.text() for lbl in win._score_chart.findChildren(QtWidgets.QLabel))
+        assert status_text and status_text != "No data yet."
+        assert "0-20" in score_text
+
+
 def test_site_crawl_detail_can_analyze_images(monkeypatch, qtbot) -> None:
     image_row = normalize_image_row(
         ["https://example.com/img.png", "Alt", "Title", "-", "", "", "", "", "Lazy", "High"]

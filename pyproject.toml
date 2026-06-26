@@ -90,6 +90,14 @@ google = [
 semrush = [
     "keyring (>=25.7,<26)",
 ]
+# v2.0 V19 — optional charts. pyqtgraph is pure-Python and reuses the base numpy
+# + PySide6 (no new base dep); it renders the Site Crawl distribution charts.
+# When the extra is absent, `silentfrog.charts` degrades to a text fallback, so
+# the base install needs nothing here. Version pinned + release-age-verified
+# (>=48h) per the supply-chain rule before committing.
+charts = [
+    "pyqtgraph (>=0.13.7,<0.14)",
+]
 
 [tool.poetry]
 packages = [{include = "silentfrog", from = "src"}]

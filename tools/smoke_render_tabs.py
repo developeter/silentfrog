@@ -121,10 +121,23 @@ def main(argv: list[str]) -> int:
     vis_path = out_dir / "ai_visibility.png"
     vis_tab.grab().save(str(vis_path))
 
+    # V19-A3: render the crawl-level chart fallback. pyqtgraph is optional, so the
+    # mandatory smoke path exercises the pure-Qt text fallback (no [charts] extra).
+    from silentfrog.charts import make_distribution_chart
+
+    chart = make_distribution_chart("HTTP status")
+    chart.resize(360, 200)
+    chart.set_distribution({"200": 128, "301": 12, "404": 5})
+    chart.show()
+    QtWidgets.QApplication.processEvents()
+    chart_path = out_dir / "chart_status.png"
+    chart.grab().save(str(chart_path))
+
     QtCore.QTimer.singleShot(50, app.quit)
     app.exec()
     print(f"wrote {bot_path}")
     print(f"wrote {vis_path}")
+    print(f"wrote {chart_path}")
     return 0
 
 

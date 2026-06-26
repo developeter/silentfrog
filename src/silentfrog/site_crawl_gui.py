@@ -13,6 +13,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 
 from .audit_issues import AuditIssue, issues_for_payload, issues_for_site_report
 from .audit_recap import AuditRecapWidget
+from .charts import bin_scores, make_distribution_chart
 from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
@@ -382,6 +383,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.recap_widget = AuditRecapWidget("Site Crawl recap")
         self.recap_widget.issueActivated.connect(self._focus_recap_issue)
         layout.addWidget(self.recap_widget)
+        layout.addWidget(self._build_charts_strip())
         layout.addWidget(self._build_history_label())
         layout.addLayout(self._build_filter_row())
         layout.addWidget(self._build_table(), 1)
@@ -403,6 +405,34 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.lbl_history.setWordWrap(True)
         self.lbl_history.setToolTip("Local crawl history diff against the previous run for the same host.")
         return self.lbl_history
+
+    def _build_charts_strip(self) -> QtWidgets.QWidget:
+        # V19-A3: crawl-level distribution charts fed by read-only repository
+        # aggregates (no payloads). pyqtgraph is optional; absent, charts.py
+        # renders the same numbers as text.
+        strip = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(strip)
+        row.setContentsMargins(0, 0, 0, 0)
+        self._status_chart = make_distribution_chart("HTTP status")
+        self._indexability_chart = make_distribution_chart("Indexability")
+        self._score_chart = make_distribution_chart("GEO score")
+        for chart in (self._status_chart, self._indexability_chart, self._score_chart):
+            row.addWidget(chart)
+        strip.setMaximumHeight(200)
+        # V19-A3 (6a): stay hidden until a completed crawl populates the charts, so
+        # the empty "No data yet." boxes never sit on screen during discovery.
+        strip.setVisible(False)
+        self._charts_strip = strip
+        return strip
+
+    def _update_charts(self, report: SiteCrawlReport) -> None:
+        if not report.has_rows:
+            return
+        with open_report_repository(report) as repo:
+            self._status_chart.set_distribution(repo.status_distribution())
+            self._indexability_chart.set_distribution(repo.indexability_distribution())
+            self._score_chart.set_distribution(bin_scores(repo.score_values()))
+        self._charts_strip.setVisible(True)
 
     def _build_source_form(self) -> QtWidgets.QFormLayout:
         form = QtWidgets.QFormLayout()
@@ -678,6 +708,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.model.clear()
         self._latest_report = None
         self.recap_widget.reset("Crawl in progress. The recap updates when results are complete.")
+        self._charts_strip.setVisible(False)  # re-hide until this run's charts populate
         self.lbl_history.setText("History: waiting for completed crawl...")
         self._reset_eta_tracking()
         self._show_results()
@@ -794,6 +825,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             self.model.set_results(list(report.results))
         self._set_running(False)
         self._update_recap_from_report(report)
+        self._update_charts(report)
         self._update_history_from_report(report)
         summary = self._report_summary(report)
         self.lbl_discovery.setText(summary if not report.warning else f"{summary}. {report.warning}")
