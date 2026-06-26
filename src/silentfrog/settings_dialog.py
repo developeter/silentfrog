@@ -34,12 +34,25 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         # audits stay DEEP (H4), so their dialog hides it and preserves the profile.
         self._show_profile = show_profile
         theme = self._configure_dialog()
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(self._build_general_group())
-        layout.addWidget(self._build_geo_group())
-        layout.addWidget(self._build_semrush_group(theme))
-        layout.addWidget(self._build_advanced_group(theme))
-        layout.addWidget(self._build_button_box())
+        outer = QtWidgets.QVBoxLayout(self)
+        # B1: the four setting groups scroll inside a viewport so a tall dialog
+        # never pushes the button row off-screen. OK/Cancel/Help stay pinned
+        # below the scroll area and reachable above the taskbar.
+        body = QtWidgets.QWidget()
+        body_layout = QtWidgets.QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.addWidget(self._build_general_group())
+        body_layout.addWidget(self._build_geo_group())
+        body_layout.addWidget(self._build_semrush_group(theme))
+        body_layout.addWidget(self._build_advanced_group(theme))
+        body_layout.addStretch(1)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(self._build_button_box())
         self._connect_signals()
         self._applying_preset = False
         self._initialize_options(options)
@@ -102,7 +115,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def _configure_dialog(self) -> str:
         self.setWindowTitle("Crawl settings")
-        self.setMinimumSize(440, 520)
+        # Min height kept low so the dialog can shrink to fit short screens; the
+        # scroll area supplies the overflow. Actual size is screen-capped below.
+        self.setMinimumSize(440, 360)
         help_flag = QtCore.Qt.WindowType.WindowContextHelpButtonHint
         self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowFlags(help_flag))
         style = QtWidgets.QStyleFactory.create("Fusion")
@@ -248,7 +263,18 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._initialize_semrush()
         self._load_from_options(options)
         self._sync_state()
-        self.resize(self.sizeHint().expandedTo(self.minimumSize()))
+        self._apply_sized_geometry()
+
+    def _apply_sized_geometry(self) -> None:
+        """Size to the content but never taller/wider than the screen (minus
+        headroom for title bar + taskbar), so the button row stays visible."""
+        target = self.sizeHint().expandedTo(self.minimumSize())
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            target.setHeight(min(target.height(), max(self.minimumHeight(), available.height() - 80)))
+            target.setWidth(min(target.width(), max(self.minimumWidth(), available.width() - 80)))
+        self.resize(target)
 
     def _initialize_semrush(self) -> None:
         """Prefill the masked key from the keychain and the cap from

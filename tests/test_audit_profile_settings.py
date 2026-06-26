@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from qtpy import QtWidgets
+
 from silentfrog.crawl_options import AuditProfile, CrawlOptions, ProfilePolicy, auto_suggest_profile
 from silentfrog.settings_dialog import CrawlSettingsDialog
 from silentfrog.site_crawl_gui import SiteCrawlWindow
@@ -104,3 +106,22 @@ def test_single_page_audit_is_deep_with_full_coverage(qtbot) -> None:
         ]
     )
     assert deep.link_probe_cap == 0  # unbounded link probing, like today
+
+
+def test_settings_dialog_scrolls_and_keeps_buttons_onscreen(qtbot) -> None:
+    # B1: a tall settings dialog must scroll its body and never push the
+    # OK/Cancel/Help row below the taskbar.
+    dialog = CrawlSettingsDialog(CrawlOptions.default(), show_profile=True)
+    qtbot.addWidget(dialog)
+
+    # the setting groups live inside a scroll area (overflow scrolls, not clips)
+    assert dialog.findChild(QtWidgets.QScrollArea) is not None
+
+    # the dialog never exceeds the available screen height, so the buttons stay reachable
+    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
+    assert dialog.height() <= screen.availableGeometry().height()
+
+    # the button box is pinned outside the scroll area (parented to the dialog), always visible
+    button_box = dialog.findChild(QtWidgets.QDialogButtonBox)
+    assert button_box is not None
+    assert button_box.parentWidget() is dialog
