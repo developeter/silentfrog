@@ -47,17 +47,25 @@ class DistributionChart(QtWidgets.QWidget):
 
 
 class _TextDistribution(DistributionChart):
-    """Fallback used when pyqtgraph is not installed: a titled count list."""
+    """Fallback when pyqtgraph is absent: a titled summary card, so the numbers
+    read as an intentional panel rather than stray text."""
 
     def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("chartFallbackCard")
+        # Translucent border reads on both the dark and light themes without
+        # coupling charts.py to the theme palette.
+        self.setStyleSheet("#chartFallbackCard { border: 1px solid rgba(127,127,127,0.45); border-radius: 6px; }")
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        heading = QtWidgets.QLabel(f"<b>{title}</b>")
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+        heading = QtWidgets.QLabel(title)
+        heading.setStyleSheet("font-weight: 600;")
         self._body = QtWidgets.QLabel("No data yet.")
         self._body.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(heading)
         layout.addWidget(self._body)
+        layout.addStretch(1)
 
     def set_distribution(self, distribution: dict[str, int]) -> None:
         if not distribution:

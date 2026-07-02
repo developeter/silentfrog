@@ -118,8 +118,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         # Min height kept low so the dialog can shrink to fit short screens; the
         # scroll area supplies the overflow. Actual size is screen-capped below.
         self.setMinimumSize(440, 360)
-        help_flag = QtCore.Qt.WindowType.WindowContextHelpButtonHint
-        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowFlags(help_flag))
+        # Toggle only the context-help "?" off. A single-flag toggle avoids the
+        # platform quirk where rebuilding the whole flag mask drops the native
+        # close button; keep the close button explicit so the title-bar X (and
+        # Cancel/Esc) always dismiss the dialog.
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowCloseButtonHint, True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowContextHelpButtonHint, False)
         style = QtWidgets.QStyleFactory.create("Fusion")
         if style:
             self.setStyle(style)

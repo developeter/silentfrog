@@ -170,6 +170,10 @@ async def _orchestrate_crawl(
     # per origin for the whole crawl, in every profile, instead of per page.
     with discovery_scope():
         drive = await _drive_frontier(ctx, work_source)
+    # item 5: the last page is fetched; report building (store finish + summaries)
+    # starts now. Emit here — not after crawl_site returns — so the GUI shows the
+    # finalize phase *while* that work runs, in every crawl mode.
+    _emit(on_event, "finalizing")
     return _build_report(config, store, run_id, drive, work_source.count(), _is_cancelled(ctx))
 
 

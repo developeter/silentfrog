@@ -32,6 +32,11 @@ class LinksModel(GenericModel):
     _STATUS_COLUMN = 4
     _NOTE_COLUMN = 5
     _UNPROBED_LABEL = "Not probed"
+    _UNPROBED_NOTE = "Not checked (profile limit)"
+    _UNPROBED_TIP = (
+        "This link's HTTP status was not checked. The Standard audit profile probes only the first "
+        "links on each page to stay fast; run a single-page (Deep) audit to check every link."
+    )
 
     def _status_brush(self, value: object):
         text = str(value).strip()
@@ -63,14 +68,22 @@ class LinksModel(GenericModel):
         index: QtCore.QModelIndex,
         role: int = Qt.ItemDataRole.DisplayRole,
     ):
-        if role == Qt.ItemDataRole.DisplayRole:
-            if index.isValid() and index.column() == self._STATUS_COLUMN:
-                if not str(self._rows[index.row()][self._STATUS_COLUMN]).strip():
-                    return self._UNPROBED_LABEL
+        if not index.isValid():
             return super().data(index, role)
+        column = index.column()
+        status_blank = not str(self._rows[index.row()][self._STATUS_COLUMN]).strip()
+        if role == Qt.ItemDataRole.DisplayRole:
+            if status_blank and column == self._STATUS_COLUMN:
+                return self._UNPROBED_LABEL
+            if status_blank and column == self._NOTE_COLUMN:
+                return self._UNPROBED_NOTE
+            return super().data(index, role)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            if status_blank and column in (self._STATUS_COLUMN, self._NOTE_COLUMN):
+                return self._UNPROBED_TIP
+            return None
         if role != Qt.ItemDataRole.BackgroundRole:
             return None
-        column = index.column()
         value = self._rows[index.row()][column]
         if column == self._STATUS_COLUMN:
             return self._status_brush(value)

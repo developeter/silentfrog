@@ -184,3 +184,20 @@ See the milestone table above and the per-task plans under
   `code_shape_baseline.json` unchanged.
 - Install base needs zero new deps; heavy deps behind extras.
 - diff-cover ≥85% on touched files.
+
+## Hardening prerequisite before V19
+
+The active H0-H7 hardening plan under `.claude/plans/` is the release gate
+for V19. Its final task is **PR-21 — Documentation and release alignment**:
+
+- align `README.md`, `HANDOFF.md`, `CLAUDE.md`, and relevant public docs with
+  shipped behavior;
+- distinguish the verified 100k synthetic gate from aspirational 1M support;
+- document crawl profiles, persistence/resume, paging, security and updater
+  trust, and known limits;
+- verify public CLI, Settings, and installation instructions against the app;
+- remove obsolete or contradictory claims.
+
+PR-21 is documentation-only except for focused checks that prevent stale
+public documentation. The H0-H7 gate cannot close, and V19 cannot begin, until
+PR-21 is complete.

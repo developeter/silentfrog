@@ -40,6 +40,7 @@ DARK_STYLESHEET = """
 QWidget            { background: #1e1e1e; color: #f0f0f0; }
 QPushButton        { background: #333; color: #f0f0f0; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; }
 QPushButton:hover  { background: #444; }
+QPushButton:disabled { background: #262626; color: #6b6f76; border: 1px solid #383838; }
 QMenuBar           { background: #1e1e1e; color: #f0f0f0; padding: 2px 6px; border-bottom: 1px solid #333; }
 QMenuBar::item     { background: transparent; padding: 6px 12px; border-radius: 4px; }
 QMenuBar::item:selected { background: #3a3a3a; color: #ffffff; }
@@ -73,6 +74,7 @@ LIGHT_STYLESHEET = """
 QWidget            { background: #f0f0f0; color: #1e1e1e; }
 QPushButton        { background: #f0f0f0; color: #333; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; }
 QPushButton:hover  { background: #555555; color: #f0f0f0}
+QPushButton:disabled { background: #e4e4e4; color: #a6a6a6; border: 1px solid #cccccc; }
 QMenuBar           { background: #f0f0f0; color: #1e1e1e; padding: 2px 6px; border-bottom: 1px solid #d4d4d4; }
 QMenuBar::item     { background: transparent; padding: 6px 12px; border-radius: 4px; }
 QMenuBar::item:selected { background: #d4d4d4; color: #1e1e1e; }

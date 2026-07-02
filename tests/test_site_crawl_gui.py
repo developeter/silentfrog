@@ -22,6 +22,8 @@ from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
     SIZE_COL,
     normalize_image_row,
 )
+from silentfrog.link_graph import GraphInput, build_link_graph  # type: ignore[reportMissingImports]
+from silentfrog.link_graph.graph_view import LinkGraphView  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_gui import (  # type: ignore[reportMissingImports]
     SiteCrawlDetailDialog,
     SiteCrawlTableModel,
@@ -191,6 +193,38 @@ def test_site_crawl_eta_updates_from_completed_rows(monkeypatch, qtbot) -> None:
     win._append_progress_row({"event": "row", "completed": 1})
 
     assert win.lbl_eta.text() == "ETA: 30s remaining"
+
+
+def test_finalizing_event_enters_finalizing_state(qtbot) -> None:
+    # item 5: the worker's 'finalizing' event (emitted before the report is built)
+    # shows the post-fetch phase and disables Stop with an explanatory tooltip.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._set_running(True)  # Stop visible + enabled while running
+
+    win._handle_progress({"event": "finalizing"})
+
+    assert win.btn_stop.isEnabled() is False
+    assert "cannot be stopped" in win.btn_stop.toolTip()
+    assert "Finalizing" in win.progress.format()
+    assert "finalizing" in win.lbl_eta.text().lower()
+
+
+def test_progress_does_not_finalize_when_completed_reaches_seed_total(qtbot) -> None:
+    # item 5 regression: a spider/hybrid crawl's discovered total is only the seed
+    # count and is never bumped as links are found, so `completed` reaches it
+    # mid-crawl. Reaching it must NOT finalize or disable Stop — only the worker's
+    # explicit 'finalizing' event does. Reintroducing a completed>=total trigger
+    # would disable Stop here and fail this test.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._set_running(True)
+    win._handle_progress({"event": "discovered", "total": 1})  # one seed
+
+    win._append_progress_row({"event": "row", "completed": 1})  # completed == seed total
+
+    assert win.btn_stop.isEnabled() is True
+    assert "Finalizing" not in win.progress.format()
 
 
 def test_site_crawl_recap_issue_activation_filters_to_url(qtbot, tmp_path: Path) -> None:
@@ -580,3 +614,85 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
     # CrawlRunRef itself (H2), so the button just hands it the report + path.
     assert called["report"] is report
     assert called["path"] == target
+
+
+# --- item 1/3: link-graph dialog wiring (node click + caption/banner/controls) ---
+
+
+def _graph_inputs(orphan_count: int = 0) -> list[GraphInput]:
+    """Homepage + linked children, plus ``orphan_count`` pages reached with no
+    internal parent (discovered_from="")."""
+    rows = [GraphInput("https://e.com/", "", 90), GraphInput("https://e.com/a", "https://e.com/", 80)]
+    rows += [GraphInput(f"https://e.com/o{i}", "", 50) for i in range(orphan_count)]
+    return rows
+
+
+def test_graph_node_click_opens_page_detail(monkeypatch, qtbot) -> None:
+    # item 1: LinkGraphView emits node_clicked, but the dialog never connected it,
+    # so the legend's "click to open" did nothing. _build_graph_dialog now wires it
+    # to the same run-bound payload loader the results-table double-click uses.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    monkeypatch.setattr(win, "_load_payload_for_detail", lambda url: _payload(url))
+    inputs = _graph_inputs()
+    graph = build_link_graph(inputs, root_url="https://e.com/")
+    view = LinkGraphView()
+    qtbot.addWidget(view)
+    view.set_graph(graph)
+
+    dialog = win._build_graph_dialog(graph, view, len(inputs))
+    qtbot.addWidget(dialog)
+    view.node_clicked.emit("https://e.com/a")  # what a node click emits
+
+    assert win._detail_windows
+    assert isinstance(win._detail_windows[-1], SiteCrawlDetailDialog)
+
+
+def test_graph_caption_notes_sampling_when_sampled(qtbot) -> None:
+    rows = _graph_inputs() + [GraphInput(f"https://e.com/c{i}", "https://e.com/", 50) for i in range(10)]
+    sampled = build_link_graph(rows, root_url="https://e.com/", max_nodes=5)
+    full = build_link_graph(rows, root_url="https://e.com/")
+
+    sampled_label = site_crawl_gui._graph_caption(sampled, total=len(rows))
+    full_label = site_crawl_gui._graph_caption(full, total=len(rows))
+    qtbot.addWidget(sampled_label)
+    qtbot.addWidget(full_label)
+
+    assert f"showing the top 5 of {len(rows)} by links" in sampled_label.text()
+    assert "showing the top" not in full_label.text()
+
+
+def test_graph_orphan_banner_threshold(qtbot) -> None:
+    # >=60% of pages with no internal parent -> warning banner; below -> none.
+    high = build_link_graph(_graph_inputs(orphan_count=4), root_url="https://e.com/")
+    low = build_link_graph(_graph_inputs(orphan_count=0), root_url="https://e.com/")
+
+    banner = site_crawl_gui._graph_orphan_banner(high, total=6)  # 4 orphans of 6
+    assert banner is not None
+    qtbot.addWidget(banner)
+    assert "no parent" in banner.text()
+    assert site_crawl_gui._graph_orphan_banner(low, total=2) is None  # 0 orphans of 2
+
+
+def test_graph_dialog_assembles_controls_and_banner(qtbot) -> None:
+    # item 3: the dialog carries Fit all / Reset zoom controls (callable) and shows
+    # the orphan banner for a high-orphan crawl.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    inputs = _graph_inputs(orphan_count=4)
+    graph = build_link_graph(inputs, root_url="https://e.com/")
+    view = LinkGraphView()
+    qtbot.addWidget(view)
+    view.set_graph(graph)
+
+    dialog = win._build_graph_dialog(graph, view, len(inputs))
+    qtbot.addWidget(dialog)
+
+    buttons = {b.text(): b for b in dialog.findChildren(QtWidgets.QPushButton)}
+    assert "Fit all" in buttons
+    assert "Reset zoom" in buttons
+    buttons["Fit all"].click()  # callable without crashing
+    buttons["Reset zoom"].click()
+    labels = " ".join(lbl.text() for lbl in dialog.findChildren(QtWidgets.QLabel))
+    assert "orphan page(s)" in labels  # caption
+    assert "no parent" in labels  # orphan banner (high ratio)

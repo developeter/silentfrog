@@ -75,6 +75,9 @@ _MAX_CACHED_PAGES = 8  # ~800 rows resident at most, regardless of crawl size
 # Live-streaming in-memory rows are capped to a rolling window so an in-progress
 # store-backed crawl also stays flat; the full run is shown SQL-paged on finish.
 _LIVE_ROW_WINDOW = 5000
+# item 6: cap nodes fed to the O(n^2) force-directed layout so a large crawl's
+# Link graph stays responsive (sampled to the most-central nodes).
+_GRAPH_NODE_CAP = 500
 # Display column -> sortable SQL (lightweight) column. Columns absent here derive
 # from the payload and keep crawl order (sorting them would load every payload).
 _SORT_COLUMN_BY_INDEX = {0: "url", 1: "http_status", 2: "indexability", 3: "title", 12: "issue_summary"}
@@ -709,6 +712,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._latest_report = None
         self.recap_widget.reset("Crawl in progress. The recap updates when results are complete.")
         self._charts_strip.setVisible(False)  # re-hide until this run's charts populate
+        self.btn_stop.setToolTip("Request cancellation. Active requests finish before the crawl fully stops.")
         self.lbl_history.setText("History: waiting for completed crawl...")
         self._reset_eta_tracking()
         self._show_results()
@@ -793,6 +797,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             self.progress.setValue(0)
             self._update_eta_label()
             return
+        if event.get("event") == "finalizing":
+            self._enter_finalizing()
+            return
         if event.get("event") == "row":
             self._append_progress_row(event)
 
@@ -806,8 +813,23 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if self._crawl_started_at is None:
             self._crawl_started_at = monotonic()
         self.progress.setValue(int((completed / total) * 100))
+        # item 5: do NOT enter finalizing from completed>=total — for a spider/hybrid
+        # crawl `total` is only the seed count (never bumped as links are discovered),
+        # so `completed` reaches it mid-crawl and would finalize + disable Stop early.
+        # The worker's explicit 'finalizing' event drives that state instead.
         self.progress.setFormat(f"Crawled {completed} of {total} URLs")
         self._update_eta_label()
+
+    def _enter_finalizing(self) -> None:
+        """item 5: between the last fetched page and the final report the worker
+        flushes the store and builds summaries. Show that phase clearly instead of
+        a stale 'finishing...' ETA, and stop offering a Stop that cannot apply."""
+        message = "Finalizing crawl: writing results and computing summaries…"
+        self.progress.setFormat(message)
+        self.lbl_discovery.setText(message)
+        self.lbl_eta.setText("ETA: finalizing…")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.setToolTip("Finalizing — the crawl has finished fetching and cannot be stopped now.")
 
     def _handle_report(self, report: SiteCrawlReport) -> None:
         self._previous_report = self._latest_report
@@ -963,6 +985,18 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._detail_windows.append(dialog)
         dialog.show()
 
+    def _open_node_detail(self, url: str) -> None:
+        """item 1: open the page-detail dialog for a clicked link-graph node, reusing
+        the run-bound payload loader the results-table double-click uses. A graph node
+        has no backing model row, so payload edits (image analysis) are read-through
+        only. Mirrors _open_result_detail's silent return when the payload cannot load."""
+        payload = self._load_payload_for_detail(url)
+        if payload is None:
+            return
+        dialog = SiteCrawlDetailDialog(payload, url, parent=self)
+        self._detail_windows.append(dialog)
+        dialog.show()
+
     def _show_graph(self) -> None:
         from .link_graph import GraphInput, build_link_graph
         from .link_graph.graph_view import LinkGraphView
@@ -972,25 +1006,34 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             QtWidgets.QMessageBox.information(self, "No graph data", "No crawl data to graph yet.")
             return
         root = self._latest_report.base_url if self._latest_report else ""
-        graph = build_link_graph([GraphInput(*r) for r in rows], root_url=root)
+        # item 6: cap nodes + show a wait cursor — the force-directed layout is
+        # O(n^2), so a large crawl is sampled to the most-central nodes and the
+        # build runs behind a busy cursor instead of silently freezing the UI.
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            graph = build_link_graph([GraphInput(*r) for r in rows], root_url=root, max_nodes=_GRAPH_NODE_CAP)
+            view = LinkGraphView()
+            view.set_graph(graph)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        dialog = self._build_graph_dialog(graph, view, len(rows))
+        self._detail_windows.append(dialog)
+        dialog.show()
+
+    def _build_graph_dialog(self, graph: Any, view: Any, total: int) -> QtWidgets.QDialog:
+        view.node_clicked.connect(self._open_node_detail)  # item 1: clicking a node opens its page detail
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Link graph — crawl tree")
         dialog.resize(900, 680)
         layout = QtWidgets.QVBoxLayout(dialog)
-        caption = QtWidgets.QLabel(
-            f"{graph.node_count} nodes"
-            + (" (sampled to top centrality)" if graph.sampled else "")
-            + f" · {len(graph.orphans)} orphan page(s)"
-        )
-        layout.addWidget(caption)
-        view = LinkGraphView()
-        view.set_graph(graph)
-        layout.addWidget(view)
-        close = QtWidgets.QPushButton("Close")
-        close.clicked.connect(dialog.accept)
-        layout.addWidget(close)
-        self._detail_windows.append(dialog)
-        dialog.show()
+        layout.addWidget(_graph_caption(graph, total))
+        banner = _graph_orphan_banner(graph, total)
+        if banner is not None:
+            layout.addWidget(banner)
+        layout.addWidget(view, 1)
+        layout.addWidget(_graph_legend())
+        layout.addLayout(_graph_controls(view, dialog))
+        return dialog
 
     def _graph_inputs_from_store(self) -> list[tuple[str, str, int]]:
         if not self._crawl_store_path or not self._crawl_run_id:
@@ -1219,6 +1262,53 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
 
 
 __all__ = ["SiteCrawlWindow", "SiteCrawlTableModel", "SiteCrawlFilterProxy"]
+
+
+def _graph_caption(graph: Any, total: int) -> QtWidgets.QLabel:
+    extra = f" (showing the top {graph.node_count} of {total} by links)" if graph.sampled else ""
+    return QtWidgets.QLabel(f"{graph.node_count} nodes{extra} · {len(graph.orphans)} orphan page(s)")
+
+
+def _graph_orphan_banner(graph: Any, total: int) -> QtWidgets.QLabel | None:
+    """Warn when most pages have no parent so the user does not read a ring of
+    unconnected dots as a meaningful link graph."""
+    if total <= 0 or len(graph.orphans) < total * 0.6:
+        return None
+    connected = max(0, total - len(graph.orphans))
+    banner = QtWidgets.QLabel(
+        f"⚠ {len(graph.orphans)} of {total} pages were reached via the sitemap/seed, not via an internal "
+        f"link, so they have no parent in the tree. Only ~{connected} page(s) form a real link graph; the "
+        "rest render as unconnected dots."
+    )
+    banner.setWordWrap(True)
+    banner.setStyleSheet("color:#f0c040; background:rgba(243,156,18,0.12); padding:8px; border-radius:6px;")
+    return banner
+
+
+def _graph_legend() -> QtWidgets.QLabel:
+    legend = QtWidgets.QLabel(
+        "Node colour = GEO Score: green ≥80 · yellow 60–79 · red <60 · grey unknown.  "
+        "Edge = the first internal link found to a page.  Hover a node for its URL + score, click to open it.  "
+        "Scroll to zoom, drag to pan."
+    )
+    legend.setWordWrap(True)
+    legend.setStyleSheet("font-size:11px; color:#9aa0a6;")
+    return legend
+
+
+def _graph_controls(view: Any, dialog: QtWidgets.QDialog) -> QtWidgets.QHBoxLayout:
+    row = QtWidgets.QHBoxLayout()
+    fit = QtWidgets.QPushButton("Fit all")
+    fit.clicked.connect(view.fit)
+    reset = QtWidgets.QPushButton("Reset zoom")
+    reset.clicked.connect(view.reset_zoom)
+    close = QtWidgets.QPushButton("Close")
+    close.clicked.connect(dialog.accept)
+    row.addWidget(fit)
+    row.addWidget(reset)
+    row.addStretch(1)
+    row.addWidget(close)
+    return row
 
 
 def _title_from_meta(rows: object) -> str:

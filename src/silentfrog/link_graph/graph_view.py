@@ -58,6 +58,23 @@ class LinkGraphView(QtWidgets.QGraphicsView):
         self.setScene(self._scene)
         self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # item 7 / B2: a readable dark canvas so the bright nodes/edges keep
+        # contrast (the scene otherwise defaults to white under the dark theme).
+        self._scene.setBackgroundBrush(QtGui.QBrush(QtGui.QColor("#15171a")))
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        factor = 1.2 if event.angleDelta().y() > 0 else 1 / 1.2
+        self.scale(factor, factor)
+
+    def fit(self) -> None:
+        rect = self._scene.itemsBoundingRect()
+        if not rect.isNull():
+            self.fitInView(rect, QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+
+    def reset_zoom(self) -> None:
+        self.resetTransform()
+        self.fit()
 
     def set_graph(self, graph: LinkGraph) -> None:
         self._scene.clear()

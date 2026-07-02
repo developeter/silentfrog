@@ -222,6 +222,33 @@ async def test_crawl_site_returns_cached_payloads_and_failed_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_finalizing_emitted_before_report_build(monkeypatch):
+    # item 5: the GUI shows a "Finalizing crawl…" phase while the report is built
+    # (store finish + summaries). That only works if the 'finalizing' event is
+    # emitted BEFORE _build_report runs — not after crawl_site returns. Reproducing
+    # the old defect (emit after the build) makes finalizing_before_build False.
+    async def fake_analyse(url: str, timeout: int, options=None):
+        return _payload(url)
+
+    monkeypatch.setattr(site_crawler, "analyse", fake_analyse)
+    events: list[str] = []
+    seen: dict[str, bool] = {}
+    real_build = site_crawler._build_report
+
+    def spy_build(*args, **kwargs):
+        seen["finalizing_before_build"] = "finalizing" in events
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(site_crawler, "_build_report", spy_build)
+    config = SiteCrawlConfig.from_text(base_url="https://example.com", url_list_text="https://example.com/ok", limit=10)
+
+    await site_crawler.crawl_site(config, timeout=5, on_event=lambda event: events.append(event["event"]))
+
+    assert "finalizing" in events
+    assert seen["finalizing_before_build"] is True
+
+
+@pytest.mark.asyncio
 async def test_crawl_site_cancelled_before_start_processes_nothing(monkeypatch):
     # PR-9 cooperative cancellation: a crawl cancelled before any URL is claimed
     # stops cleanly with NO rows processed (the old behavior marked every pending
