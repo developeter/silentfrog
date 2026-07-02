@@ -37,12 +37,13 @@ secrets.local.json
 # bundle (and the menu bar renders "Silentfrog" instead of "Python").
 /Silentfrog.app/
 
-# Claude Code worktrees and session state. Keep the project-level
-# settings.json + hooks/ committed (they're part of the dev contract)
-# but ignore the per-session worktrees, plans, and transcripts.
+# Claude Code worktrees and session state. Keep project-level settings,
+# hooks, skills, and the reviewed lean agent committed as part of the dev
+# contract; ignore ephemeral worktrees, plans, transcripts, and other agents.
 .claude/worktrees/
 .claude/plans/
 .claude/transcripts/
 .claude/projects/
-.claude/agents/
+.claude/agents/*
+!.claude/agents/lean-adversarial-reviewer.md
 tmp_smoke_render/

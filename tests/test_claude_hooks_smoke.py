@@ -19,6 +19,8 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HOOK_DIR = _REPO_ROOT / ".claude" / "hooks"
 _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
+_LEAN_REVIEWER = _REPO_ROOT / ".claude" / "agents" / "lean-adversarial-reviewer.md"
+_ROADMAP_SKILL = _REPO_ROOT / ".claude" / "skills" / "ship-roadmap-pr" / "SKILL.md"
 
 
 def _run_hook(script_name: str, payload: dict) -> dict:
@@ -100,6 +102,37 @@ def test_route_caveman_injects_review_note() -> None:
     assert "caveman-review" in note
 
 
+def test_route_caveman_injects_adversarial_review_note() -> None:
+    payload = {"prompt": "run an analytical review before I commit"}
+    output = _run_hook("route_caveman.py", payload)
+    note = output["hookSpecificOutput"]["additionalContext"]
+    assert "lean-adversarial-reviewer" in note
+    assert "caveman-review" in note
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Proceed with PR-4 only",
+        "implementa PR-4 e fermati prima del commit",
+        "PR-4: continua con il piano approvato",
+        "vai avanti con PR-4",
+    ],
+)
+def test_route_caveman_injects_roadmap_workflow_note(prompt: str) -> None:
+    output = _run_hook("route_caveman.py", {"prompt": prompt})
+    note = output["hookSpecificOutput"]["additionalContext"]
+    assert "ship-roadmap-pr" in note
+    assert "one PR only" in note
+
+
+def test_route_caveman_does_not_route_passive_pr_status() -> None:
+    payload = {"prompt": "PR-4 is complete and ready for review"}
+    output = _run_hook("route_caveman.py", payload)
+    assert "ship-roadmap-pr" not in str(output)
+    assert "caveman-review" in output["hookSpecificOutput"]["additionalContext"]
+
+
 def test_route_caveman_stays_quiet_on_unrelated_prompts() -> None:
     payload = {"prompt": "explain how Core Web Vitals are measured"}
     assert _run_hook("route_caveman.py", payload) == {}
@@ -111,6 +144,16 @@ def test_route_caveman_handles_italian_commit_keyword() -> None:
     payload = {"prompt": "scrivi il commit message per queste modifiche"}
     output = _run_hook("route_caveman.py", payload)
     assert "caveman-commit" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_project_workflow_and_lean_reviewer_are_wired() -> None:
+    reviewer = _LEAN_REVIEWER.read_text(encoding="utf-8")
+    workflow = _ROADMAP_SKILL.read_text(encoding="utf-8")
+    assert "model: sonnet" in reviewer
+    assert "maxTurns: 15" in reviewer
+    assert "at most 3 disposable runtime probes" in reviewer
+    assert "lean-adversarial-reviewer" in workflow
+    assert "Do not begin the next PR" in workflow
 
 
 def test_staged_changes_reminder_is_silent_when_index_clean(tmp_path, monkeypatch) -> None:

@@ -1,5 +1,7 @@
 {
   "$schema": "https://code.claude.com/schemas/settings.json",
+  "model": "opus",
+  "effortLevel": "xhigh",
   "hooks": {
     "PreToolUse": [
       {

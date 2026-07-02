@@ -67,6 +67,16 @@ tools.
 - The user's verbatim commit message always wins; the skill only drafts
   when the user hasn't supplied one.
 
+## Roadmap automation
+
+- Use `ship-roadmap-pr` when starting or continuing a numbered roadmap PR.
+- The main session orchestrates; do not create an additional orchestrator.
+- Use `lean-adversarial-reviewer` only for the high-risk boundaries listed in
+  `AGENTS.md`. It is read-only, Sonnet, probe-limited, and does not rerun the
+  full suite.
+- Keep `caveman-review`/`caveman-commit` for concise reporting and messages;
+  they do not replace behavioral verification.
+
 ## Code shape (enforced by tools/code_shape_guard.py)
 
 - Max nesting depth 2; guard clauses over nesting.

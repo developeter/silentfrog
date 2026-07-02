@@ -98,3 +98,21 @@ Authoring rules:
 - Hooks ship Python scripts (cross-platform). Keep them dependency-
   free (stdlib only) so a contributor's bare Python install runs
   them.
+
+## 8) Review and test economy
+
+- The implementation agent owns the full quality-gate run. Review agents do
+  not repeat it unless the evidence is stale or contradicted.
+- Use `ship-roadmap-pr` for one numbered roadmap PR at a time.
+- Invoke `lean-adversarial-reviewer` only for high-risk boundaries:
+  persistence/schema, concurrency/cancellation, networking/security,
+  updater/installer, data loss/scoring, large-scale memory/paging, or mutable
+  GUI identity.
+- Every new regression test must fail when the verified defect is reintroduced.
+- Prefer extending or parametrizing an existing test over adding another test.
+- Test public behavior instead of private helpers when practical.
+- Do not add abstractions for hypothetical future consumers.
+- Do not add unrelated cleanup, compatibility shims, or bonus refactors.
+- Optional hardening cannot block the current PR without a reproducible failure.
+- A reviewer may request at most one follow-up pass after fixes; unresolved
+  blockers after that are reported rather than reviewed in an open-ended loop.
