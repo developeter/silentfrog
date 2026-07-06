@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from qtpy import QtCore
-
 from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
     AuditIssue,
     IssueCategory,
@@ -54,5 +52,7 @@ def test_recap_widget_renders_counts_and_emits_issue(qtbot) -> None:
 
     assert "Warnings found" in widget.health_text()
     assert widget.count_text(IssueSeverity.WARNING) == "Warnings: 1"
-    assert item.data(QtCore.Qt.ItemDataRole.UserRole) == issue
+    # G1: the list now shows grouped hints, but activating one still deep-links
+    # to the backing issue so "jump to the page" keeps working.
+    assert item is not None
     assert emitted == [issue]

@@ -7,6 +7,7 @@ from html import escape
 from qtpy import QtCore, QtGui, QtWidgets
 
 from .audit_issues import AuditIssue, IssueSeverity, severity_color_role
+from .hints import Hint, build_hints
 from .theme import current_theme
 
 
@@ -47,11 +48,15 @@ class AuditRecapWidget(QtWidgets.QFrame):
         super().__init__(parent)
         self.setObjectName("auditRecap")
         self._issues: list[AuditIssue] = []
+        self._hints: list[Hint] = []
+        self._item_count: int = 1
         self._build_ui(title)
         self.reset()
 
     def reset(self, text: str = "Run an analysis to build the action recap.") -> None:
         self._issues = []
+        self._hints = []
+        self._item_count = 1
         self._set_health("Ready", text)
         self._set_counts(0, 0, 0)
         self.action_list.clear()
@@ -65,6 +70,8 @@ class AuditRecapWidget(QtWidgets.QFrame):
         item_label: str = "page",
     ) -> None:
         self._issues = list(issues)
+        self._hints = build_hints(self._issues)
+        self._item_count = item_count
         summary = summarize_issues(self._issues, item_count=item_count)
         self._set_health(summary.health, _summary_text(summary, item_label))
         self._set_counts(summary.critical, summary.warnings, summary.info)
@@ -127,16 +134,38 @@ class AuditRecapWidget(QtWidgets.QFrame):
 
     def _render_actions(self) -> None:
         self.action_list.clear()
-        if not self._issues:
+        if not self._hints:
             self.action_list.addItem("No prioritized issues detected.")
             return
-        for issue in self._issues[:8]:
-            self.action_list.addItem(_issue_item(issue))
+        # Grouped, priority-ranked hints (G1): one row per issue type with its
+        # prevalence, so a site crawl reads as "fix this first, it hits N pages"
+        # instead of a flat wall of per-URL rows.
+        for hint in self._hints[:8]:
+            self.action_list.addItem(self._hint_item(hint))
+
+    def _hint_item(self, hint: Hint) -> QtWidgets.QListWidgetItem:
+        prefix = hint.severity.value.upper()
+        item = QtWidgets.QListWidgetItem(f"{prefix}: {hint.headline(self._item_count)}")
+        item.setData(QtCore.Qt.ItemDataRole.UserRole, hint)
+        sample = f"\nExample: {hint.sample_urls[0]}" if hint.sample_urls else ""
+        item.setToolTip(f"{hint.recommendation}{sample}")
+        item.setForeground(QtGui.QBrush(QtGui.QColor(_severity_text_color(hint.severity))))
+        return item
 
     def _emit_issue(self, item: QtWidgets.QListWidgetItem) -> None:
-        issue = item.data(QtCore.Qt.ItemDataRole.UserRole)
-        if isinstance(issue, AuditIssue):
-            self.issueActivated.emit(issue)
+        hint = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        if not isinstance(hint, Hint):
+            return
+        # Deep-link to the first affected URL by re-emitting its backing issue,
+        # so the existing "jump to the page" wiring keeps working.
+        target_url = hint.sample_urls[0] if hint.sample_urls else ""
+        for issue in self._issues:
+            if issue.issue_id == hint.issue_id and issue.url == target_url:
+                self.issueActivated.emit(issue)
+                return
+        matches = [issue for issue in self._issues if issue.issue_id == hint.issue_id]
+        if matches:
+            self.issueActivated.emit(matches[0])
 
     def _apply_frame_style(self) -> None:
         border = "#3a3a3a" if current_theme() == "dark" else "#c8cdd2"
@@ -170,25 +199,6 @@ def _summary_text(summary: AuditRecapSummary, item_label: str) -> str:
     if summary.total:
         return f"{summary.detail}. Review the next actions below and open details for evidence."
     return f"No prioritized issues found for this {item_label}."
-
-
-def _issue_item(issue: AuditIssue) -> QtWidgets.QListWidgetItem:
-    item = QtWidgets.QListWidgetItem(_issue_label(issue))
-    item.setData(QtCore.Qt.ItemDataRole.UserRole, issue)
-    item.setToolTip(_issue_tooltip(issue))
-    item.setForeground(QtGui.QBrush(QtGui.QColor(_severity_text_color(issue.severity))))
-    return item
-
-
-def _issue_label(issue: AuditIssue) -> str:
-    prefix = issue.severity.value.upper()
-    target = f" [{issue.url}]" if issue.url else ""
-    return f"{prefix}: {issue.reason}{target}"
-
-
-def _issue_tooltip(issue: AuditIssue) -> str:
-    evidence = "; ".join(f"{item.label}: {item.value}" for item in issue.evidence) or "-"
-    return f"{issue.recommendation}\nEvidence: {evidence}"
 
 
 def _count_style(severity: IssueSeverity) -> str:
