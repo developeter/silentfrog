@@ -948,8 +948,11 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     # after the opt-in single-page run, so it doesn't clutter stock pages.
     if rich_results.measured:
         checks.extend(build_rich_results_checks(rich_results))
-    if lighthouse.measured:
-        checks.extend(build_lighthouse_checks(lighthouse))
+    # Lighthouse rows are emitted unconditionally: unmeasured renders the
+    # single "Not run / click Run Lighthouse" info row, which is the only
+    # discoverability anchor the button has (the old measured-gate hid it
+    # and made a failed run indistinguishable from the feature not existing).
+    checks.extend(build_lighthouse_checks(lighthouse))
     # H6: stamp every check with its evidence class + source IDs at the single
     # aggregation seam. Additive metadata only — never touches status or score.
     return [attach_evidence(check) for check in checks]

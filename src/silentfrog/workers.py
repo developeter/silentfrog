@@ -43,6 +43,17 @@ def run_lighthouse(
             from .integrations.google.lighthouse import fetch_lighthouse
 
             scores = asyncio.run(fetch_lighthouse(url, api_key))
+            if not scores.measured:
+                # fetch_lighthouse never raises, so an HTTP failure (the
+                # anonymous PSI quota is permanently exhausted — HTTP 429)
+                # used to reach on_success as an unmeasured no-op and the
+                # user saw nothing. Route it to the warning dialog instead.
+                on_error(
+                    "PageSpeed Insights returned no Lighthouse result (rate limit or "
+                    "network error). Set SILENTFROG_PSI_API_KEY to lift the anonymous "
+                    "quota, then retry."
+                )
+                return
             on_success(scores.to_dict())
         except Exception as exc:  # noqa: BLE001
             on_error(str(exc))

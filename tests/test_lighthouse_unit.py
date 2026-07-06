@@ -6,6 +6,28 @@ import asyncio
 
 from silentfrog.integrations.google import lighthouse as lh
 from silentfrog.integrations.google.lighthouse import LighthouseScores, fetch_lighthouse
+from silentfrog.workers import run_lighthouse
+
+
+def test_run_lighthouse_routes_unmeasured_to_on_error(monkeypatch) -> None:
+    """Regression: a PSI failure (e.g. anonymous-quota HTTP 429) used to reach
+    on_success as an unmeasured dict — the GUI repainted with nothing and the
+    user saw a silent no-op instead of the warning dialog."""
+
+    async def _unmeasured(url: str, api_key: str = "") -> LighthouseScores:
+        return LighthouseScores(measured=False)
+
+    monkeypatch.setattr("silentfrog.integrations.google.lighthouse.fetch_lighthouse", _unmeasured)
+    outcomes: list[tuple[str, str]] = []
+    thread = run_lighthouse(
+        "https://example.com",
+        "",
+        on_success=lambda data: outcomes.append(("success", str(data))),
+        on_error=lambda message: outcomes.append(("error", message)),
+    )
+    thread.join(timeout=10)
+    assert [kind for kind, _ in outcomes] == ["error"]
+    assert "SILENTFROG_PSI_API_KEY" in outcomes[0][1]
 
 
 def test_parse_full_lighthouse_result() -> None:

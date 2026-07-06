@@ -753,10 +753,18 @@ def test_ai_visibility_emits_v14_checks_in_existing_areas() -> None:
     assert by_key["rich_results_eligible"].area == "Citation readiness"
 
 
-def test_ai_visibility_omits_v14_checks_without_data() -> None:
-    keys = {c.key for c in build_ai_visibility_checks(_payload_with_discovery({}))}
-    assert "lighthouse_perf_above_90" not in keys
-    assert "rich_results_eligible" not in keys
+def test_ai_visibility_v14_unmeasured_shows_lighthouse_hint_only() -> None:
+    # Rich results stay hidden when unmeasured, but Lighthouse must emit its
+    # single "Not run." info row — it is the Run Lighthouse button's only
+    # discoverability anchor (regression: the old measured-gate hid it and a
+    # failed run was indistinguishable from the feature not existing).
+    checks = build_ai_visibility_checks(_payload_with_discovery({}))
+    by_key = {c.key: c for c in checks}
+    assert "rich_results_eligible" not in by_key
+    hint = by_key["lighthouse_perf_above_90"]
+    assert hint.status == "info"
+    assert "Not run" in hint.details
+    assert "lighthouse_freshness" not in by_key  # score rows only when measured
 
 
 def test_ai_visibility_v14_tooltips_are_non_default() -> None:
