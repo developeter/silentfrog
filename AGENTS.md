@@ -22,6 +22,9 @@ This file is the local execution contract for Codex in this repository.
 
 For every non-trivial change:
 
+0. If the change matches a recipe in `docs/PLAYBOOKS.md` (new check, payload
+   key, opt-in feature, dependency, audit issue, GUI styling), follow that
+   playbook step-by-step — the guard tests pin every step.
 1. Run quick checks:
    - `poetry run python tools/doctor.py --quick`
 2. Run focused tests for touched modules when applicable.
@@ -30,6 +33,7 @@ For every non-trivial change:
 
 If tests cannot run, report why and what remains unverified.
 If the code-shape guard fails, refactor the touched code instead of weakening the rule or silently growing the baseline.
+If any gate fails, apply the remedy table in `docs/PLAYBOOKS.md` §P7 — never bypass a hook or edit a guard/baseline to get green.
 Before closing a non-trivial code task, run the review questions in `docs/code_review_checklist.md`.
 
 ## 3) Testing policy
@@ -107,7 +111,12 @@ Authoring rules:
 - Invoke `lean-adversarial-reviewer` only for high-risk boundaries:
   persistence/schema, concurrency/cancellation, networking/security,
   updater/installer, data loss/scoring, large-scale memory/paging, or mutable
-  GUI identity.
+  GUI identity. Concretely (file-level mapping): the risk table in
+  `docs/PLAYBOOKS.md` §P7 — when in doubt, classify by that table, not by
+  intuition. If the reviewer's reply is not in its `SEV ...` /
+  `No verified blockers.` format, it exhausted its turn budget mid-probe:
+  resume the same agent and ask for the final report instead of re-running
+  the review from scratch.
 - Every new regression test must fail when the verified defect is reintroduced.
 - Prefer extending or parametrizing an existing test over adding another test.
 - Test public behavior instead of private helpers when practical.

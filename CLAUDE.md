@@ -33,6 +33,13 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 ## Where the rules live
 
 - `AGENTS.md` (repo root) — the operating contract. Read it first.
+- **`docs/PLAYBOOKS.md` — mechanical recipes. Before adding an AI Visibility
+  check, a CrawlPayload key, an opt-in feature, a dependency, an audit issue,
+  or touching GUI styling: open the matching playbook and follow it LITERALLY.
+  Every step exists because a guard test fails without it. It also has the
+  risk-classification table (which diffs need adversarial review) and the
+  gate-failure → remedy table. When intuition and playbook disagree, the
+  playbook wins.**
 - `docs/code_review_checklist.md` — run before closing any non-trivial task.
 - `docs/v2_beat_screaming_frog_roadmap.md` — the v2.0 master roadmap (V1..V20).
 - `docs/v3_roadmap.md` — the post-v2.0 gap analysis + milestone ordering.
