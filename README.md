@@ -281,25 +281,18 @@ Integrations (Google, Semrush, AI providers) are off by default and never run on
 
 ### Single Page SEO Check tabs
 
-The **Single Page SEO Check** window currently includes these tabs:
+The **Single Page SEO Check** window groups its checks into a top-level
+**Recap** (Overview) plus five user-goal buckets. Every individual tab is
+still present — now nested under the bucket that matches its purpose:
 
-- `Meta tag`
-- `Header H1-H6`
-- `Images`
-- `Social`
-- `Link`
-- `Redirect`
-- `Canonical`
-- `Indexability`
-- `Robots`
-- `Hreflang`
-- `Structured data`
-- `Content quality`
-- `Keywords`
-- `AI crawl`
-- `AI Visibility`
-- `Performance`
-- `SERP`
+- **Indexability** — `Indexability`, `Robots`, `Canonical`, `Redirect`, `Hreflang`, `Link`
+- **Content** — `Meta tag`, `Header H1-H6`, `Images`, `Content quality`, `Keywords`
+- **Speed** — `Performance`
+- **Trust** — `Structured data`, `Social`, `SERP`
+- **AI/GEO** — `Bot Matrix`, `AI Visibility`
+
+The Site Crawl per-page detail view (double-click a result row) uses the same
+bucketed layout.
 
 ### Site Crawl mode
 
@@ -332,13 +325,15 @@ Recent v2.0 work hardened large-site crawling:
 - **Audit profiles:** a **Lightweight / Standard / Deep** selector gates per-page *network* cost (extra HTTP probes, rendering, integrations) — local HTML parsing always runs. Site crawls default to **Standard**, single-page audits use **Deep**, and very large URL lists auto-suggest **Lightweight**.
 - **Resume:** a crawl that is cancelled or interrupted can resume and re-run only the unfinished URLs (the SQLite frontier tracks per-URL state).
 - **Results table:** sorting, filtering, and paging run in SQL against the store, so the GUI stays responsive on large runs.
+- **Overview charts (optional):** with the optional `silentfrog[charts]` extra (PyQtGraph) installed, the results screen shows small HTTP-status, indexability, and GEO-score distribution charts once a crawl completes; without the extra the same figures render as a compact text summary. Chart data comes from read-only store aggregates, so it never re-materialises the crawl in RAM.
+- **Link graph:** the **Link graph** button visualises the crawl tree (nodes coloured by GEO Score, edges from the page that first linked to each URL, orphan pages flagged). Large graphs are sampled to the most-central nodes; scroll to zoom, drag to pan, and use **Fit all** / **Reset zoom**.
 - **Scale:** memory is measured against a synthetic gate up to **100k URLs**. **~1M-URL crawling is a future, post-gate goal — it is not a verified or supported production scale yet.**
 
 The setup form and results table are separate screens. After **Start crawl**, the setup form is hidden and the results screen shows the discovered URL count, filters, table, export action, and crawl progress.
 
 Completed Site Crawls are saved locally and can be opened from **View past scans**. The history browser lists saved runs by site/date, shows a summary and diff against the previous local run for the same site, and lets you export or delete selected local history files. This is local-only; it does not sync to Google Drive or any remote service.
 
-Rows in the results table keep cached page payloads. Double-click a successful row to open the same detailed tab report used by the single-page checker, without re-crawling the URL. Detail windows also include **Analyze images** so image dimensions, size, type, and cache headers can be fetched for that page snapshot.
+Rows in the results table keep cached page payloads. Double-click a successful row to open the same detailed tab report used by the single-page checker (grouped into the same five buckets), without re-crawling the URL. Detail windows also include **Analyze images** so image dimensions, size, type, and cache headers can be fetched for that page snapshot.
 
 Bulk export creates a workbook with high-level sheets:
 
