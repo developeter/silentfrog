@@ -21,6 +21,13 @@ def test_crawl_options_bot_render_off_by_default() -> None:
     assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, bot_render=True).bot_render is True
 
 
+def test_crawl_options_topic_embeddings_off_by_default() -> None:
+    # V20: local embedding inference is strictly opt-in.
+    assert CrawlOptions.default().topic_embeddings is False
+    assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4).topic_embeddings is False
+    assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, topic_embeddings=True).topic_embeddings is True
+
+
 def test_crawl_options_from_ui_allow_insecure_tls_off_by_default() -> None:
     assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4).allow_insecure_tls is False
     opted_in = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, allow_insecure_tls=True)

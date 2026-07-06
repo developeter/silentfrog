@@ -390,6 +390,9 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         "ai_citations": ai_citations_payload,
         "custom_extraction": extract_custom(response.body, crawl_options.custom_extraction),
         "tech_stack": _collect_tech_stack(response, soup, crawl_options),
+        # Model inference blocks; keep the crawl loop responsive (V10 render precedent).
+        "topic_embeddings": await asyncio.to_thread(_collect_topic_embeddings, soup, crawl_options),
+        "brand_mentions": await _collect_brand_mentions(response.url, soup, policy),
         "semrush": semrush_metrics,
         **google_metrics,
     }
@@ -411,6 +414,35 @@ async def _collect_integrations(
         await _collect_google_metrics(url),
         await _collect_semrush(url),
     )
+
+
+def _collect_topic_embeddings(soup: BeautifulSoup, crawl_options: CrawlOptions) -> dict[str, Any]:
+    """v2.0 V20 — local embedding coherence, off by default. Local-only compute,
+    so no profile gate; the flag (plus the [embeddings] extra) is the consent."""
+    if not crawl_options.topic_embeddings:
+        return {}
+    from .embeddings import topic_coherence
+
+    title_tag = soup.title
+    title = (title_tag.string or "").strip() if title_tag else ""
+    if not title:
+        h1 = soup.find("h1")
+        title = h1.get_text(strip=True) if h1 else ""
+    paragraphs = [tag.get_text(separator=" ", strip=True) for tag in soup.find_all("p")]
+    return topic_coherence(title, paragraphs).to_dict()
+
+
+async def _collect_brand_mentions(url: str, soup: BeautifulSoup, policy: ProfilePolicy) -> dict[str, Any]:
+    """v2.0 V20 — brand-mention counts + local series. Gated like every
+    integration: H4 profile switch AND its own env enable knob."""
+    if not policy.run_integrations:
+        return {}
+    from .brand_mentions import fetch_brand_mentions
+
+    og_tag = soup.find("meta", attrs={"property": "og:site_name"})
+    og_site_name = str(og_tag.get("content", "")) if og_tag else ""
+    payload = await fetch_brand_mentions(url, og_site_name=og_site_name)
+    return payload.to_dict()
 
 
 def _collect_tech_stack(response: Any, soup: BeautifulSoup, crawl_options: CrawlOptions) -> dict[str, Any]:

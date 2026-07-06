@@ -7,6 +7,7 @@ from typing import Any
 
 from .ai_citations import AiCitationsPayload, build_ai_citations_checks
 from .bot_render import build_bot_render_check
+from .brand_mentions import BrandMentionsPayload, build_brand_mention_checks
 from .citation_advanced import AdvancedCitationPayload, build_advanced_citation_checks
 from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .crawl_types import (
@@ -22,6 +23,7 @@ from .crawl_types import (
 )
 from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
+from .embeddings import TopicEmbeddingsPayload, build_topic_embedding_check
 from .hreflang_validator import build_hreflang_checks
 from .integrations.google.checks import (
     build_lighthouse_checks,
@@ -272,6 +274,26 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Best practice: render critical content server-side; AI crawlers commonly fetch without executing JS. "
         "When Playwright is not installed this check reports 'not measured' (status=info) and does not "
         "affect the verdict. Enable in Crawl settings after installing silentfrog[geo-render]."
+    ),
+    "topic_embedding_coherence": (
+        "Embeds the title and each substantial paragraph with a local sentence-transformers model "
+        "(all-MiniLM-L6-v2) and reports their mean cosine similarity.\n\n"
+        "Low similarity = the body drifts from what the title promises, which weakens topical focus "
+        "for both search and generative engines. Runs fully locally (no text leaves the machine); "
+        "opt-in via Crawl settings after installing silentfrog[embeddings]. The 0.40 threshold is a "
+        "Silentfrog heuristic, not a measured ranking factor."
+    ),
+    "brand_mentions_visibility": (
+        "Counts off-site Brave web results that mention the brand plus Common Crawl references to "
+        "the host.\n\n"
+        "External mentions are how generative engines learn a brand exists. Absence is informational "
+        "(§1.5) — never a penalty. Opt-in via SILENTFROG_BRAND_MENTIONS_ENABLE; reuses the Brave key."
+    ),
+    "brand_mentions_trend": (
+        "Compares the two most recent locally-recorded brand-mention measurements for this host.\n\n"
+        "Each audited day appends one point to a local series (no SaaS, no telemetry), so the trend "
+        "reflects your own audit cadence. A declining count warns; verify against index churn before "
+        "reacting. Needs at least two audited days."
     ),
     "access_bot_render": (
         "Renders the page once per audited AI/search bot user-agent and compares the rendered DOMs.\n\n"
@@ -907,6 +929,11 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     bot_render_check = build_bot_render_check(data.get("bot_render"))
     if bot_render_check is not None:
         checks.append(bot_render_check)
+    # Topic embeddings + brand mentions (V20): only when their opt-ins ran.
+    topic_check = build_topic_embedding_check(TopicEmbeddingsPayload.from_raw(data.get("topic_embeddings", {})))
+    if topic_check is not None:
+        checks.append(topic_check)
+    checks.extend(build_brand_mention_checks(BrandMentionsPayload.from_raw(data.get("brand_mentions", {}))))
     # AI Citations area (N4a): only emitted when actually measured, so
     # the optional 8th area stays invisible on stock audits.
     if ai_citations.measured:

@@ -118,6 +118,10 @@ class CrawlOptions:
     # v2.0 V15: tech-stack (Wappalyzer-style) detection. Off by default;
     # opt-in via Crawl Settings.
     tech_stack_detection: bool = False
+    # v2.0 V20: local topic-embedding coherence scoring. Off by default —
+    # needs the `silentfrog[embeddings]` extra; inference is local-only but
+    # heavy, so it never runs unopted.
+    topic_embeddings: bool = False
     # v2.0 H4: audit profile gating extra HTTP/render/integrations. Defaults to
     # DEEP here so every existing caller keeps today's full coverage (PR-12 ships
     # the mechanism, behaviour-neutral). PR-13 flips the site-crawl default to
@@ -147,6 +151,7 @@ class CrawlOptions:
             use_stealth=False,
             custom_extraction=CustomExtractionConfig(),
             tech_stack_detection=False,
+            topic_embeddings=False,
             profile=AuditProfile.DEEP,
             allow_insecure_tls=False,
             allow_private_network=False,
@@ -167,6 +172,7 @@ class CrawlOptions:
         use_stealth: bool | None = None,
         custom_rules_text: str = "",
         tech_stack_detection: bool | None = None,
+        topic_embeddings: bool | None = None,
         profile: AuditProfile | str | None = None,
         allow_insecure_tls: bool | None = None,
         allow_private_network: bool | None = None,
@@ -190,6 +196,7 @@ class CrawlOptions:
             use_stealth=bool(use_stealth),
             custom_extraction=parse_rules_text(custom_rules_text or ""),
             tech_stack_detection=bool(tech_stack_detection),
+            topic_embeddings=bool(topic_embeddings),
             profile=base.profile if profile is None else AuditProfile.from_value(profile),
             allow_insecure_tls=bool(allow_insecure_tls),
             allow_private_network=bool(allow_private_network),

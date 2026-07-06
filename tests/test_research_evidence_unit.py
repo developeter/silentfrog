@@ -212,6 +212,22 @@ def comprehensive_audit_raw() -> dict[str, Any]:
             "source": "schema",
             "measured": True,
         },
+        "topic_embeddings": {
+            "measured": True,
+            "reason": "",
+            "coherence": 0.62,
+            "paragraphs_scored": 4,
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+        },
+        "brand_mentions": {
+            "measured": True,
+            "reason": "",
+            "brand": "Example",
+            "host": "e.com",
+            "brave_mentions": 3,
+            "common_crawl_refs": 2,
+            "series": [{"ts": 1, "brave": 2, "cc": 2}, {"ts": 2, "brave": 3, "cc": 2}],
+        },
         "semrush": {
             "domain_authority": 40,
             "organic_keywords": 100,

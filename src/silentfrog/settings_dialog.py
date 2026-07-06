@@ -23,6 +23,15 @@ def _playwright_available() -> bool:
     return True
 
 
+def _embeddings_available() -> bool:
+    """Return True when the optional silentfrog[embeddings] extra is importable."""
+    try:
+        import sentence_transformers  # type: ignore[import]  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 class CrawlSettingsDialog(QtWidgets.QDialog):
     """Lightweight dialog that groups gentle crawl controls away from the main window."""
 
@@ -94,6 +103,19 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "HTML, headers and scripts. Off by default; adds a 'tech_stack' block to the audit."
         )
         geo_layout.addRow(self.chk_tech_stack)
+        self.chk_topic_embeddings = QtWidgets.QCheckBox("Topic embeddings (local model)")
+        self.chk_topic_embeddings.setToolTip(
+            "Optional. Scores how well the body paragraphs stay on the topic the title promises, "
+            "using a local sentence-transformers model (all-MiniLM-L6-v2). Fully local — no text "
+            "leaves the machine; the first run downloads the model (~90 MB). Off by default."
+        )
+        if not _embeddings_available():
+            self.chk_topic_embeddings.setEnabled(False)
+            self.chk_topic_embeddings.setToolTip(
+                self.chk_topic_embeddings.toolTip() + "\n\nsentence-transformers is not installed: enable "
+                "by running `pip install silentfrog[embeddings]`."
+            )
+        geo_layout.addRow(self.chk_topic_embeddings)
         return geo_box
 
     def _build_semrush_group(self, theme: str) -> QtWidgets.QGroupBox:
@@ -275,6 +297,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             self.chk_ssr_parity.setChecked(False)
         self.chk_bot_render.setChecked(self.chk_bot_render.isEnabled() and options.bot_render)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
+        self.chk_topic_embeddings.setChecked(self.chk_topic_embeddings.isEnabled() and options.topic_embeddings)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
         self.chk_allow_private_network.setChecked(options.allow_private_network)
         profile_index = self.profile_combo.findData(options.profile.value)
@@ -391,6 +414,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             bot_render=bot_render,
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
+            topic_embeddings=bool(self.chk_topic_embeddings.isEnabled() and self.chk_topic_embeddings.isChecked()),
             # Hidden selector (single-page) keeps the incoming profile (DEEP).
             profile=self.profile_combo.currentData(),
             allow_insecure_tls=self.chk_allow_insecure_tls.isChecked(),
