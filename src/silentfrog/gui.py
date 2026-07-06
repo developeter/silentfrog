@@ -30,14 +30,13 @@ class HomeWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog")
-        # Final shape: a compact landing card locked to 420x560.
-        # v1.1 N5b added the "Multi-URL Dashboard" entry so the height
-        # bumped 500 → 560 to fit a fourth 48px button without
-        # touching the rest of the rhythm. Fixed size still means no
-        # resize handle, no green-pill fullscreen on macOS, no edge-
-        # cases for Qt to drift the layout. Child windows (Site Crawl,
-        # SEO, Redirect, Dashboard) stay resizable.
-        self.setFixedSize(420, 560)
+        # Final shape: a compact landing card locked to 420x500 (back to
+        # the pre-N5b height: v3 retired the Multi-URL Dashboard — Site
+        # Crawl's URL-list mode covers it — so the fourth 48px button is
+        # gone). Fixed size still means no resize handle, no green-pill
+        # fullscreen on macOS, no edge-cases for Qt to drift the layout.
+        # Child windows (Site Crawl, SEO, Redirect) stay resizable.
+        self.setFixedSize(420, 500)
 
         # Each click on a primary action opens a new top-level QWidget.
         # We must hold a Python reference to every one of them or
@@ -85,7 +84,6 @@ class HomeWindow(QMainWindow):
             ("Massive Redirect Check", self.open_redirect),
             ("Single Page SEO Check", self.open_seo),
             ("Site Crawl", self.open_site_crawl),
-            ("Multi-URL Dashboard", self.open_dashboard),
         )
         for label, callback in actions:
             btn = QPushButton(label)
@@ -131,11 +129,6 @@ class HomeWindow(QMainWindow):
         from .site_crawl_gui import SiteCrawlWindow
 
         self._spawn_child(SiteCrawlWindow())
-
-    def open_dashboard(self) -> None:
-        from .dashboard_gui import DashboardWindow
-
-        self._spawn_child(DashboardWindow())
 
     def _spawn_child(self, window: QtWidgets.QWidget) -> None:
         """Show ``window`` and retain a strong reference to it.

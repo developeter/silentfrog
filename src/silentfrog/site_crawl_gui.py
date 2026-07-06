@@ -80,7 +80,14 @@ _LIVE_ROW_WINDOW = 5000
 _GRAPH_NODE_CAP = 500
 # Display column -> sortable SQL (lightweight) column. Columns absent here derive
 # from the payload and keep crawl order (sorting them would load every payload).
-_SORT_COLUMN_BY_INDEX = {0: "url", 1: "http_status", 2: "indexability", 3: "title", 12: "issue_summary"}
+_SORT_COLUMN_BY_INDEX = {
+    0: "url",
+    1: "http_status",
+    2: "indexability",
+    3: "geo_score",
+    4: "title",
+    13: "issue_summary",
+}
 
 
 def _sql_filter_value(value: str) -> str:

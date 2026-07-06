@@ -310,6 +310,7 @@ def test_site_crawl_table_uses_crawler_overview_columns() -> None:
         "URL",
         "Status",
         "Indexability",
+        "GEO",  # v3: GEO Score column ported from the retired Multi-URL Dashboard
         "Title",
         "Meta desc",
         "Canonical",
@@ -324,11 +325,12 @@ def test_site_crawl_table_uses_crawler_overview_columns() -> None:
     assert "Final URL" not in headers
     assert "Performance" not in headers
     assert "AI Visibility" not in headers
-    assert row[6] == "Multiple (2)"
-    assert row[7] == 240
-    assert row[9] == 1
+    assert row[3] == result.geo_score
+    assert row[7] == "Multiple (2)"
+    assert row[8] == 240
+    assert row[10] == 1
     assert "H1: Multiple (2)" in str(row[-1])
-    assert model.headerData(12, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
+    assert model.headerData(13, QtCore.Qt.Orientation.Horizontal, QtCore.Qt.ItemDataRole.ToolTipRole)
 
 
 def test_row_detail_uses_cached_payload(qtbot) -> None:

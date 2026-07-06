@@ -1,9 +1,9 @@
 """Pure-Qt sparkline widget (v1.1 N5c).
 
 Tiny polyline chart with no QChart dependency — pure paintEvent. Used
-to overlay a GEO Score history on the AI Visibility tab and on every
-row of the Dashboard. Range is auto-scaled to [min, max] of the
-series; an empty series renders a centred "no history yet" string.
+to overlay a GEO Score history on the AI Visibility tab. Range is
+auto-scaled to [min, max] of the series; an empty series renders a
+centred "no history yet" string.
 """
 
 from __future__ import annotations
