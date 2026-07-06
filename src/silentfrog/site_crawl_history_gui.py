@@ -51,6 +51,10 @@ class CrawlHistoryRunsModel(QtCore.QAbstractTableModel):
 
 
 class CrawlHistoryDialog(QtWidgets.QDialog):
+    # v3: emitted with the selected CrawlHistoryRun when the user asks to
+    # reopen a saved scan whose SQLite store is still on disk.
+    openRunRequested = QtCore.Signal(object)
+
     def __init__(self, store: CrawlHistoryStore, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
@@ -101,9 +105,15 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
 
     def _build_actions(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
+        self.btn_open = QtWidgets.QPushButton("Open scan")
+        self.btn_open.setToolTip(
+            "Reopen this scan in the Site Crawl results view with full per-page detail. "
+            "Available while the scan's local crawl database is still on disk."
+        )
         self.btn_export = QtWidgets.QPushButton("Export selected JSON")
         self.btn_delete = QtWidgets.QPushButton("Delete selected")
         self.btn_close = QtWidgets.QPushButton("Close")
+        row.addWidget(self.btn_open)
         row.addWidget(self.btn_export)
         row.addWidget(self.btn_delete)
         row.addStretch()
@@ -112,6 +122,8 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
 
     def _connect_signals(self) -> None:
         self.table.selectionModel().currentChanged.connect(lambda *_: self._update_details())
+        self.table.doubleClicked.connect(lambda *_: self._open_selected())
+        self.btn_open.clicked.connect(self._open_selected)
         self.btn_export.clicked.connect(self._export_selected)
         self.btn_delete.clicked.connect(self._delete_selected)
         self.btn_close.clicked.connect(self.accept)
@@ -124,9 +136,11 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
         self._update_details()
 
     def _sync_actions(self) -> None:
-        has_selection = self._selected_run() is not None
+        run = self._selected_run()
+        has_selection = run is not None
         self.btn_export.setEnabled(has_selection)
         self.btn_delete.setEnabled(has_selection)
+        self.btn_open.setEnabled(has_selection and _run_openable(run))
 
     def _selected_run(self) -> CrawlHistoryRun | None:
         rows = self.table.selectionModel().selectedRows()
@@ -166,11 +180,19 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
         target = Path(path if path.lower().endswith(".json") else f"{path}.json")
         target.write_text(json.dumps(run.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
+    def _open_selected(self) -> None:
+        run = self._selected_run()
+        if run is None or not _run_openable(run):
+            return
+        self.openRunRequested.emit(run)
+        self.accept()
+
     def _delete_selected(self) -> None:
         run = self._selected_run()
         if run is None or not _confirm_delete(self, run):
             return
         self._store.delete_run(run.run_id)
+        _unlink_run_store(run)
         self.reload()
 
 
@@ -231,11 +253,31 @@ def _top_issues(run: CrawlHistoryRun) -> str:
     return "\n".join(lines)
 
 
+def _run_openable(run: CrawlHistoryRun | None) -> bool:
+    return run is not None and run.has_store and Path(run.db_path).is_file()
+
+
+def _unlink_run_store(run: CrawlHistoryRun) -> None:
+    """Best-effort removal of the run's crawl database (+WAL/SHM siblings)."""
+    if not run.db_path:
+        return
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            Path(run.db_path + suffix).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _confirm_delete(parent: QtWidgets.QWidget, run: CrawlHistoryRun) -> bool:
+    detail = (
+        "This removes the local history file and the stored crawl database."
+        if run.has_store
+        else "This only removes the local history file."
+    )
     result = QtWidgets.QMessageBox.question(
         parent,
         "Delete saved crawl",
-        f"Delete the saved crawl for {run.scope_key} from {run.created_at}?\n\nThis only removes the local history file.",
+        f"Delete the saved crawl for {run.scope_key} from {run.created_at}?\n\n{detail}",
     )
     return result == QtWidgets.QMessageBox.StandardButton.Yes
 

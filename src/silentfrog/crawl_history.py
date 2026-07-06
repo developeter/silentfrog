@@ -58,6 +58,20 @@ class CrawlHistoryIssue:
     def key(self) -> tuple[str, str]:
         return self.issue_id, self.url
 
+    def to_audit_issue(self) -> AuditIssue:
+        """Inverse of ``from_audit_issue`` — lets an opened past scan rebuild
+        its recap from the stored issues instead of re-streaming payloads."""
+        return AuditIssue(
+            issue_id=self.issue_id,
+            severity=self.severity,
+            category=self.category,
+            url=self.url,
+            reason=self.reason,
+            recommendation=self.recommendation,
+            source=self.source,
+            confidence=self.confidence,
+        )
+
     def to_dict(self) -> dict[str, str]:
         return {
             "issue_id": self.issue_id,
@@ -81,6 +95,12 @@ class CrawlHistoryRun:
     failed_count: int
     skipped_count: int
     issues: tuple[CrawlHistoryIssue, ...]
+    # v3: link back to the SQLite crawl store so a saved scan can be reopened
+    # with full per-page data. Empty for store-less runs and pre-v3 history
+    # files (which load fine via these defaults — "Open scan" just disables).
+    db_path: str = ""
+    store_run_id: str = ""
+    base_url: str = ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> CrawlHistoryRun:
@@ -94,7 +114,14 @@ class CrawlHistoryRun:
             failed_count=_to_int(value.get("failed_count")),
             skipped_count=_to_int(value.get("skipped_count")),
             issues=issues,
+            db_path=str(value.get("db_path", "")),
+            store_run_id=str(value.get("store_run_id", "")),
+            base_url=str(value.get("base_url", "")),
         )
+
+    @property
+    def has_store(self) -> bool:
+        return bool(self.db_path and self.store_run_id)
 
     def severity_count(self, severity: IssueSeverity) -> int:
         return sum(1 for issue in self.issues if issue.severity == severity)
@@ -122,6 +149,9 @@ class CrawlHistoryRun:
             "info_count": self.severity_count(IssueSeverity.INFO),
             "health_score": self.health_score(),
             "issues": [issue.to_dict() for issue in self.issues],
+            "db_path": self.db_path,
+            "store_run_id": self.store_run_id,
+            "base_url": self.base_url,
         }
 
 
@@ -187,6 +217,7 @@ def build_history_run(
     timestamp = created_at or _utc_timestamp()
     scope = scope_key or _scope_from_report(report)
     issues = tuple(CrawlHistoryIssue.from_audit_issue(issue) for issue in issues_for_site_report(report))
+    run_ref = report.run_ref
     return CrawlHistoryRun(
         run_id=f"{_safe_filename(scope)}_{_safe_filename(timestamp)}",
         created_at=timestamp,
@@ -196,6 +227,9 @@ def build_history_run(
         failed_count=report.failed_count,
         skipped_count=report.skipped_count,
         issues=issues,
+        db_path=str(run_ref.db_path) if run_ref is not None else "",
+        store_run_id=run_ref.run_id if run_ref is not None else "",
+        base_url=report.base_url,
     )
 
 

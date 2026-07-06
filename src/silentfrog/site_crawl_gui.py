@@ -78,6 +78,9 @@ _LIVE_ROW_WINDOW = 5000
 # item 6: cap nodes fed to the O(n^2) force-directed layout so a large crawl's
 # Link graph stays responsive (sampled to the most-central nodes).
 _GRAPH_NODE_CAP = 500
+# v3: how many crawl databases the rolling prune keeps on disk for "View past
+# scans" (newest first, the window's live/previous stores always excluded).
+_STORED_CRAWL_RETENTION = 10
 # Display column -> sortable SQL (lightweight) column. Columns absent here derive
 # from the payload and keep crawl order (sorting them would load every payload).
 _SORT_COLUMN_BY_INDEX = {
@@ -695,11 +698,29 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._stored_model = None
 
     def _roll_store_generation(self) -> None:
-        """Retain the immediately-previous run's store for the diff; discard the
-        run before it (at most two crawl stores live on disk at once)."""
-        self._discard_store(self._previous_store_path)
+        """v3 retention: stores are KEPT on disk so 'View past scans' can reopen
+        them with full per-page data; a rolling prune caps total disk use.
+        (Pre-v3 this unlinked everything but the previous run — that made the
+        SQLite store invisible value the moment the window closed.)"""
         self._previous_store_path = self._crawl_store_path
         self._crawl_store_path = str(new_crawl_db_path())
+        self._prune_stored_crawls()
+
+    def _prune_stored_crawls(self, keep: int = _STORED_CRAWL_RETENTION) -> None:
+        """Keep the ``keep`` newest crawl databases; unlink the rest (best
+        effort). The window's own live/previous stores are never pruned. A
+        history entry whose DB was pruned simply greys out its Open button."""
+        live = {self._crawl_store_path, self._previous_store_path}
+        try:
+            candidates = sorted(
+                (p for p in Path(self._crawl_store_path).parent.glob("crawl_*.db") if str(p) not in live),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return
+        for stale in candidates[max(0, keep) :]:
+            self._discard_store(str(stale))
 
     def _discard_store(self, path: str) -> None:
         """Best-effort unlink of a crawl store and its WAL/SHM siblings."""
@@ -942,7 +963,39 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _open_history_browser(self) -> None:
         dialog = CrawlHistoryDialog(self._history_store, self)
+        dialog.openRunRequested.connect(self._open_stored_run)
         dialog.exec()
+
+    def _open_stored_run(self, history_run: Any) -> None:
+        """v3: reopen a saved scan from history — SQL-paged results table plus
+        full per-page detail dialogs, all read from the stored SQLite run."""
+        run_ref = CrawlRunRef(db_path=history_run.db_path, run_id=history_run.store_run_id)
+        report = SiteCrawlReport.from_run(
+            run_ref,
+            discovered_count=history_run.discovered_count,
+            crawled_count=history_run.crawled_count,
+            skipped_count=history_run.skipped_count,
+            failed_count=history_run.failed_count,
+            base_url=history_run.base_url,
+        )
+        self._previous_report = self._latest_report
+        self._latest_report = report
+        # Adopt the opened run as the window's current store so the link graph
+        # and detail loaders read it; retention (not unlinking) makes this safe.
+        self._crawl_store_path = history_run.db_path
+        self._crawl_run_id = history_run.store_run_id
+        self._bind_stored_model(run_ref)
+        self._show_results()
+        self._set_running(False)
+        issues = [issue.to_audit_issue() for issue in history_run.issues]
+        self.recap_widget.update_issues(issues, item_count=max(1, history_run.discovered_count), item_label="crawl")
+        self._update_charts(report)
+        summary = self._report_summary(report)
+        self.lbl_discovery.setText(f"{summary} (opened from history: {history_run.created_at})")
+        self.lbl_history.setText(f"History: viewing saved scan {history_run.run_id}")
+        self.lbl_eta.setText("ETA: -")
+        self.progress.setFormat("Loaded from history")
+        self.progress.setValue(100)
 
     def _update_speed_label(self) -> None:
         mode = "Gentle" if self._crawl_options.gentle_mode else "Standard"
@@ -1125,8 +1178,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         if self._active_cancel:
             self._active_cancel.set()
         self._teardown_stored_model()
-        self._discard_store(self._crawl_store_path)
-        self._discard_store(self._previous_store_path)
+        # v3 retention: stores survive the window so saved scans stay openable
+        # from history; disk use is bounded by _prune_stored_crawls instead.
         super().closeEvent(event)
 
 

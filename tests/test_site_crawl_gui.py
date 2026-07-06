@@ -112,7 +112,13 @@ def test_site_crawl_setup_form_grows_fields_to_row_width(qtbot) -> None:
 def test_site_crawl_window_opens_history_browser(monkeypatch, qtbot, tmp_path: Path) -> None:
     opened: dict[str, object] = {}
 
+    class _FakeSignal:
+        def connect(self, *_a, **_k) -> None:
+            pass
+
     class FakeHistoryDialog:
+        openRunRequested = _FakeSignal()
+
         def __init__(self, store, parent=None) -> None:
             opened["store"] = store
             opened["parent"] = parent
@@ -560,10 +566,23 @@ def test_previous_run_retained_so_diff_sees_both(qtbot, tmp_path: Path) -> None:
     assert any(change.url == "https://e.com/keep" for change in diff.status_changes)
 
 
-def test_roll_store_generation_discards_two_crawls_ago(qtbot, tmp_path: Path) -> None:
-    older = tmp_path / "older.db"
-    older.write_bytes(b"x")  # stand-in for a two-crawls-ago store file
-    previous = tmp_path / "previous.db"
+def test_roll_store_generation_retains_stores_and_prunes_beyond_cap(monkeypatch, qtbot, tmp_path: Path) -> None:
+    # v3 retention: rolling no longer unlinks two-crawls-ago (saved scans must
+    # stay openable from history); instead a prune caps crawl_*.db files.
+    import os as _os
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    crawls = tmp_path / "crawls"
+    crawls.mkdir()
+    stale: list[Path] = []
+    for i in range(12):
+        p = crawls / f"crawl_stale{i:02d}.db"
+        p.write_bytes(b"x")
+        _os.utime(p, (1_000_000 + i, 1_000_000 + i))  # oldest-first mtimes
+        stale.append(p)
+    older = crawls / "crawl_older.db"
+    older.write_bytes(b"z")  # two-crawls-ago; fresh mtime -> retained
+    previous = crawls / "crawl_previous.db"
     previous.write_bytes(b"y")
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
@@ -572,8 +591,69 @@ def test_roll_store_generation_discards_two_crawls_ago(qtbot, tmp_path: Path) ->
 
     win._roll_store_generation()
 
-    assert not older.exists()  # two-crawls-ago is discarded
-    assert previous.exists()  # immediately-previous is retained for the diff
+    assert older.exists()  # v3: two-crawls-ago is RETAINED (was unlinked pre-v3)
+    assert previous.exists()
+    assert win._previous_store_path == str(previous)
+    survivors = sorted(p.name for p in crawls.glob("crawl_stale*.db"))
+    # 13 prunable candidates (12 stale + older), cap 10 -> the 3 oldest go.
+    assert len(survivors) == 9
+    assert stale[0].name not in survivors
+
+
+def test_close_event_keeps_stores_on_disk(qtbot, tmp_path: Path) -> None:
+    # v3 retention regression: closing the window used to unlink both stores,
+    # which made every saved scan unopenable the moment the window closed.
+    live = tmp_path / "crawl_live.db"
+    live.write_bytes(b"x")
+    previous = tmp_path / "crawl_prev.db"
+    previous.write_bytes(b"y")
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._crawl_store_path = str(live)
+    win._previous_store_path = str(previous)
+    win.close()
+    assert live.exists()
+    assert previous.exists()
+
+
+def test_open_stored_run_binds_paged_model_and_detail_payload(qtbot, tmp_path: Path) -> None:
+    # v3: opening a saved scan from history drives the SQL-paged table AND the
+    # per-page detail loader from the stored run.
+    from silentfrog.crawl_history import build_history_run
+
+    # A store with a persisted payload blob so the detail-load path is exercised.
+    db = tmp_path / "crawl_saved.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.save_audit(
+        run_id,
+        StoredAudit(
+            url="https://e.com/p",
+            http_status="200",
+            indexability="Indexable",
+            title="P",
+            geo_score=80,
+            payload=_payload().to_mapping(),
+        ),
+    )
+    store.finish_run(run_id)
+    store.close()
+    report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id), discovered_count=1, crawled_count=1, skipped_count=0, failed_count=0
+    )
+    history_run = build_history_run(report)
+    assert history_run.has_store  # linkage captured from report.run_ref
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._open_stored_run(history_run)
+
+    assert isinstance(win._stored_model, StoredCrawlTableModel)
+    assert win._stored_model.rowCount() == 1
+    assert win._stored_model.index(0, 0).data() == "https://e.com/p"
+    assert win._crawl_run_id == report.run_ref.run_id
+    payload = win._load_payload_for_detail("https://e.com/p")
+    assert payload is not None  # detail dialog path reads the stored payload
 
 
 def test_stored_model_owns_connection_on_building_thread(qtbot, tmp_path: Path) -> None:
