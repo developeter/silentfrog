@@ -1,6 +1,6 @@
 # Silentfrog — Handoff
 
-Last updated: 2026-06-29
+Last updated: 2026-07-06
 
 Fast orientation for the next session. This file stays short on purpose —
 durable detail lives in the linked sources, not here.
@@ -54,9 +54,15 @@ prioritized issues + evidence, local-first.
   distribution charts on the Site Crawl results screen, fed by read-only repository
   aggregates, with a pure-Qt text fallback when the extra is absent. Stage B
   (premium UI / QML) is out of scope for v2.0.
-- **Next (not started):** **V10** per-bot SSR rendering, then **V20** topic
-  embeddings + brand-mention time-series. **Dropped:** V18 (MCP server); V12
-  (folded into V17).
+- **V10 — shipped.** Per-bot SSR rendering: 19 bot user-agents rendered through
+  the V4 pool (now hardened against launch failures), per-bot cells in the Bot
+  Matrix SSR column, `access_bot_render` check. Off by default (Crawl Settings),
+  needs Playwright + DEEP profile.
+- **V20 — shipped.** Topic embeddings (local MiniLM title/body coherence, extra
+  **`[embeddings]`**, opt-in checkbox) + brand-mention time-series (Brave +
+  Common Crawl reuse, local per-host JSON series, `SILENTFROG_BRAND_MENTIONS_ENABLE`).
+  Three checks, emitted only when measured. **Roadmap V1..V20 complete.**
+  **Dropped:** V18 (MCP server); V12 (folded into V17).
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
