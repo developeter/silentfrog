@@ -1,32 +1,52 @@
 # Silentfrog — Claude Code project memory
 
+> If you are a new agent picking this up: read this file, then `AGENTS.md`
+> (the operating contract), then `HANDOFF.md` (current state). This file is
+> the durable map + the hard-won lessons that aren't obvious from the code.
+
 ## What this repo is
 
-Silentfrog is a Python + Qt desktop SEO/GEO auditor. v1.1 shipped the
-GEO moat (Core Web Vitals, CrUX field data, Princeton GEO methods, AI
-citation tracking, the 19-bot Bot Matrix heatmap, watch mode, the
-GEO-checks badge row). v2.0 (in flight) targets ~1M-URL whole-site
-crawling, richer audit data, and parity-plus versus Screaming Frog /
-Sitebulb while staying the best open-source alternative to the paid
-tools.
+Silentfrog is a Python + Qt (PySide6/qtpy) desktop SEO/GEO auditor — a
+local-first, open-source alternative to Screaming Frog / Sitebulb with a GEO
+(generative-engine optimization) moat no other tool bundles: a 19-bot access
+matrix with per-bot SSR rendering, Princeton GEO methods, llms.txt/ai.json
+parsing, Core Web Vitals (lab + CrUX field), local topic embeddings, and
+brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
+(whole-site, verified to ~100k URLs), and per-page detail.
 
-**Reply in English.**
+**Reply in English.** (AGENTS.md rule; the user has corrected this repeatedly.)
+
+## Status (2026-07-06)
+
+- **v2.0 roadmap V1..V20: complete.** Full milestone history in
+  `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in `HANDOFF.md`.
+- **v3 gap analysis: `docs/v3_roadmap.md`** — ranked gaps vs the paid tools,
+  with a must-have/nice-to-have verdict. Shipped from it so far: prioritized
+  hints engine (G1), JS-rendered link crawl (M8), reopenable past scans,
+  Multi-URL Dashboard retired (folded into Site Crawl URL-list mode + a GEO
+  column), Lighthouse-button fix, GUI design-token pass.
+- **Biggest open v3 gaps:** health-score + issue trends across crawls (G2),
+  BYO-key AI citation share-of-voice (G3, needs a policy decision — v2.0
+  locked out new AI-engine APIs), accessibility audits via axe-core (G4),
+  client-ready HTML report (G8), scheduled crawls + alert digest (G9).
 
 ## Where the rules live
 
 - `AGENTS.md` (repo root) — the operating contract. Read it first.
-- `docs/code_review_checklist.md` — run before closing any non-trivial
-  task.
+- `docs/code_review_checklist.md` — run before closing any non-trivial task.
+- `docs/v2_beat_screaming_frog_roadmap.md` — the v2.0 master roadmap (V1..V20).
+- `docs/v3_roadmap.md` — the post-v2.0 gap analysis + milestone ordering.
 - `.claude/plans/` — active per-task plans (ephemeral; not committed).
-- `docs/v2_beat_screaming_frog_roadmap.md` — the durable v2.0 master
-  roadmap (V1..V20). Source of truth for milestone scope + ordering.
 
 ## Key directories
 
 - `src/silentfrog/` — runtime modules
-- `src/silentfrog/models/` — Qt table models
-- `src/silentfrog/exporters/` — Excel exporters (+ LLM export, V5)
+- `src/silentfrog/models/` — Qt table models (e.g. `bot_matrix.py`)
+- `src/silentfrog/exporters/` — Excel + LLM export (V5)
 - `src/silentfrog/fetchers/` — fetcher strategy (V1)
+- `src/silentfrog/integrations/` — google (GSC/GA4/Lighthouse/CrUX/Rich), semrush
+- `src/silentfrog/embeddings/`, `brand_mentions/` — V20 (optional extra)
+- `src/silentfrog/link_graph/`, `logs/` — link graph, server-log analysis
 - `src/silentfrog/crawl_store.py` — streaming SQLite audit store (V2)
 - `tests/` — unit + GUI smoke tests via pytest-qt
 - `tools/` — `doctor.py`, `quality_gates.py`, `code_shape_guard.py`,
@@ -35,11 +55,11 @@ tools.
 ## How to run things
 
 - Quick gate: `poetry run python tools/doctor.py --quick`
-- Full gate: `poetry run python tools/doctor.py`
+- Full gate (7 gates: lock-check, dep-policy, ruff, format, mypy allowlist,
+  pytest+coverage, diff-cover): `poetry run python tools/doctor.py`
 - Tests only: `poetry run pytest -q`
-- Re-install editable after source edits:
-  `./.venv/Scripts/python.exe -m pip install --no-deps --upgrade .`
-- Smoke-render GUI tabs to PNG (no need to open the app):
+- Launch GUI: `poetry run silentfrog`
+- Smoke-render GUI tabs to PNG (no display needed, good for visual review):
   `poetry run python tools/smoke_render_tabs.py tmp_smoke_render`
 
 ## CLI surface
@@ -47,42 +67,74 @@ tools.
 - `silentfrog` — GUI entry point
 - `silentfrog-cli aggregate <sitemap_url>` — sitemap-level GEO report
 - `silentfrog-cli watch <urls>` — watch mode with regression alerts
-- `silentfrog-cli export --format llm <url|crawl.db>` — LLM-friendly
-  export (V5)
+- `silentfrog-cli export --format llm <url|crawl.db>` — LLM-friendly export (V5)
 
-## Supply chain rules (§4.5)
+## Invariants (hold on EVERY change — these are load-bearing)
 
-- Never install a PyPI dep less than 48 hours old. Verify via the PyPI
-  JSON endpoint (`https://pypi.org/pypi/<pkg>/json`) before adding.
-- Commit `poetry.lock` alongside every dependency bump.
-- Heavy / risky deps go behind optional extras (`silentfrog[stealth]`,
-  `[google]`, `[semrush]`, `[mcp]`, `[charts]`, `[embeddings]`). The
-  install base needs zero new deps.
+- **§1.5 myth rule:** an absent not-required signal → `info`, NEVER
+  `warning`/`critical`. Absence is informational, never a penalty.
+- **Add-only `CrawlPayload` keys.** New keys must survive the H0 lossless
+  `to_mapping`/`from_raw` round-trip, and old blobs must load with the field's
+  default (`_extra_group` returns `{}`). A guard test pins `_decode_fields`
+  keys == dataclass fields == `to_mapping` keys — a new field left unread
+  fails it.
+- **New features/integrations default OFF.** Every heavy or network feature is
+  opt-in via a `CrawlOptions` flag + Settings checkbox (or an env enable knob).
+  A stock audit must make zero extra network calls and load zero heavy models.
+- **Zero new base deps.** `tools/dependency_policy.py` freezes the base set;
+  heavy deps go behind extras (`[stealth] [google] [semrush] [charts]
+  [embeddings] [geo-render]`). Verify a new dep is ≥48h old on PyPI, pin it,
+  commit `poetry.lock`.
+- **Code shape** (`tools/code_shape_guard.py`): max nesting 2, no `if/elif`
+  string dispatch, 80-line function cap, ≤2 bool args, baseline never grows —
+  refactor instead.
+- **Integrations never run automatically**; external-API tests use mocks.
+  Never commit keys/tokens/crawl history/exports.
 
-## Commit policy
+## Working the roadmap
 
-- A PreToolUse hook denies bare `git commit`. Use the `caveman-commit`
-  skill or supply `-m "..."`, `-F file`, or `--amend`. Never bypass by
-  re-running the same bare command.
-- The user's verbatim commit message always wins; the skill only drafts
-  when the user hasn't supplied one.
+- Use `ship-roadmap-pr` for one numbered PR at a time; the main session
+  orchestrates — do NOT spawn a second orchestrator.
+- `lean-adversarial-reviewer` only for high-risk boundaries (persistence/
+  schema, concurrency/cancellation, networking/TLS/SSRF, updater/installer,
+  data loss, scoring, large-scale memory, mutable GUI identity). It is
+  read-only, Sonnet, probe-limited; it does not rerun the full suite.
+- `caveman-commit`/`caveman-review` for concise messages/reports.
 
-## Roadmap automation
+## Hard-won lessons (traps that cost time — heed them)
 
-- Use `ship-roadmap-pr` when starting or continuing a numbered roadmap PR.
-- The main session orchestrates; do not create an additional orchestrator.
-- Use `lean-adversarial-reviewer` only for the high-risk boundaries listed in
-  `AGENTS.md`. It is read-only, Sonnet, probe-limited, and does not rerun the
-  full suite.
-- Keep `caveman-review`/`caveman-commit` for concise reporting and messages;
-  they do not replace behavioral verification.
+- **The reviewer often truncates.** `lean-adversarial-reviewer` frequently
+  hits its turn budget mid-probe and stops before printing findings. If the
+  result isn't in `SEV file:symbol — …` / `No verified blockers.` form,
+  resume it via SendMessage asking for the report — it finishes reliably.
+- **The pre-push hook runs the full doctor** (several minutes) — that's the
+  gate, not an auth hang. Allow ≥5 min; a 2-min Bash timeout will look stuck.
+- **Non-editable install quirk:** `tests/conftest.py` prepends `src/`, so
+  tests exercise the working tree, but the *app* runs the copy in
+  `.venv/Lib/site-packages/silentfrog`. After editing source while the GUI is
+  open, re-sync with `cp -r src/silentfrog/* .venv/.../silentfrog/` (a plain
+  pip reinstall rolls back while `silentfrog.exe` is locked). App closed → a
+  normal reinstall works.
+- **Git commits:** a PreToolUse hook denies a bare `git commit`. Supply
+  `-m`/`-F`/`--amend`. For multi-line messages on Windows, write the message
+  to a scratch file and use `git commit -F` — PowerShell here-strings into
+  `git` are fragile and have failed silently mid-session.
+- **CRLF warnings on commit are harmless** (the repo is LF; Git converts).
+- **A long-lived resource on a worker thread must guard its construction.**
+  The V4 `RenderPool` originally let a failed browser launch kill the worker
+  thread, hanging every queued render forever. Any pool/thread that other code
+  awaits must resolve pending work with an error on construction failure, not
+  die. (Same lesson bit the V20 embedder — guard the model *constructor*, not
+  just the import: the download happens on first use.)
+- **The repo lives in the NESTED `silentfrog/` subdir**, not the outer
+  workspace. `git`, `pyproject.toml`, `tests/` are all under `silentfrog/`.
+- **Push identity:** the remote is pinned to the `developeter` GitHub account
+  via a repo-LOCAL credential helper. Before pushing, confirm
+  `git config --local user.email` is `developeter.apps@gmail.com` — never rely
+  on a global identity.
 
-## Code shape (enforced by tools/code_shape_guard.py)
+## Comment policy
 
-- Max nesting depth 2; guard clauses over nesting.
-- No `if/elif` ladders for string dispatch — use constants or maps.
-- 80-line per-function cap. New code must NOT grow
-  `tools/code_shape_baseline.json` — refactor instead.
-- Comments explain intent or tradeoffs, never restate the code.
-- Prefer typed frozen dataclasses over loose dicts when data crosses
-  module boundaries.
+Comments explain intent or tradeoffs, never restate the code. Prefer typed
+frozen dataclasses over loose dicts when data crosses module boundaries. Keep
+parsing / derivation / orchestration / UI rendering in separate functions.

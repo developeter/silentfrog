@@ -64,6 +64,33 @@ prioritized issues + evidence, local-first.
   Three checks, emitted only when measured. **Roadmap V1..V20 complete.**
   **Dropped:** V18 (MCP server); V12 (folded into V17).
 
+## v3 — post-v2.0 (gap analysis: `docs/v3_roadmap.md`)
+
+Shipped:
+- **Prioritized hints engine (G1):** `hints.py` groups per-URL `AuditIssue`s by
+  type into severity-ranked `Hint`s with a prevalence count; the Site Crawl
+  recap now reads "Missing meta description — 142 of 900 pages" instead of a
+  flat per-URL list. Site-wide "blocked from AI search" (G12) falls out of this
+  for free (AI-access checks already flow into `ai_geo.*` issues).
+- **JS-rendered link crawl (M8):** opt-in `render_js` unions JS-rendered DOM
+  links into `payload.links` so the spider follows SPA/React/Vue routes. Off by
+  default; needs Playwright + DEEP.
+- **Reopenable past scans:** crawl SQLite stores are now retained (rolling prune,
+  10 newest); "View past scans" → **Open scan** reloads the SQL-paged results
+  table with full per-page detail. History records `db_path`/`store_run_id`.
+- **Multi-URL Dashboard retired:** Site Crawl URL-list mode covers it; its
+  GEO-Score-per-URL view moved to a sortable **GEO** column in the results table.
+- **Lighthouse fix:** the button silently no-op'd (anonymous PSI quota is
+  permanently 429, swallowed at three layers). Failures now surface a dialog
+  with the `SILENTFROG_PSI_API_KEY` remedy; the "Not run" hint row always shows.
+- **GUI design-token pass:** one QSS template + per-theme tokens (light mode was
+  visibly broken); zebra/gridless tables, underline tabs, styled inputs.
+
+Next (ranked in `docs/v3_roadmap.md`): G2 health-score + issue trends · G3
+BYO-key AI citation share-of-voice (needs the "no new AI-engine APIs" policy
+reopened) · G4 accessibility (axe-core via the render pool) · G8 HTML report ·
+G9 scheduled crawls + alert digest.
+
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
 Settings/integrations default OFF; zero new **base** deps — heavy deps go behind

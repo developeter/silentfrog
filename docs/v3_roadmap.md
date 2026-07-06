@@ -25,9 +25,14 @@ Three themes: **A** — turn checks into prioritized, trended, reportable
 recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 **C** — visual/automation surfaces.
 
+> **Status (2026-07-06):** G1 ✅ shipped · G12 ✅ (delivered via G1) · plus,
+> outside this table: JS-rendered link crawl (M8) ✅, reopenable past scans ✅,
+> Multi-URL Dashboard retired ✅, Lighthouse button fixed ✅, GUI token pass ✅.
+> Remaining top gaps: G2, G3 (policy decision), G4, G8, G9.
+
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
-| G1 | A | **Prioritized hints engine** — severity + plain-English *why* + *how to fix* per finding | Sitebulb Hints (300+), Semrush thematic reports | Biggest UX gap; most data already exists in check details/recommendations — this is a presentation + curation layer |
+| G1 ✅ | A | **Prioritized hints engine** — severity + plain-English *why* + *how to fix* per finding | Sitebulb Hints (300+), Semrush thematic reports | SHIPPED: `hints.py` + recap. Data already existed in check details/recommendations; this is the ranking + grouping layer |
 | G2 | A | **Audit health score + per-issue trend history** across stored crawls | Ahrefs always-on audits, Sitebulb Audit Scores | SQLite runs already persist everything; longitudinal issue charts are presentation work |
 | G3 | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | The whole $300M GEO category, local-first; no OSS equivalent exists. Needs a "new AI-engine APIs" policy decision (v2.0 locked this out; v3 can reopen it as strictly BYO-key opt-in) |
 | G4 | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | Rides the existing render pool; axe-core JS injectable via Playwright |
@@ -38,7 +43,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G9 | C | **Scheduled runs + notifications with auto-diff digest** (email/webhook) | SF v24 auto-compare, Sitebulb alerts | Watch mode exists; missing the alerting transport + scheduling |
 | G10 | B | **llms.txt generator/validator** | Sitebulb ships one | Cheap; complements the existing per-bot matrix |
 | G11 | B | **AI-agent log analytics view** — classify 40+ AI crawlers in the existing log module | Peec server-log integration (€169/mo tier) | bot_fingerprint.py already exists; extend taxonomy + dedicated view |
-| G12 | A | **"Blocked from AI Search" rollup + AI Readiness Score** | Semrush AI widget, Rankscale score | Pure repackaging of existing robots-matrix/GEO data |
+| G12 ✅ | A | **"Blocked from AI Search" rollup + AI Readiness Score** | Semrush AI widget, Rankscale score | DELIVERED VIA G1: AI-access checks flow into `ai_geo.*` issues, so `build_hints` groups them into "AI crawler blocked — N pages" site-wide. A separate AI-readiness number would duplicate the existing GEO Score — deliberately not added |
 | G13 | B | **Semantic redirect mapping** (embedding old→new URL matching for migrations) | SF v23 | Embeddings extra already in the tree |
 | G14 | A | **Uncrawlable link detection** (onclick/span/div pseudo-links) | SF v24 | Small crawl-layer check |
 | G15 | A | **Spelling/grammar** | SF classic | Low effort with local dictionaries; multilingual caveat |
@@ -58,6 +63,34 @@ AI-agent log view → G10 llms.txt generator → G4 accessibility**.
 Tier B (reach): **G8 HTML report → G5 visualisations → G6 MCP → G9
 scheduling/alerts → G7 custom prompts**.
 Tier C (parity nits): G13, G14, G15.
+
+## Notable absences — verdict (2026-07-06)
+
+**Must-have** (without these it is not a credible alternative to the paid tools):
+
+| Rank | Absence | Why it gates adoption |
+|---|---|---|
+| M1 | Prioritized hints engine (G1) | Raw checks ≠ an audit; every competitor leads with "what do I fix first" |
+| M2 | Fully browsable past scans | Stored runs users can't reopen page-by-page make the SQLite store invisible value |
+| M3 | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
+| M4 | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
+| M5 | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
+| M6 | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |
+| M7 | Scheduled re-crawl + alert digest (G9) | Watch mode exists; without transport (email/webhook) it's a demo |
+| M8 | Rendered-DOM link discovery for SPAs | Spider misses JS-routed sites entirely — a correctness gap, not a feature |
+
+**Nice-to-have** (differentiators or parity nits, after the must list):
+MCP server (G6) · custom AI prompts w/ Ollama (G7) · force-directed/cluster
+visualisations (G5) · llms.txt generator (G10) · AI-agent log analytics view
+(G11) · semantic redirect mapping (G13) · uncrawlable-link detection (G14) ·
+spelling/grammar (G15) · WARC export · crawl segments · sitemap generation.
+
+**Deliberately out** (policy, unchanged from v2.0): cloud/SaaS/team features,
+telemetry, first-party backlink index (Semrush BYO-key covers it), keyword
+rank tracking (needs SERP scraping infra), white-label/multi-tenant.
+
+**Removed in v3**: the Multi-URL Dashboard (duplicate of Site Crawl's URL-list
+mode; its GEO-Score-per-URL view moves to the Site Crawl results table).
 
 ## GUI redesign (Stage B, prerequisite polish shipped separately)
 
