@@ -9,11 +9,7 @@ _BASE = "https://spa.example.com/"
 _RAW = "<html><body><a href='/home'>Home</a></body></html>"
 # A SPA whose nav links exist only after JS hydration.
 _RENDERED = (
-    "<html><body>"
-    "<a href='/home'>Home</a>"
-    "<a href='/products'>Products</a>"
-    "<a href='/about'>About</a>"
-    "</body></html>"
+    "<html><body><a href='/home'>Home</a><a href='/products'>Products</a><a href='/about'>About</a></body></html>"
 )
 
 
