@@ -66,7 +66,8 @@ HEATMAP_HEADER_TOOLTIPS: list[str] = [
     (
         "Site-wide: green = server-rendered DOM matches the JS-rendered DOM; "
         "yellow / red = mismatch. Grey when the SSR parity check is not enabled "
-        "(Settings → Run SSR parity check)."
+        "(Settings → Run SSR parity check). With per-bot SSR rendering enabled "
+        "(V10) each cell reflects the render seen by THAT bot's user-agent."
     ),
     (
         "Per-bot: combines robots.txt + nonstandard directives + Google search "
@@ -246,6 +247,37 @@ def _llms_status_for_bot(
     return site_status
 
 
+def _bot_render_entries(bot_render: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """The per-bot diff map from the V10 payload, or {} when unmeasured."""
+    if not isinstance(bot_render, Mapping) or not bot_render.get("measured"):
+        return {}
+    bots = bot_render.get("bots")
+    return bots if isinstance(bots, Mapping) else {}
+
+
+def _ssr_status_for_bot(
+    token: str,
+    entries: Mapping[str, Any],
+    site_status: tuple[str, str],
+) -> tuple[str, str]:
+    """Per-bot SSR cell (v2.0 V10): this bot's own render diff when measured,
+    otherwise the site-wide SSR parity fallback."""
+    entry = entries.get((token or "").strip().lower())
+    if not isinstance(entry, Mapping):
+        return site_status
+    status = str(entry.get("status", "")).strip().lower()
+    reason = str(entry.get("reason", "")).strip()
+    if status == "good":
+        return "good", "Per-bot render matches the server-rendered DOM."
+    if status in {"warning", "critical"}:
+        detail = reason or (
+            f"Rendered DOM differs: +{entry.get('missing_main_text_chars', 0)} chars, "
+            f"+{entry.get('missing_links', 0)} links vs the server-rendered HTML."
+        )
+        return status, f"Per-bot render ({status}): {detail}"
+    return site_status
+
+
 def _ssr_status(render: Mapping[str, Any] | None) -> tuple[str, str]:
     if not isinstance(render, Mapping) or not render:
         return "info", "SSR parity not measured — enable in Settings → Run SSR parity check."
@@ -308,6 +340,7 @@ def build_bot_rows(
     ai_crawl_rows: Sequence[Sequence[Any]],
     discovery: Mapping[str, Any] | None = None,
     render: Mapping[str, Any] | None = None,
+    bot_render: Mapping[str, Any] | None = None,
 ) -> list[BotRow]:
     """Produce one ``BotRow`` per AI crawl row.
 
@@ -316,11 +349,13 @@ def build_bot_rows(
     Nonstandard directive, Google controls, Verdict, Notes]``.
 
     Site-wide signals (llms.txt, SSR parity) are computed once and
-    replicated across every row.
+    replicated across every row. With the V10 ``bot_render`` payload the
+    SSR column upgrades to that bot's own per-UA render diff.
     """
     site_llms = _llms_status(discovery)
     policies = ai_json_agent_policies(discovery)  # V11: per-agent ai.json
-    ssr_status, ssr_tip = _ssr_status(render)
+    site_ssr = _ssr_status(render)
+    render_entries = _bot_render_entries(bot_render)  # V10: per-bot SSR
     rows: list[BotRow] = []
     for raw in ai_crawl_rows:
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
@@ -331,6 +366,7 @@ def build_bot_rows(
         robots_status, robots_tip = _robots_status(robots_ok)
         meta_status, meta_tip = _meta_status(nonstandard)
         llms_status, llms_tip = _llms_status_for_bot(token, policies, site_llms)
+        ssr_status, ssr_tip = _ssr_status_for_bot(token, render_entries, site_ssr)
         verdict_status, verdict_tip = _verdict_status(verdict, notes)
         rows.append(
             BotRow(

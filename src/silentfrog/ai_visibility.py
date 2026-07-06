@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .ai_citations import AiCitationsPayload, build_ai_citations_checks
+from .bot_render import build_bot_render_check
 from .citation_advanced import AdvancedCitationPayload, build_advanced_citation_checks
 from .citation_readiness_content import CitationContentPayload, build_citation_content_checks
 from .crawl_types import (
@@ -271,6 +272,13 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Best practice: render critical content server-side; AI crawlers commonly fetch without executing JS. "
         "When Playwright is not installed this check reports 'not measured' (status=info) and does not "
         "affect the verdict. Enable in Crawl settings after installing silentfrog[geo-render]."
+    ),
+    "access_bot_render": (
+        "Renders the page once per audited AI/search bot user-agent and compares the rendered DOMs.\n\n"
+        "Divergence means the server varies content by user-agent (WAF blocks, cloaking, bot-specific "
+        "templates) — AI engines then see a different page than users. The Bot Matrix SSR column shows "
+        "the per-bot detail. Opt-in (Crawl settings) and only emitted when it actually ran; the user-agent "
+        "strings are Silentfrog's best-effort impersonation of each bot, so treat results as a heuristic."
     ),
     "perf_lcp": (
         "Largest Contentful Paint — lab measurement via Playwright CDP. Google's Core Web Vitals threshold: "
@@ -895,6 +903,10 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_eeat_checks(eeat),
         *build_performance_checks(vitals, crux),
     ]
+    # Per-bot SSR rendering (V10): only emitted when the opt-in feature ran.
+    bot_render_check = build_bot_render_check(data.get("bot_render"))
+    if bot_render_check is not None:
+        checks.append(bot_render_check)
     # AI Citations area (N4a): only emitted when actually measured, so
     # the optional 8th area stays invisible on stock audits.
     if ai_citations.measured:

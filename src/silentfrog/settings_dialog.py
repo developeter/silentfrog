@@ -74,6 +74,20 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "`pip install silentfrog[geo-render]` and `playwright install chromium`."
             )
         geo_layout.addRow(self.chk_ssr_parity)
+        self.chk_bot_render = QtWidgets.QCheckBox("Per-bot SSR rendering (render as each AI bot)")
+        self.chk_bot_render.setToolTip(
+            "Optional. Renders the page once per audited AI/search bot user-agent (19 bots) and "
+            "compares the rendered DOMs — surfaces WAF blocks, cloaking, and UA-dependent content in "
+            "the Bot Matrix SSR column. Slow (one render per bot per page); off by default. Requires "
+            "Playwright and a Deep audit profile."
+        )
+        if not _playwright_available():
+            self.chk_bot_render.setEnabled(False)
+            self.chk_bot_render.setToolTip(
+                self.chk_bot_render.toolTip() + "\n\nPlaywright is not installed: enable by running "
+                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
+            )
+        geo_layout.addRow(self.chk_bot_render)
         self.chk_tech_stack = QtWidgets.QCheckBox("Detect tech stack (Wappalyzer-style)")
         self.chk_tech_stack.setToolTip(
             "Optional. Identifies the CMS, frameworks, analytics, CDN and server from the page's "
@@ -259,6 +273,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             self.chk_ssr_parity.setChecked(options.ssr_parity_check)
         else:
             self.chk_ssr_parity.setChecked(False)
+        self.chk_bot_render.setChecked(self.chk_bot_render.isEnabled() and options.bot_render)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
         self.chk_allow_private_network.setChecked(options.allow_private_network)
@@ -366,12 +381,14 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         header_text = self.txt_headers.toPlainText().strip()
         cookie_text = self.edit_cookies.text().strip()
         ssr = bool(self.chk_ssr_parity.isEnabled() and self.chk_ssr_parity.isChecked())
+        bot_render = bool(self.chk_bot_render.isEnabled() and self.chk_bot_render.isChecked())
         return CrawlOptions.from_ui(
             gentle_mode=self.chk_gentle.isChecked(),
             max_parallel=self.spin_parallel.value(),
             header_text=header_text,
             cookie_text=cookie_text,
             ssr_parity_check=ssr,
+            bot_render=bot_render,
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
             # Hidden selector (single-page) keeps the incoming profile (DEEP).

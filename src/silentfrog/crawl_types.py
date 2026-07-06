@@ -1301,6 +1301,8 @@ class CrawlPayload:
     citation_advanced: dict[str, Any] = field(default_factory=dict)
     seo_basics: dict[str, Any] = field(default_factory=dict)
     render: dict[str, Any] = field(default_factory=dict)
+    # v2.0 V10: per-bot SSR render diffs {measured, reason, bots:{token:{...}}}.
+    bot_render: dict[str, Any] = field(default_factory=dict)
     perf_vitals: dict[str, Any] = field(default_factory=dict)
     perf_crux: dict[str, Any] = field(default_factory=dict)
     ai_citations: dict[str, Any] = field(default_factory=dict)
@@ -1352,6 +1354,7 @@ class CrawlPayload:
             "citation_advanced": _extra_group(data, "citation_advanced"),
             "seo_basics": _extra_group(data, "seo_basics"),
             "render": _extra_group(data, "render"),
+            "bot_render": _extra_group(data, "bot_render"),
             "perf_vitals": _extra_group(data, "perf_vitals"),
             "perf_crux": _extra_group(data, "perf_crux"),
             "ai_citations": _extra_group(data, "ai_citations"),
@@ -1394,6 +1397,7 @@ class CrawlPayload:
             "citation_advanced": dict(self.citation_advanced),
             "seo_basics": dict(self.seo_basics),
             "render": dict(self.render),
+            "bot_render": dict(self.bot_render),
             "perf_vitals": dict(self.perf_vitals),
             "perf_crux": dict(self.perf_crux),
             "ai_citations": dict(self.ai_citations),

@@ -48,9 +48,13 @@ def _default_browser_factory() -> BrowserManager:
     return BrowserManager()
 
 
-def _render_with_browser(browser: Any, url: str, timeout: int, collect_vitals: bool) -> RenderResult:
+def _render_with_browser(
+    browser: Any, url: str, timeout: int, collect_vitals: bool, user_agent: str = ""
+) -> RenderResult:
     try:
-        page = browser.new_page()
+        # v2.0 V10: only pass user_agent when set, so pre-V10 fakes (and the
+        # default-UA path) keep the zero-kwarg new_page() contract.
+        page = browser.new_page(user_agent=user_agent) if user_agent else browser.new_page()
     except Exception as exc:  # pragma: no cover - real browser failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
     try:
@@ -77,6 +81,8 @@ class _RenderJob:
     collect_vitals: bool
     loop: asyncio.AbstractEventLoop
     future: asyncio.Future[RenderResult]
+    # v2.0 V10: render with this exact user-agent ("" = browser default).
+    user_agent: str = ""
 
 
 def _resolve(future: asyncio.Future[RenderResult], result: RenderResult) -> None:
@@ -102,32 +108,49 @@ class RenderPool:
                 self._thread = threading.Thread(target=self._run, daemon=True)
                 self._thread.start()
 
-    async def render(self, url: str, timeout: int = 15, collect_vitals: bool = False) -> RenderResult:
+    async def render(
+        self,
+        url: str,
+        timeout: int = 15,
+        collect_vitals: bool = False,
+        user_agent: str = "",
+    ) -> RenderResult:
         self._ensure_started()
         loop = asyncio.get_running_loop()
         future: asyncio.Future[RenderResult] = loop.create_future()
-        self._queue.put(_RenderJob(url, timeout, collect_vitals, loop, future))
+        self._queue.put(_RenderJob(url, timeout, collect_vitals, loop, future, user_agent))
         return await future
 
     def _run(self) -> None:
-        manager = self._factory()
-        browser = manager.launch()
+        # V10 hardening: a failed launch must never kill the worker thread —
+        # queued futures would hang forever. A dead browser resolves every
+        # job with an error result instead.
+        manager, browser, launch_error = self._start_browser()
         pages_done = 0
         try:
             while True:
                 job = self._queue.get()
                 if job is None:
                     return
-                result = _render_with_browser(browser, job.url, job.timeout, job.collect_vitals)
+                result = _job_result(browser, job, launch_error)
                 job.loop.call_soon_threadsafe(_resolve, job.future, result)
                 pages_done += 1
-                if pages_done >= self._max_pages:
-                    _safe_close(browser)
-                    browser = manager.launch()
-                    pages_done = 0
+                if browser is None or pages_done < self._max_pages:
+                    continue
+                _safe_close(browser)
+                browser, launch_error = _relaunch(manager)
+                pages_done = 0
         finally:
             _safe_close(browser)
             _safe_stop(manager)
+
+    def _start_browser(self) -> tuple[Any, Any, str]:
+        try:
+            manager = self._factory()
+        except Exception as exc:
+            return None, None, f"{type(exc).__name__}: {exc}"
+        browser, error = _relaunch(manager)
+        return manager, browser, error
 
     def close(self) -> None:
         thread = self._thread
@@ -142,6 +165,20 @@ def _safe_stop(manager: Any) -> None:
         manager.stop()
     except Exception:
         pass
+
+
+def _relaunch(manager: Any) -> tuple[Any, str]:
+    """Launch a browser off *manager*; ``(None, error)`` instead of raising."""
+    try:
+        return manager.launch(), ""
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _job_result(browser: Any, job: _RenderJob, launch_error: str) -> RenderResult:
+    if browser is None:
+        return RenderResult(url=job.url, rendered_html="", error=f"Browser launch failed: {launch_error}")
+    return _render_with_browser(browser, job.url, job.timeout, job.collect_vitals, job.user_agent)
 
 
 __all__ = ["BrowserManager", "RenderPool"]

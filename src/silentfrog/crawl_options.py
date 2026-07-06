@@ -104,6 +104,10 @@ class CrawlOptions:
     user_agent: str
     extra_headers: dict[str, str]
     ssr_parity_check: bool = False
+    # v2.0 V10: per-bot SSR rendering — renders the page once per AI-bot
+    # user-agent through the shared render pool and diffs each DOM. Off by
+    # default; needs Playwright and a rendering profile (DEEP).
+    bot_render: bool = False
     # v2.0 V1: opt-in stealth fetcher (Scrapling TLS + browser escalation
     # past WAF blocks). Off by default — needs the `silentfrog[stealth]`
     # extra installed to actually escalate; otherwise the strategy stays
@@ -139,6 +143,7 @@ class CrawlOptions:
             user_agent=DEFAULT_USER_AGENT,
             extra_headers={},
             ssr_parity_check=False,
+            bot_render=False,
             use_stealth=False,
             custom_extraction=CustomExtractionConfig(),
             tech_stack_detection=False,
@@ -158,6 +163,7 @@ class CrawlOptions:
         header_text: str | None = None,
         cookie_text: str | None = None,
         ssr_parity_check: bool = False,
+        bot_render: bool | None = None,
         use_stealth: bool | None = None,
         custom_rules_text: str = "",
         tech_stack_detection: bool | None = None,
@@ -180,6 +186,7 @@ class CrawlOptions:
             user_agent=ua,
             extra_headers=extras,
             ssr_parity_check=bool(ssr_parity_check),
+            bot_render=bool(bot_render),
             use_stealth=bool(use_stealth),
             custom_extraction=parse_rules_text(custom_rules_text or ""),
             tech_stack_detection=bool(tech_stack_detection),

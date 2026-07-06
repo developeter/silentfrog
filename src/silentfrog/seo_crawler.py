@@ -310,6 +310,16 @@ async def _collect_render_diff_and_vitals(
     return render_payload, vitals_payload
 
 
+async def _collect_bot_renders(response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy) -> dict[str, Any]:
+    """v2.0 V10 — per-bot SSR renders through the shared pool. Off by default;
+    ``{}`` (unmeasured) when the flag is off or the profile does not render."""
+    if not crawl_options.bot_render or not policy.render:
+        return {}
+    from .bot_render import render_for_bots
+
+    return await render_for_bots(response.url, response.body)
+
+
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
     """Audit one URL. TLS is verified and SSRF is guarded by default; a crawl
     that opted into ``allow_insecure_tls`` / ``allow_private_network`` relaxes
@@ -353,6 +363,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
     )
     seo_basics = extract_seo_basics(soup, response.url)
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options, policy)
+    bot_render_payload = await _collect_bot_renders(response, crawl_options, policy)
     crux_payload, ai_citations_payload, google_metrics, semrush_metrics = await _collect_integrations(
         response.url, policy
     )
@@ -373,6 +384,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         "citation_advanced": citation_advanced.to_dict(),
         "seo_basics": seo_basics.to_dict(),
         "render": render_payload,
+        "bot_render": bot_render_payload,
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
         "ai_citations": ai_citations_payload,

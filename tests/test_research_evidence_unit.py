@@ -160,6 +160,19 @@ def comprehensive_audit_raw() -> dict[str, Any]:
             "missing_links": 0,
             "reason": "",
         },
+        "bot_render": {
+            "measured": True,
+            "reason": "",
+            "bots": {
+                "gptbot": {
+                    "status": "good",
+                    "missing_headings": [],
+                    "missing_main_text_chars": 0,
+                    "missing_links": 0,
+                    "reason": "",
+                },
+            },
+        },
         "perf_vitals": {
             "lcp_ms": 2000.0,
             "inp_ms": 100.0,

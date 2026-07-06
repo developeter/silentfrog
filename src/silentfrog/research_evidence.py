@@ -143,6 +143,7 @@ CHECK_EVIDENCE: dict[str, tuple[str, tuple[str, ...]]] = {
     "access_agents": (EVIDENCE_OFFICIAL, ("RFC-9309",)),
     "access_controls": (EVIDENCE_OFFICIAL, ("GOOGLE-ROBOTS-META",)),
     "access_ssr_parity": (EVIDENCE_HEURISTIC, ()),
+    "access_bot_render": (EVIDENCE_HEURISTIC, ()),
     # Site-wide discovery
     "access_llms_txt": (EVIDENCE_OFFICIAL, _AIF),
     "access_llms_full_txt": (EVIDENCE_OFFICIAL, _AIF),

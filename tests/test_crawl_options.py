@@ -14,6 +14,13 @@ def test_crawl_options_default_values() -> None:
     assert options.allow_private_network is False  # H7: SSRF guarded unless opted out
 
 
+def test_crawl_options_bot_render_off_by_default() -> None:
+    # V10: per-bot SSR rendering is strictly opt-in.
+    assert CrawlOptions.default().bot_render is False
+    assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4).bot_render is False
+    assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, bot_render=True).bot_render is True
+
+
 def test_crawl_options_from_ui_allow_insecure_tls_off_by_default() -> None:
     assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4).allow_insecure_tls is False
     opted_in = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, allow_insecure_tls=True)

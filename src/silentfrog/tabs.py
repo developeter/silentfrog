@@ -450,8 +450,8 @@ class BotMatrixTab(TableTab):
         full payload to pick up the discovery + render keys) on
         the same code path.
         """
-        ai_crawl_rows, discovery, render = self._unpack(data)
-        bots = build_bot_rows(ai_crawl_rows, discovery, render)
+        ai_crawl_rows, discovery, render, bot_render = self._unpack(data)
+        bots = build_bot_rows(ai_crawl_rows, discovery, render, bot_render)
         model = BotMatrixModel(bots)
         self._model = model
         self.set_model(model)
@@ -479,16 +479,17 @@ class BotMatrixTab(TableTab):
             header.resizeSection(col, 90)
 
     @staticmethod
-    def _unpack(data: object) -> tuple[list[list[str]], dict | None, dict | None]:
+    def _unpack(data: object) -> tuple[list[list[str]], dict | None, dict | None, dict | None]:
         if isinstance(data, list):
-            return [list(row) for row in data if isinstance(row, (list, tuple))], None, None
+            return [list(row) for row in data if isinstance(row, (list, tuple))], None, None, None
         if isinstance(data, dict):
             raw_rows = data.get("ai_crawl", []) or []
             rows = [list(row) for row in raw_rows if isinstance(row, (list, tuple))]
             discovery = data.get("discovery") if isinstance(data.get("discovery"), dict) else None
             render = data.get("render") if isinstance(data.get("render"), dict) else None
-            return rows, discovery, render
-        return [], None, None
+            bot_render = data.get("bot_render") if isinstance(data.get("bot_render"), dict) else None
+            return rows, discovery, render, bot_render
+        return [], None, None, None
 
     def _on_row_activated(self, index: QtCore.QModelIndex) -> None:
         if self._model is None:
