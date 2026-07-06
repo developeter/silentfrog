@@ -158,6 +158,12 @@ class TableTab(QtWidgets.QWidget):
         self._table = _TooltipTableView()
         _configure_table_view_geometry(self._table)
         self._table.setHorizontalHeader(_TooltipHeaderView(QtCore.Qt.Orientation.Horizontal, self._table))
+        # GUI polish: zebra rows + gridless + taller rows + no number gutter.
+        # Colors come from the app stylesheet (theme.py tokens).
+        self._table.setShowGrid(False)
+        self._table.setAlternatingRowColors(True)
+        self._table.verticalHeader().setVisible(False)
+        self._table.verticalHeader().setDefaultSectionSize(34)
         self._table.setSortingEnabled(sorting)
         header = _header(self._table)
         header.setSectionsClickable(sorting)
