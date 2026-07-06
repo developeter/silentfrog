@@ -97,6 +97,20 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "`pip install silentfrog[geo-render]` and `playwright install chromium`."
             )
         geo_layout.addRow(self.chk_bot_render)
+        self.chk_render_js = QtWidgets.QCheckBox("Crawl JavaScript-rendered links (SPA sites)")
+        self.chk_render_js.setToolTip(
+            "Optional. Renders each page with headless Chromium and follows links found in the "
+            "JS-rendered DOM as well as the raw HTML — needed to crawl React/Vue/Angular route "
+            "graphs that inject their navigation. Slow (one render per page); off by default. "
+            "Requires Playwright and a Deep audit profile."
+        )
+        if not _playwright_available():
+            self.chk_render_js.setEnabled(False)
+            self.chk_render_js.setToolTip(
+                self.chk_render_js.toolTip() + "\n\nPlaywright is not installed: enable by running "
+                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
+            )
+        geo_layout.addRow(self.chk_render_js)
         self.chk_tech_stack = QtWidgets.QCheckBox("Detect tech stack (Wappalyzer-style)")
         self.chk_tech_stack.setToolTip(
             "Optional. Identifies the CMS, frameworks, analytics, CDN and server from the page's "
@@ -296,6 +310,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         else:
             self.chk_ssr_parity.setChecked(False)
         self.chk_bot_render.setChecked(self.chk_bot_render.isEnabled() and options.bot_render)
+        self.chk_render_js.setChecked(self.chk_render_js.isEnabled() and options.render_js)
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
         self.chk_topic_embeddings.setChecked(self.chk_topic_embeddings.isEnabled() and options.topic_embeddings)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
@@ -412,6 +427,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             cookie_text=cookie_text,
             ssr_parity_check=ssr,
             bot_render=bot_render,
+            render_js=bool(self.chk_render_js.isEnabled() and self.chk_render_js.isChecked()),
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
             topic_embeddings=bool(self.chk_topic_embeddings.isEnabled() and self.chk_topic_embeddings.isChecked()),

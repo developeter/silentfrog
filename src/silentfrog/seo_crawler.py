@@ -310,6 +310,40 @@ async def _collect_render_diff_and_vitals(
     return render_payload, vitals_payload
 
 
+def merge_rendered_links(page_url: str, raw_rows: list[list[str]], rendered_html: str) -> list[list[str]]:
+    """Union raw-HTML link rows with links found only in the JS-rendered DOM (M8).
+
+    Pure + deterministic: rendered rows for URLs already present are dropped, so
+    the spider follows SPA routes without double-counting. Rendered-only rows are
+    unprobed (status left as ``_extract_links`` emits) — the frontier reads the
+    URL column, and the Links tab shows them as not-probed."""
+    if not (rendered_html or "").strip():
+        return raw_rows
+    rendered_rows = _extract_links(page_url, BeautifulSoup(rendered_html, "html.parser"))
+    seen = {row[0] for row in raw_rows if row}
+    extra: list[list[str]] = []
+    for row in rendered_rows:
+        if not row or row[0] in seen:
+            continue
+        seen.add(row[0])  # dedup rendered-only rows against EACH OTHER too
+        extra.append(row)
+    return raw_rows + extra
+
+
+async def _augment_links_with_rendered_dom(
+    url: str, raw_rows: list[list[str]], crawl_options: CrawlOptions, policy: ProfilePolicy
+) -> list[list[str]]:
+    """M8 — render the page and merge its DOM links so the spider can follow
+    JS-injected routes. Off unless ``render_js`` is set and the profile renders;
+    a render failure degrades to the raw rows (never raises)."""
+    if not crawl_options.render_js or not policy.render:
+        return raw_rows
+    rendered = await asyncio.to_thread(render_with_playwright, url, 15, False)
+    if rendered is None or rendered.error or not rendered.rendered_html:
+        return raw_rows
+    return merge_rendered_links(url, raw_rows, rendered.rendered_html)
+
+
 async def _collect_bot_renders(response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy) -> dict[str, Any]:
     """v2.0 V10 — per-bot SSR renders through the shared pool. Off by default;
     ``{}`` (unmeasured) when the flag is off or the profile does not render."""
@@ -346,6 +380,9 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         crawl_options,
         robots_snapshot,
         policy,
+    )
+    section_payload["links"] = await _augment_links_with_rendered_dom(
+        response.url, section_payload.get("links", []), crawl_options, policy
     )
 
     eeat = extract_eeat_signals(soup, structured_data, response.url)
@@ -627,4 +664,5 @@ __all__ = [
     "_extract_keywords",
     "_extract_schema_all",
     "_ai_crawl_matrix",
+    "merge_rendered_links",
 ]
