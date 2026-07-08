@@ -1,13 +1,35 @@
 # Silentfrog — Handoff
 
-Last updated: 2026-07-06
+Last updated: 2026-07-08
 
-Fast orientation for the next session. This file stays short on purpose —
-durable detail lives in the linked sources, not here.
+**Start here.** This is the entry point for a new session: what shipped, where
+we are, what's next. Read this first, then the linked sources for depth — the
+durable detail lives there, not here.
 
-- **Contract & map:** [`AGENTS.md`](AGENTS.md) (operating rules) · [`CLAUDE.md`](CLAUDE.md) (repo map, key dirs)
-- **Roadmap:** [`docs/v2_beat_screaming_frog_roadmap.md`](docs/v2_beat_screaming_frog_roadmap.md) · active per-task plan under `.claude/plans/`
+- **Contract & map:** [`AGENTS.md`](AGENTS.md) (operating rules) · [`CLAUDE.md`](CLAUDE.md) (repo map, key dirs) · [`docs/PLAYBOOKS.md`](docs/PLAYBOOKS.md) (mechanical recipes — read the matching one BEFORE adding a check / payload key / opt-in feature / dependency / audit issue, or touching GUI styling)
+- **Roadmaps (three, related — see "How the roadmaps fit" below):** [`PLAN.md`](PLAN.md) (product direction, M0–M9) · [`docs/v2_beat_screaming_frog_roadmap.md`](docs/v2_beat_screaming_frog_roadmap.md) (the V1–V20 build, complete) · [`docs/v3_roadmap.md`](docs/v3_roadmap.md) (post-v2 gap analysis — the ACTIVE track). Per-task scratch plans (if any) under `.claude/plans/`.
 - **Install / security:** [`docs/INSTALL.md`](docs/INSTALL.md) · [`bootstrap/README.md`](bootstrap/README.md) · [`SECURITY.md`](SECURITY.md) · [`README.md`](README.md)
+
+## Where we are (2026-07-08)
+
+- **v2.0 roadmap V1..V20: complete.** **H0–H7 hardening gate: landed.** v3 first
+  wave shipped (see "v3" below). All work is committed AND **pushed** —
+  `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
+- **Next up:** the ranked v3 gaps in `docs/v3_roadmap.md` — start with **G2**
+  (health-score + issue trends across crawls). Pick the top unstarted gap,
+  open the matching `docs/PLAYBOOKS.md` recipe, ship one at a time.
+
+## How the roadmaps fit (avoid confusion)
+
+- **`PLAN.md`** = the product north star (M0–M9: issue model → recap → export →
+  history → GSC → logs → AI → remote sync → future integrations). Direction and
+  privacy policy; not a live build queue.
+- **`docs/v2_beat_screaming_frog_roadmap.md`** = the executed V1–V20 build that
+  delivered most of PLAN.md's milestones plus the GEO moat. Historical now.
+- **`docs/v3_roadmap.md`** = the CURRENT execution track: gaps vs Screaming
+  Frog / Sitebulb / Ahrefs / GEO tools, ranked, with a must/nice verdict.
+- ⚠️ **Naming collision:** PLAN.md's "M8" is *Remote Sync*; v3's "M8" is *JS
+  link crawl*. They are unrelated — disambiguate by which doc you're reading.
 
 ## Working rules
 

@@ -1,5 +1,17 @@
 # Silentfrog Product Plan
 
+> **This is the product north star (direction + privacy policy), not the live
+> build queue.** For *where we are today* and *what to do next*, read
+> [`HANDOFF.md`](HANDOFF.md) first. The milestones below (M0–M9) were largely
+> executed through the V1–V20 build
+> ([`docs/v2_beat_screaming_frog_roadmap.md`](docs/v2_beat_screaming_frog_roadmap.md),
+> complete) plus the GEO moat; the active track now is the gap analysis in
+> [`docs/v3_roadmap.md`](docs/v3_roadmap.md). Statuses here were re-verified
+> against the code on 2026-07-08.
+>
+> ⚠️ Naming note: this plan's **M8 is Remote Sync**; the v3 roadmap's "M8" is
+> an unrelated *JS link crawl*. Disambiguate by which doc you are reading.
+
 ## Direction
 
 Silentfrog should become a local-first, open-source, action-oriented SEO audit tool.
@@ -132,8 +144,18 @@ Visible local UX:
 - saved runs are listed by site/date
 - selecting a run shows summary and diff against the previous local run for that site
 - selected runs can be exported as JSON or deleted locally
+- **Open scan** (v3) reloads a saved run into the full SQL-paged results table
+  with per-page detail dialogs, while its SQLite store is still on disk (stores
+  are retained with a rolling prune; deleting a run also unlinks its store)
 
 ### M5 Google Search Console Integration
+
+Status: implemented foundation (v2.0 V7/V14).
+
+Shipped: OAuth loopback + keyring token store, Search Analytics metrics, and a
+URL Inspection call (rich-results verdict only) feed the AI Visibility checks;
+local opt-in creds (`SILENTFROG_GOOGLE_ENABLE`), mocked tests. Not yet shipped:
+the full **indexing/page-state** deliverable and **crawl stats**.
 
 Add GSC URL Inspection, indexing/page state, and crawl stats.
 
@@ -146,7 +168,15 @@ Rules:
 
 ### M6 Log File Analysis
 
-Status: implemented.
+Status: partially implemented (needs wiring).
+
+The findings-to-issue-model mapper (`log_analysis.py`, all five target
+findings) is complete and unit-tested, but has **no runtime caller** — it is
+unreachable from the GUI, CLI, or crawl pipeline. The only wired path,
+`silentfrog-cli logs` (the `logs/` package), emits a crawl-budget JSON report
+that does **not** feed the shared issue model and lacks orphan / important-page
+detection. Closing M6 = wire `log_analysis.issues_for_log_report` into a user
+surface (or fold the `logs/` path into it).
 
 Import server logs from local files and map findings into the issue model.
 
@@ -231,17 +261,24 @@ sibling roadmap to the milestones above, not a replacement.
 
 ### M9 Future Integrations / APIs
 
+Status: partially shipped.
+
 Explore additional integrations after the issue model, reporting, GSC, logs, and
 AI foundations are stable.
 
-Candidate integrations:
+Already shipped in v2.0 (real, wired, gated-optional):
 
-- GA4
-- PageSpeed Insights / CrUX
+- **GA4** — GA4 Data API `runReport`, gated on `SILENTFROG_GOOGLE_ENABLE` (V7)
+- **PageSpeed Insights / CrUX** — `perf_crux.fetch_crux` (field CWV) + on-demand
+  Lighthouse via PSI (V14)
+- **backlink APIs** — Semrush `backlinks_overview`, gated on
+  `SILENTFROG_SEMRUSH_ENABLE` (V17)
+
+Still future / unexplored:
+
 - Bing Webmaster Tools
 - WordPress / CMS APIs
 - rank tracking APIs
-- backlink APIs
 - task/project tools
 
 All integrations must feed the shared issue model or report history.
