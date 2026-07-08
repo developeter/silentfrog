@@ -36,6 +36,9 @@ class IssueEvidence:
     label: str
     value: str
 
+    def to_dict(self) -> dict[str, str]:
+        return {"label": self.label, "value": self.value}
+
 
 @dataclass(frozen=True, slots=True)
 class AuditIssue:
@@ -52,6 +55,21 @@ class AuditIssue:
 
     def key(self) -> tuple[str, str, str]:
         return self.issue_id, self.url, self.scope
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON-native serialization for CLI/export surfaces (M6 log issues)."""
+        return {
+            "issue_id": self.issue_id,
+            "category": self.category.value,
+            "severity": self.severity.value,
+            "source": self.source,
+            "reason": self.reason,
+            "recommendation": self.recommendation,
+            "evidence": [item.to_dict() for item in self.evidence],
+            "url": self.url,
+            "scope": self.scope,
+            "confidence": self.confidence,
+        }
 
 
 def issues_for_payload(url: str, payload: CrawlPayload) -> list[AuditIssue]:

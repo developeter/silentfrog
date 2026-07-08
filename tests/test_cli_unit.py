@@ -113,6 +113,65 @@ async def test_aggregate_cmd_writes_to_stdout_when_no_out(capsys, monkeypatch) -
     assert body["count"] == 1
 
 
+def test_build_parser_accepts_logs_flags() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["logs", "access.log", "--base-url", "https://e.com", "--known-urls", "known.txt"])
+    assert args.command == "logs"
+    assert args.base_url == "https://e.com"
+    assert str(args.known_urls) == "known.txt"
+
+
+_GOOGLEBOT_LOG = (
+    '66.249.66.1 - - [08/Jul/2026:10:00:00 +0000] "GET /gone HTTP/1.1" 404 0 "-" "Googlebot/2.1"\n'
+    '66.249.66.1 - - [08/Jul/2026:10:00:01 +0000] "GET /seen HTTP/1.1" 200 100 "-" "Googlebot/2.1"\n'
+)
+
+
+@pytest.mark.asyncio
+async def test_logs_cmd_wires_issue_model_findings(tmp_path) -> None:
+    # M6 regression: the logs command must feed log_analysis.issues_for_log_report
+    # into its output. Fails if the mapper is left unwired again.
+    log = tmp_path / "access.log"
+    log.write_text(_GOOGLEBOT_LOG, encoding="utf-8")
+    known = tmp_path / "known.txt"
+    known.write_text("/seen\n/never-hit\n", encoding="utf-8")
+    out = tmp_path / "report.json"
+    parser = cli._build_parser()
+    args = parser.parse_args(
+        ["logs", str(log), "--base-url", "https://e.com", "--known-urls", str(known), "--out", str(out)]
+    )
+
+    exit_code = await cli._logs_cmd(args)
+
+    assert exit_code == 0
+    body = json.loads(out.read_text(encoding="utf-8"))
+    assert "bot_requests" in body  # crawl-budget report preserved
+    ids = {issue["issue_id"] for issue in body["issues"]}
+    assert "logs.googlebot_blocked" in ids  # Googlebot 404
+    assert "logs.important_urls_not_hit" in ids  # /never-hit never crawled
+    blocked = next(i for i in body["issues"] if i["issue_id"] == "logs.googlebot_blocked")
+    assert blocked["category"] == "logs"
+    assert blocked["url"] == "https://e.com/gone"  # base-url applied
+
+
+@pytest.mark.asyncio
+async def test_logs_cmd_without_known_urls_still_emits_issues(tmp_path) -> None:
+    # The four config-free findings fire without --known-urls; only orphan /
+    # important-not-hit need the known set.
+    log = tmp_path / "access.log"
+    log.write_text(_GOOGLEBOT_LOG, encoding="utf-8")
+    out = tmp_path / "report.json"
+    parser = cli._build_parser()
+    args = parser.parse_args(["logs", str(log), "--out", str(out)])
+
+    await cli._logs_cmd(args)
+
+    body = json.loads(out.read_text(encoding="utf-8"))
+    ids = {issue["issue_id"] for issue in body["issues"]}
+    assert "logs.googlebot_blocked" in ids
+    assert "logs.important_urls_not_hit" not in ids  # no known set -> not detectable
+
+
 @pytest.mark.asyncio
 async def test_watch_cmd_runs_for_iterations(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("silentfrog.watch_mode._alert_log_path", lambda: tmp_path / "alerts.log")

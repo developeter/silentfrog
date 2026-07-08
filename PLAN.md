@@ -168,15 +168,15 @@ Rules:
 
 ### M6 Log File Analysis
 
-Status: partially implemented (needs wiring).
+Status: implemented (CLI).
 
-The findings-to-issue-model mapper (`log_analysis.py`, all five target
-findings) is complete and unit-tested, but has **no runtime caller** — it is
-unreachable from the GUI, CLI, or crawl pipeline. The only wired path,
-`silentfrog-cli logs` (the `logs/` package), emits a crawl-budget JSON report
-that does **not** feed the shared issue model and lacks orphan / important-page
-detection. Closing M6 = wire `log_analysis.issues_for_log_report` into a user
-surface (or fold the `logs/` path into it).
+`silentfrog-cli logs <access.log>` now emits the shared issue model: the
+crawl-budget JSON report (unchanged) plus an `issues` array of `AuditIssue`s
+from `log_analysis.issues_for_log_report` (Googlebot blocked/redirected, crawl
+waste, and — with `--known-urls <file>` — orphan-crawl and important-URL-not-hit;
+`--base-url` renders absolute URLs). Later slice: surface these in the GUI
+(there is still no GUI log-import window), and unify the two log parsers
+(`logs/` crawl-budget path vs `log_analysis.py`).
 
 Import server logs from local files and map findings into the issue model.
 

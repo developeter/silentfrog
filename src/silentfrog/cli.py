@@ -11,6 +11,9 @@ Subcommands:
                               [--concurrency N]
     silentfrog-cli watch <url> [<url>...] [--interval-seconds N]
                                 [--iterations N]
+    silentfrog-cli export --format llm <url> [--mode compact|full]
+    silentfrog-cli logs <access.log> [--base-url URL] [--known-urls FILE]
+                        [--out report.json]
 """
 
 from __future__ import annotations
@@ -108,6 +111,17 @@ def _add_logs_parser(subparsers: Any) -> None:
     )
     logs.add_argument("path", type=Path, help="Path to the access log file (CLF / Combined / JSON).")
     logs.add_argument("--out", type=Path, default=None, help="Write the JSON report to this path (default: stdout).")
+    logs.add_argument(
+        "--base-url",
+        default="",
+        help="Site base URL, so log findings render as absolute URLs (e.g. https://example.com).",
+    )
+    logs.add_argument(
+        "--known-urls",
+        type=Path,
+        default=None,
+        help="File with one known URL per line; unlocks orphan-crawl and important-URL-not-hit findings.",
+    )
 
 
 async def _aggregate_cmd(
@@ -176,7 +190,13 @@ async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | N
 
     text = args.path.read_text(encoding="utf-8", errors="ignore")
     report = analyse_entries(parse_log_text(text))
-    body = json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+    output = report.to_dict()
+    # M6: also feed the shared issue model — the crawl-budget report above stays,
+    # and the prioritized log findings (Googlebot blocked/redirected, crawl waste,
+    # orphans, important-not-hit) are added as AuditIssues under "issues".
+    issues = _log_issues(args)
+    output["issues"] = issues
+    body = json.dumps(output, indent=2, ensure_ascii=False)
     if args.out is None:
         sys.stdout.write(body + "\n")
     else:
@@ -185,10 +205,32 @@ async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | N
         print(f"[logs] wrote {args.out}")
     print(
         f"[logs] {report.total_requests} requests, {report.bot_requests} from bots, "
-        f"{report.wasted_404} 4xx, {report.wasted_redirect} 3xx",
+        f"{report.wasted_404} 4xx, {report.wasted_redirect} 3xx, {len(issues)} issues",
         file=sys.stderr,
     )
     return 0
+
+
+def _log_issues(args: argparse.Namespace) -> list[dict[str, object]]:
+    """Run the issue-model log mapper over the same file and serialize findings.
+
+    A second parse (via log_analysis, not the logs/ crawl-budget path) — cheap
+    for a one-shot CLI, and it keeps the two log surfaces independent."""
+    from .log_analysis import LogAnalysisConfig, analyse_log_file, issues_for_log_report
+
+    config = LogAnalysisConfig(
+        site_base_url=getattr(args, "base_url", "") or "",
+        important_urls=_read_known_urls(getattr(args, "known_urls", None)),
+    )
+    report = analyse_log_file(args.path, config)
+    return [issue.to_dict() for issue in issues_for_log_report(report)]
+
+
+def _read_known_urls(path: Path | None) -> tuple[str, ...]:
+    if path is None:
+        return ()
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    return tuple(line.strip() for line in lines if line.strip())
 
 
 _DISPATCH: dict[str, Callable[..., Any]] = {
