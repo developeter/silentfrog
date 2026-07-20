@@ -97,15 +97,24 @@ def test_settings_dialog_tech_stack_toggle(qtbot) -> None:
     assert dialog.options().tech_stack_detection is True
 
 
-def test_settings_dialog_semrush_defaults(qtbot, monkeypatch) -> None:
+def test_settings_dialog_semrush_defaults(qtbot, monkeypatch, tmp_path) -> None:
     # V17 — the API-key field is empty + masked by default and the
-    # max-calls spinbox defaults to 100. Force env-only resolution (no
-    # stored key) so the default is deterministic regardless of keychain.
+    # max-calls spinbox defaults to 100. Stub the keychain lookup and point
+    # the settings seam at a temp ini so the defaults are deterministic
+    # regardless of the developer's keychain or registry.
     monkeypatch.delenv("SILENTFROG_SEMRUSH_API_KEY", raising=False)
-    from qtpy import QtWidgets
+    from qtpy import QtCore, QtWidgets
 
     from silentfrog.crawl_options import CrawlOptions
     from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(
+        CrawlSettingsDialog,
+        "_app_settings",
+        staticmethod(lambda: QtCore.QSettings(ini, QtCore.QSettings.IniFormat)),
+    )
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
 
     dialog = CrawlSettingsDialog(CrawlOptions.default())
     qtbot.addWidget(dialog)

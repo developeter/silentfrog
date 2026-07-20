@@ -337,8 +337,16 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         """Prefill the masked key from the keychain and the cap from
         QSettings. Both degrade to empty/default when unavailable."""
         self.edit_semrush_key.setText(self._load_semrush_key())
-        settings = QtCore.QSettings("Silentfrog", "Silentfrog")
+        settings = self._app_settings()
         self.spin_semrush_max_calls.setValue(int(settings.value("semrush/max_calls", 100) or 100))
+
+    @staticmethod
+    def _app_settings() -> QtCore.QSettings:
+        """Single seam for the app-wide settings store. The (org, app)
+        constructor always uses the platform-native backend (the Windows
+        registry) regardless of QSettings.setDefaultFormat, so tests must
+        substitute a temp-file store here."""
+        return QtCore.QSettings("Silentfrog", "Silentfrog")
 
     @staticmethod
     def _load_semrush_key() -> str:
@@ -445,7 +453,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def _persist_semrush(self) -> None:
         key = self.edit_semrush_key.text().strip()
-        settings = QtCore.QSettings("Silentfrog", "Silentfrog")
+        settings = self._app_settings()
         settings.setValue("semrush/max_calls", self.spin_semrush_max_calls.value())
         try:
             import keyring
