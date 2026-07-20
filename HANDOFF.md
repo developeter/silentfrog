@@ -16,9 +16,10 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up (operator-decided queue, 2026-07-20):** **G2 → G3 → G4 → G5 → G6**,
-  one `ship-roadmap-pr` PR at a time via the matching `docs/PLAYBOOKS.md`
-  recipe. Remaining must-haves (G8, G9) and the nice-to-haves come after.
+- **Next up (operator-decided queue, 2026-07-20):** **G3 → G4 → G5 → G6**
+  (G2 ✅ shipped 2026-07-20), one `ship-roadmap-pr` PR at a time via the
+  matching `docs/PLAYBOOKS.md` recipe. Remaining must-haves (G8, G9) and the
+  nice-to-haves come after.
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
   reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
@@ -113,12 +114,17 @@ Shipped:
 - **M6 debt paid (PLAN.md numbering):** CLI log analysis now feeds the shared
   issue model. Still deferred: a GUI log-import window, and unifying the two
   log parsers (`logs/` crawl-budget path vs `log_analysis.py`).
+- **Health score + issue trends (G2):** `crawl_trends.py` derives, per site,
+  the health-score series and per-issue count chains across stored history
+  runs (window 12, top 8 issues, signed deltas); the past-scans dialog grows
+  a Trends panel (series chart via the `[charts]` triad with pure-Qt text
+  fallback). Reads the JSON history only — no schema change, no new score.
 
-Next (operator-decided 2026-07-20): **G2** health-score + issue trends →
-**G3** BYO-key AI citation share-of-voice (policy reopened: strictly BYO-key
-opt-in) → **G4** accessibility (axe-core via the render pool) → **G5**
-interactive visualisations → **G6** MCP server revival. Then G8 HTML report ·
-G9 scheduled crawls + alert digest · the nice-to-have tail.
+Next (operator-decided 2026-07-20): **G3** BYO-key AI citation share-of-voice
+(policy reopened: strictly BYO-key opt-in) → **G4** accessibility (axe-core
+via the render pool) → **G5** interactive visualisations → **G6** MCP server
+revival. Then G8 HTML report · G9 scheduled crawls + alert digest · the
+nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

@@ -6,9 +6,12 @@ from pathlib import Path
 from qtpy import QtCore, QtWidgets
 
 from .audit_issues import IssueSeverity
+from .charts import SeriesChart, make_series_chart
 from .crawl_history import CrawlHistoryRun, CrawlHistoryStore, diff_runs
+from .crawl_trends import CrawlTrend, IssueTrend, build_trend
 
 _HISTORY_HEADERS = ["Site", "Created", "URLs", "Critical", "Warnings", "Info", "Health", "Run ID"]
+_TRENDS_PLACEHOLDER = "Trends appear after two crawls of the same site."
 
 
 class CrawlHistoryRunsModel(QtCore.QAbstractTableModel):
@@ -76,6 +79,7 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
         layout.addWidget(self._build_intro())
         layout.addWidget(self._build_table(), 1)
         layout.addWidget(self._build_details(), 1)
+        layout.addWidget(self._build_trends())
         layout.addLayout(self._build_actions())
 
     def _build_intro(self) -> QtWidgets.QLabel:
@@ -102,6 +106,27 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Select a saved crawl to view the summary and local diff.")
         return self.details
+
+    def _build_trends(self) -> QtWidgets.QGroupBox:
+        # v3 G2: health score + per-issue counts across the selected site's
+        # stored runs. build_trend is pure derivation over CrawlHistoryStore
+        # data already loaded for this dialog — no extra I/O.
+        box = QtWidgets.QGroupBox("Trends")
+        box.setMaximumHeight(220)
+        outer = QtWidgets.QVBoxLayout(box)
+        self._trend_placeholder = QtWidgets.QLabel(_TRENDS_PLACEHOLDER)
+        self._trend_placeholder.setWordWrap(True)
+        self._trend_content = QtWidgets.QWidget()
+        content_row = QtWidgets.QHBoxLayout(self._trend_content)
+        content_row.setContentsMargins(0, 0, 0, 0)
+        self._trend_chart = make_series_chart("Health score")
+        self.trend_issues = QtWidgets.QPlainTextEdit()
+        self.trend_issues.setReadOnly(True)
+        content_row.addWidget(self._trend_chart, 1)
+        content_row.addWidget(self.trend_issues, 1)
+        outer.addWidget(self._trend_placeholder)
+        outer.addWidget(self._trend_content)
+        return box
 
     def _build_actions(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
@@ -131,6 +156,7 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
     def _select_first_row(self) -> None:
         if self.model.rowCount() <= 0:
             self.details.setPlainText("No saved Site Crawl runs yet.")
+            self._update_trends(None)
             return
         self.table.selectRow(0)
         self._update_details()
@@ -154,6 +180,7 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
         self.details.setPlainText(
             _details_text(run, self._previous_run(run)) if run else "No saved Site Crawl runs yet."
         )
+        self._update_trends(run)
 
     def _previous_run(self, run: CrawlHistoryRun | None) -> CrawlHistoryRun | None:
         if run is None:
@@ -164,6 +191,19 @@ class CrawlHistoryDialog(QtWidgets.QDialog):
             if item.scope_key == run.scope_key and item.created_at < run.created_at
         ]
         return older[-1] if older else None
+
+    def _scoped_runs(self, run: CrawlHistoryRun) -> list[CrawlHistoryRun]:
+        return [item for item in self._runs_ascending if item.scope_key == run.scope_key]
+
+    def _update_trends(self, run: CrawlHistoryRun | None) -> None:
+        scoped = self._scoped_runs(run) if run else []
+        if len(scoped) < 2:
+            self._trend_placeholder.setVisible(True)
+            self._trend_content.setVisible(False)
+            return
+        self._trend_placeholder.setVisible(False)
+        self._trend_content.setVisible(True)
+        _render_trend(build_trend(scoped), self._trend_chart, self.trend_issues)
 
     def _export_selected(self) -> None:
         run = self._selected_run()
@@ -251,6 +291,31 @@ def _top_issues(run: CrawlHistoryRun) -> str:
         f"- {issue.severity.value}: {issue.issue_id} | {issue.url or run.scope_key}" for issue in run.issues[:10]
     )
     return "\n".join(lines)
+
+
+def _render_trend(trend: CrawlTrend, chart: SeriesChart, issues_panel: QtWidgets.QPlainTextEdit) -> None:
+    chart.set_series(
+        [_short_date(point.created_at) for point in trend.points], [point.health_score for point in trend.points]
+    )
+    issues_panel.setPlainText(_issue_trend_text(trend))
+
+
+def _short_date(created_at: str) -> str:
+    return created_at[:10] if len(created_at) >= 10 else created_at
+
+
+def _issue_trend_text(trend: CrawlTrend) -> str:
+    if not trend.issue_trends:
+        return "No recurring issues in this window."
+    return "\n".join(_issue_trend_line(item) for item in trend.issue_trends)
+
+
+def _issue_trend_line(item: IssueTrend) -> str:
+    # A bare signed delta, not an arrow: for issue counts more = worse, so
+    # up/down glyphs would invert the reader's good/bad instinct.
+    chain = " → ".join(str(count) for count in item.counts)
+    suffix = f" ({item.delta:+d})" if item.delta else ""
+    return f"{item.issue_id} ({item.severity.value}): {chain}{suffix}"
 
 
 def _run_openable(run: CrawlHistoryRun | None) -> bool:

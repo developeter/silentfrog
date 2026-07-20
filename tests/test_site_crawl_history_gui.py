@@ -71,6 +71,46 @@ def test_history_dialog_lists_runs_and_shows_previous_diff(qtbot, tmp_path: Path
     assert "- 1 fixed issues" in dialog.details.toPlainText()
 
 
+def test_history_dialog_shows_trends_for_two_runs_of_same_scope(qtbot, tmp_path: Path) -> None:
+    dialog = CrawlHistoryDialog(_store_with_runs(tmp_path))
+    qtbot.addWidget(dialog)
+
+    dialog.table.selectRow(0)  # newest first -> run-2
+    dialog._update_details()
+
+    # The dialog is never shown (qtbot.addWidget does not call show()), so
+    # isVisible() would report False regardless of these calls; isHidden()
+    # reflects the explicit setVisible() state this behavior depends on.
+    assert dialog._trend_placeholder.isHidden()
+    assert not dialog._trend_content.isHidden()
+    chart_text = " ".join(label.text() for label in dialog._trend_chart.findChildren(QtWidgets.QLabel))
+    # health scores: run-1 = 1 warning (2), run-2 = 1 critical (5)
+    assert "2" in chart_text
+    assert "5" in chart_text
+    # Exact line: counts chain plus the signed delta suffix (0 -> 1 = +1).
+    assert "meta.description_missing (critical): 0 → 1 (+1)" in dialog.trend_issues.toPlainText()
+
+
+def test_history_dialog_shows_trend_placeholder_with_single_run(qtbot, tmp_path: Path) -> None:
+    store = CrawlHistoryStore(tmp_path / "history")
+    store.save_run(
+        _run(
+            "run-1",
+            "2026-01-01T00:00:00Z",
+            (_issue("meta.title_missing", IssueSeverity.WARNING, "https://example.com/old"),),
+        )
+    )
+    dialog = CrawlHistoryDialog(store)
+    qtbot.addWidget(dialog)
+
+    dialog.table.selectRow(0)
+    dialog._update_details()
+
+    assert not dialog._trend_placeholder.isHidden()
+    assert dialog._trend_content.isHidden()
+    assert "Trends appear after two crawls" in dialog._trend_placeholder.text()
+
+
 def test_history_dialog_exports_selected_run_json(monkeypatch, qtbot, tmp_path: Path) -> None:
     target = tmp_path / "selected-run.json"
     dialog = CrawlHistoryDialog(_store_with_runs(tmp_path / "history"))

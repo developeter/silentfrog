@@ -12,7 +12,7 @@ import pytest
 from qtpy import QtWidgets
 
 import silentfrog.charts as charts
-from silentfrog.charts import bin_scores, charts_available, make_distribution_chart
+from silentfrog.charts import bin_scores, charts_available, make_distribution_chart, make_series_chart
 
 
 def test_charts_available_matches_optional_import() -> None:
@@ -61,4 +61,35 @@ def test_pyqtgraph_chart_used_when_extra_installed(qtbot) -> None:
     chart = make_distribution_chart("HTTP status")
     qtbot.addWidget(chart)
     chart.set_distribution({"200": 2})
+    assert chart.findChild(pg.PlotWidget) is not None
+
+
+def test_fallback_series_chart_shows_values_when_pyqtgraph_absent(qtbot) -> None:
+    if charts_available():
+        pytest.skip("pyqtgraph installed; the text fallback path is not exercised")
+    chart = make_series_chart("Health score")
+    qtbot.addWidget(chart)
+    chart.set_series(["2026-01-01", "2026-01-02"], [9, 6])
+    text = " ".join(label.text() for label in chart.findChildren(QtWidgets.QLabel))
+    assert "2026-01-01: 9" in text
+    assert "2026-01-02: 6" in text
+
+
+def test_fallback_series_chart_empty_series(qtbot) -> None:
+    if charts_available():
+        pytest.skip("pyqtgraph installed")
+    chart = make_series_chart("Health score")
+    qtbot.addWidget(chart)
+    chart.set_series([], [])
+    text = " ".join(label.text() for label in chart.findChildren(QtWidgets.QLabel))
+    assert "No data yet." in text
+
+
+@pytest.mark.skipif(not charts_available(), reason="requires the optional [charts] extra")
+def test_pyqtgraph_series_chart_used_when_extra_installed(qtbot) -> None:
+    import pyqtgraph as pg
+
+    chart = make_series_chart("Health score")
+    qtbot.addWidget(chart)
+    chart.set_series(["2026-01-01", "2026-01-02"], [9, 6])
     assert chart.findChild(pg.PlotWidget) is not None

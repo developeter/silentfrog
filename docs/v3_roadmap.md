@@ -34,12 +34,12 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > **G2 → G3 → G4 → G5 → G6**, then the remaining must-haves (G8, G9), then
 > nice-to-haves. The G3 policy question is resolved: the v2.0 "no new
 > AI-engine APIs" lockout is reopened strictly as BYO-key opt-in (OFF by
-> default, user-supplied keys only).
+> default, user-supplied keys only). G2 ✅ shipped the same day.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
 | G1 ✅ | A | **Prioritized hints engine** — severity + plain-English *why* + *how to fix* per finding | Sitebulb Hints (300+), Semrush thematic reports | SHIPPED: `hints.py` + recap. Data already existed in check details/recommendations; this is the ranking + grouping layer |
-| G2 | A | **Audit health score + per-issue trend history** across stored crawls | Ahrefs always-on audits, Sitebulb Audit Scores | SQLite runs already persist everything; longitudinal issue charts are presentation work |
+| G2 ✅ | A | **Audit health score + per-issue trend history** across stored crawls | Ahrefs always-on audits, Sitebulb Audit Scores | SHIPPED: `crawl_trends.py` pure derivation over `CrawlHistoryStore` + Trends panel (health-score series chart + per-issue count chains with signed deltas) in the past-scans dialog |
 | G3 | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | The whole $300M GEO category, local-first; no OSS equivalent exists. POLICY DECIDED 2026-07-20: the v2.0 lockout is reopened strictly as BYO-key opt-in (OFF by default) |
 | G4 | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | Rides the existing render pool; axe-core JS injectable via Playwright |
 | G5 | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | Link graph + local embeddings already exist; clustering = presentation |
@@ -78,7 +78,7 @@ Tier C (parity nits): G13, G14, G15.
 |---|---|---|
 | M1 ✅ | Prioritized hints engine (G1) | Raw checks ≠ an audit; every competitor leads with "what do I fix first" |
 | M2 ✅ | Fully browsable past scans | Stored runs users can't reopen page-by-page make the SQLite store invisible value |
-| M3 | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
+| M3 ✅ | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
 | M4 ✅ | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
 | M5 | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
 | M6 | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |

@@ -103,4 +103,79 @@ def make_distribution_chart(title: str) -> DistributionChart:
     return _PgDistribution(title)  # pragma: no cover - needs the [charts] extra
 
 
-__all__ = ["DistributionChart", "bin_scores", "charts_available", "make_distribution_chart"]
+class SeriesChart(QtWidgets.QWidget):
+    """An oldest->newest line series of ``(label, value)`` pairs (e.g. health
+    score across crawl runs).
+
+    Concrete subclasses render with pyqtgraph or as plain text; callers depend
+    only on :meth:`set_series`.
+    """
+
+    def set_series(self, labels: list[str], values: list[int]) -> None:
+        raise NotImplementedError
+
+
+class _TextSeries(SeriesChart):
+    """Fallback when pyqtgraph is absent: a titled summary card, mirroring
+    ``_TextDistribution`` so both chart kinds read the same without the
+    optional backend."""
+
+    def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("chartFallbackCard")
+        self.setStyleSheet("#chartFallbackCard { border: 1px solid rgba(127,127,127,0.45); border-radius: 6px; }")
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+        heading = QtWidgets.QLabel(title)
+        heading.setStyleSheet("font-weight: 600;")
+        self._body = QtWidgets.QLabel("No data yet.")
+        self._body.setWordWrap(True)
+        self._body.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(heading)
+        layout.addWidget(self._body)
+        layout.addStretch(1)
+
+    def set_series(self, labels: list[str], values: list[int]) -> None:
+        if not values:
+            self._body.setText("No data yet.")
+            return
+        rows = zip(labels, values, strict=False) if labels else enumerate(values, start=1)
+        self._body.setText("\n".join(f"{label}: {value}" for label, value in rows))
+
+
+class _PgSeries(SeriesChart):  # pragma: no cover - needs the [charts] extra
+    """pyqtgraph line chart used when the optional backend is installed."""
+
+    def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._plot = pg.PlotWidget(title=title)
+        self._plot.setMenuEnabled(False)
+        self._plot.setMouseEnabled(x=False, y=False)
+        layout.addWidget(self._plot)
+
+    def set_series(self, labels: list[str], values: list[int]) -> None:
+        self._plot.clear()
+        xs = list(range(len(values)))
+        self._plot.plot(xs, values, pen="#2ecc71", symbol="o", symbolBrush="#2ecc71")
+        self._plot.getAxis("bottom").setTicks([list(zip(xs, labels, strict=False))])
+
+
+def make_series_chart(title: str) -> SeriesChart:
+    """A line-series widget — pyqtgraph when the ``charts`` extra is installed,
+    else a plain-text fallback. Both honour :meth:`SeriesChart.set_series`."""
+    if pg is None:
+        return _TextSeries(title)
+    return _PgSeries(title)  # pragma: no cover - needs the [charts] extra
+
+
+__all__ = [
+    "DistributionChart",
+    "SeriesChart",
+    "bin_scores",
+    "charts_available",
+    "make_distribution_chart",
+    "make_series_chart",
+]
