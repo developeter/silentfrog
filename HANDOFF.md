@@ -1,6 +1,6 @@
 # Silentfrog — Handoff
 
-Last updated: 2026-07-08
+Last updated: 2026-07-20
 
 **Start here.** This is the entry point for a new session: what shipped, where
 we are, what's next. Read this first, then the linked sources for depth — the
@@ -10,14 +10,17 @@ durable detail lives there, not here.
 - **Roadmaps (three, related — see "How the roadmaps fit" below):** [`PLAN.md`](PLAN.md) (product direction, M0–M9) · [`docs/v2_beat_screaming_frog_roadmap.md`](docs/v2_beat_screaming_frog_roadmap.md) (the V1–V20 build, complete) · [`docs/v3_roadmap.md`](docs/v3_roadmap.md) (post-v2 gap analysis — the ACTIVE track). Per-task scratch plans (if any) under `.claude/plans/`.
 - **Install / security:** [`docs/INSTALL.md`](docs/INSTALL.md) · [`bootstrap/README.md`](bootstrap/README.md) · [`SECURITY.md`](SECURITY.md) · [`README.md`](README.md)
 
-## Where we are (2026-07-08)
+## Where we are (2026-07-20)
 
 - **v2.0 roadmap V1..V20: complete.** **H0–H7 hardening gate: landed.** v3 first
-  wave shipped (see "v3" below). All work is committed AND **pushed** —
+  wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
+  into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up:** the ranked v3 gaps in `docs/v3_roadmap.md` — start with **G2**
-  (health-score + issue trends across crawls). Pick the top unstarted gap,
-  open the matching `docs/PLAYBOOKS.md` recipe, ship one at a time.
+- **Next up (operator-decided queue, 2026-07-20):** **G2 → G3 → G4 → G5 → G6**,
+  one `ship-roadmap-pr` PR at a time via the matching `docs/PLAYBOOKS.md`
+  recipe. Remaining must-haves (G8, G9) and the nice-to-haves come after.
+  **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
+  reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
 ## How the roadmaps fit (avoid confusion)
 
@@ -107,11 +110,15 @@ Shipped:
   with the `SILENTFROG_PSI_API_KEY` remedy; the "Not run" hint row always shows.
 - **GUI design-token pass:** one QSS template + per-theme tokens (light mode was
   visibly broken); zebra/gridless tables, underline tabs, styled inputs.
+- **M6 debt paid (PLAN.md numbering):** CLI log analysis now feeds the shared
+  issue model. Still deferred: a GUI log-import window, and unifying the two
+  log parsers (`logs/` crawl-budget path vs `log_analysis.py`).
 
-Next (ranked in `docs/v3_roadmap.md`): G2 health-score + issue trends · G3
-BYO-key AI citation share-of-voice (needs the "no new AI-engine APIs" policy
-reopened) · G4 accessibility (axe-core via the render pool) · G8 HTML report ·
-G9 scheduled crawls + alert digest.
+Next (operator-decided 2026-07-20): **G2** health-score + issue trends →
+**G3** BYO-key AI citation share-of-voice (policy reopened: strictly BYO-key
+opt-in) → **G4** accessibility (axe-core via the render pool) → **G5**
+interactive visualisations → **G6** MCP server revival. Then G8 HTML report ·
+G9 scheduled crawls + alert digest · the nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

@@ -29,12 +29,18 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > outside this table: JS-rendered link crawl (M8) ✅, reopenable past scans ✅,
 > Multi-URL Dashboard retired ✅, Lighthouse button fixed ✅, GUI token pass ✅.
 > Remaining top gaps: G2, G3 (policy decision), G4, G8, G9.
+>
+> **Update (2026-07-20):** execution queue decided by the operator —
+> **G2 → G3 → G4 → G5 → G6**, then the remaining must-haves (G8, G9), then
+> nice-to-haves. The G3 policy question is resolved: the v2.0 "no new
+> AI-engine APIs" lockout is reopened strictly as BYO-key opt-in (OFF by
+> default, user-supplied keys only).
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
 | G1 ✅ | A | **Prioritized hints engine** — severity + plain-English *why* + *how to fix* per finding | Sitebulb Hints (300+), Semrush thematic reports | SHIPPED: `hints.py` + recap. Data already existed in check details/recommendations; this is the ranking + grouping layer |
 | G2 | A | **Audit health score + per-issue trend history** across stored crawls | Ahrefs always-on audits, Sitebulb Audit Scores | SQLite runs already persist everything; longitudinal issue charts are presentation work |
-| G3 | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | The whole $300M GEO category, local-first; no OSS equivalent exists. Needs a "new AI-engine APIs" policy decision (v2.0 locked this out; v3 can reopen it as strictly BYO-key opt-in) |
+| G3 | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | The whole $300M GEO category, local-first; no OSS equivalent exists. POLICY DECIDED 2026-07-20: the v2.0 lockout is reopened strictly as BYO-key opt-in (OFF by default) |
 | G4 | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | Rides the existing render pool; axe-core JS injectable via Playwright |
 | G5 | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | Link graph + local embeddings already exist; clustering = presentation |
 | G6 | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | Was V18, dropped in v2.0; SF validated the bet — revive it |
@@ -70,14 +76,14 @@ Tier C (parity nits): G13, G14, G15.
 
 | Rank | Absence | Why it gates adoption |
 |---|---|---|
-| M1 | Prioritized hints engine (G1) | Raw checks ≠ an audit; every competitor leads with "what do I fix first" |
-| M2 | Fully browsable past scans | Stored runs users can't reopen page-by-page make the SQLite store invisible value |
+| M1 ✅ | Prioritized hints engine (G1) | Raw checks ≠ an audit; every competitor leads with "what do I fix first" |
+| M2 ✅ | Fully browsable past scans | Stored runs users can't reopen page-by-page make the SQLite store invisible value |
 | M3 | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
-| M4 | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
+| M4 ✅ | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
 | M5 | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
 | M6 | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |
 | M7 | Scheduled re-crawl + alert digest (G9) | Watch mode exists; without transport (email/webhook) it's a demo |
-| M8 | Rendered-DOM link discovery for SPAs | Spider misses JS-routed sites entirely — a correctness gap, not a feature |
+| M8 ✅ | Rendered-DOM link discovery for SPAs | Spider misses JS-routed sites entirely — a correctness gap, not a feature |
 
 **Nice-to-have** (differentiators or parity nits, after the must list):
 MCP server (G6) · custom AI prompts w/ Ollama (G7) · force-directed/cluster
