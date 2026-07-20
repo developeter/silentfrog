@@ -23,6 +23,8 @@ Groups recognised:
 - ``SSR parity`` — ``access_ssr_parity``
 - ``AI Citations`` — ``ai_citations_brave``,
   ``ai_citations_common_crawl``, ``ai_citations_perplexity``
+- ``AI Share of Voice`` — ``sov_openai``, ``sov_perplexity``, ``sov_gemini``,
+  ``sov_share``
 """
 
 from __future__ import annotations
@@ -48,6 +50,12 @@ _GROUPS: dict[str, tuple[str, ...]] = {
         "ai_citations_common_crawl",
         "ai_citations_perplexity",
     ),
+    "AI Share of Voice": (
+        "sov_openai",
+        "sov_perplexity",
+        "sov_gemini",
+        "sov_share",
+    ),
 }
 
 _ENABLEMENT_HINTS: dict[str, str] = {
@@ -58,9 +66,13 @@ _ENABLEMENT_HINTS: dict[str, str] = {
     "CrUX field": ("Set SILENTFROG_PSI_ENABLE=1; optionally set SILENTFROG_PSI_API_KEY for higher PSI rate."),
     "SSR parity": "Settings → tick 'Run SSR parity check (requires Playwright)'.",
     "AI Citations": ("Set SILENTFROG_AI_CITATIONS_ENABLE=1; for the Brave probe also set SILENTFROG_BRAVE_API_KEY."),
+    "AI Share of Voice": (
+        "Set SILENTFROG_AI_SOV_ENABLE=1 and add an OpenAI/Perplexity/Gemini key in Settings → "
+        "AI share of voice (BYO keys)."
+    ),
 }
 
-GROUP_ORDER: tuple[str, ...] = ("Lab CWV", "CrUX field", "SSR parity", "AI Citations")
+GROUP_ORDER: tuple[str, ...] = ("Lab CWV", "CrUX field", "SSR parity", "AI Citations", "AI Share of Voice")
 
 
 @dataclass(frozen=True)

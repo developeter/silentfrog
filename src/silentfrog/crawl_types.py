@@ -1311,6 +1311,8 @@ class CrawlPayload:
     # v2.0 V20: local topic-embedding coherence + brand-mention time-series.
     topic_embeddings: dict[str, Any] = field(default_factory=dict)
     brand_mentions: dict[str, Any] = field(default_factory=dict)
+    # v3 G3 Stage 1: BYO-key AI-engine share-of-voice (off by default).
+    ai_sov: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1365,6 +1367,7 @@ class CrawlPayload:
             "ga4": _extra_group(data, "ga4"),
             "topic_embeddings": _extra_group(data, "topic_embeddings"),
             "brand_mentions": _extra_group(data, "brand_mentions"),
+            "ai_sov": _extra_group(data, "ai_sov"),
         }
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1410,6 +1413,7 @@ class CrawlPayload:
             "ga4": dict(self.ga4),
             "topic_embeddings": dict(self.topic_embeddings),
             "brand_mentions": dict(self.brand_mentions),
+            "ai_sov": dict(self.ai_sov),
         }
 
     def __getitem__(self, key: str) -> Any:

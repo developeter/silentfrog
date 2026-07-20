@@ -16,10 +16,10 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up (operator-decided queue, 2026-07-20):** **G3 → G4 → G5 → G6**
-  (G2 ✅ shipped 2026-07-20), one `ship-roadmap-pr` PR at a time via the
-  matching `docs/PLAYBOOKS.md` recipe. Remaining must-haves (G8, G9) and the
-  nice-to-haves come after.
+- **Next up (operator-decided queue, 2026-07-20):** **G4 → G5 → G6**
+  (G2 ✅ and G3 ✅ shipped 2026-07-20), one `ship-roadmap-pr` PR at a time via
+  the matching `docs/PLAYBOOKS.md` recipe. Remaining must-haves (G8, G9) and
+  the nice-to-haves come after.
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
   reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
@@ -120,9 +120,17 @@ Shipped:
   a Trends panel (series chart via the `[charts]` triad with pure-Qt text
   fallback). Reads the JSON history only — no schema change, no new score.
 
-Next (operator-decided 2026-07-20): **G3** BYO-key AI citation share-of-voice
-(policy reopened: strictly BYO-key opt-in) → **G4** accessibility (axe-core
-via the render pool) → **G5** interactive visualisations → **G6** MCP server
+- **AI citation share-of-voice (G3):** `integrations/ai_engines/` samples a
+  small prompt set against OpenAI/Perplexity/Gemini via plain REST (no
+  SDKs), scores brand mentions / domain citations / lexicon sentiment, and
+  keeps a local per-host JSON series. Strictly BYO-key opt-in
+  (`SILENTFROG_AI_SOV_ENABLE=1` + keys in Settings), sampled once per host
+  per session; results surface as "AI Share of Voice" `ok` rows + a GEO
+  checks badge group. Later-scope: retire the fabricated
+  `ai_citations_perplexity` proxy; a per-engine comparison panel (G5).
+
+Next (operator-decided 2026-07-20): **G4** accessibility (axe-core via the
+render pool) → **G5** interactive visualisations → **G6** MCP server
 revival. Then G8 HTML report · G9 scheduled crawls + alert digest · the
 nice-to-have tail.
 
@@ -170,6 +178,12 @@ No integration runs on a stock audit.
 - **GSC + GA4 (V7):** `SILENTFROG_GOOGLE_ENABLE=1` + system-browser OAuth (tokens
   in keyring `silentfrog-google`). Rich Results is schema-derived for free; it
   upgrades to Google's verdict only when GSC is connected.
+- **AI share of voice (v3 G3):** BYO keys via Settings → AI share of voice
+  (BYO keys) → keyring `silentfrog-ai-engines` (or env
+  `SILENTFROG_OPENAI_API_KEY` / `SILENTFROG_PERPLEXITY_API_KEY` /
+  `SILENTFROG_GEMINI_API_KEY`); sampling needs `SILENTFROG_AI_SOV_ENABLE=1`
+  (optional `SILENTFROG_AI_SOV_PROMPTS`, `SILENTFROG_AI_SOV_MAX_PROMPTS`,
+  `SILENTFROG_AI_SOV_COMPETITORS`).
 
 Never commit keys, tokens, crawl history, or exports. `.env*`,
 `secrets.local.json`, `*.secrets.json` are git-ignored; full policy in `SECURITY.md`.

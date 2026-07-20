@@ -90,6 +90,14 @@ google = [
 semrush = [
     "keyring (>=25.7,<26)",
 ]
+# v3 G3 Stage 1 — optional BYO-key AI-engine share-of-voice sampling
+# (ChatGPT/OpenAI, Perplexity, Gemini via plain REST, no vendor SDKs). Same
+# `keyring` pin as google/semrush, so the lock content is unchanged; the
+# client lazy-imports it and degrades to env-only when absent. Off by
+# default (SILENTFROG_AI_SOV_ENABLE).
+ai-engines = [
+    "keyring (>=25.7,<26)",
+]
 # v2.0 V19 — optional charts. pyqtgraph is pure-Python and reuses the base numpy
 # + PySide6 (no new base dep); it renders the Site Crawl distribution charts.
 # When the extra is absent, `silentfrog.charts` degrades to a text fallback, so

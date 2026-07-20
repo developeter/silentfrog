@@ -62,6 +62,18 @@ def test_ai_citations_group_matches_check_keys() -> None:
     assert evaluate_group("AI Citations", no_keys).state == "missing"
 
 
+def test_ai_share_of_voice_group_matches_check_keys() -> None:
+    checks = [
+        {"key": "sov_openai", "status": "good"},
+        {"key": "sov_perplexity", "status": "info"},
+    ]
+    assert evaluate_group("AI Share of Voice", checks).state == "measured"
+    only_info = [{"key": "sov_openai", "status": "info"}]
+    assert evaluate_group("AI Share of Voice", only_info).state == "gated"
+    no_keys: list[dict[str, str]] = []
+    assert evaluate_group("AI Share of Voice", no_keys).state == "missing"
+
+
 def test_render_label_mentions_every_group_with_correct_glyph() -> None:
     badges = build_badges([])
     label = render_label(badges)
@@ -76,6 +88,7 @@ def test_render_tooltip_names_enable_instructions() -> None:
     assert "SILENTFROG_AI_CITATIONS_ENABLE" in tip
     assert "SILENTFROG_PSI_ENABLE" in tip
     assert "Run SSR parity check" in tip
+    assert "SILENTFROG_AI_SOV_ENABLE" in tip
 
 
 def test_ai_visibility_tab_badge_label_updates_on_update(qtbot) -> None:

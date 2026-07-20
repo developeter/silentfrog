@@ -227,6 +227,11 @@ CHECK_EVIDENCE: dict[str, tuple[str, tuple[str, ...]]] = {
     "semrush_backlinks_above_threshold": (EVIDENCE_HEURISTIC, ()),
     "semrush_referring_domains_diverse": (EVIDENCE_HEURISTIC, ()),
     "semrush_paid_signal_present": (EVIDENCE_DESCRIPTIVE, ()),
+    # AI Share of Voice (v3 G3 Stage 1, off-page BYO-key sampling)
+    "sov_openai": (EVIDENCE_HEURISTIC, ()),
+    "sov_perplexity": (EVIDENCE_HEURISTIC, ()),
+    "sov_gemini": (EVIDENCE_HEURISTIC, ()),
+    "sov_share": (EVIDENCE_HEURISTIC, ()),
 }
 
 

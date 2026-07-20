@@ -9,7 +9,7 @@ import asyncio
 import os
 import sys
 from typing import Any, cast
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, Comment
 
@@ -401,7 +401,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
     seo_basics = extract_seo_basics(soup, response.url)
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options, policy)
     bot_render_payload = await _collect_bot_renders(response, crawl_options, policy)
-    crux_payload, ai_citations_payload, google_metrics, semrush_metrics = await _collect_integrations(
+    crux_payload, ai_citations_payload, google_metrics, semrush_metrics, ai_sov_metrics = await _collect_integrations(
         response.url, policy
     )
     # Rich-result eligibility is schema-derived locally on every profile; only its
@@ -431,6 +431,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         "topic_embeddings": await asyncio.to_thread(_collect_topic_embeddings, soup, crawl_options),
         "brand_mentions": await _collect_brand_mentions(response.url, soup, policy),
         "semrush": semrush_metrics,
+        "ai_sov": ai_sov_metrics,
         **google_metrics,
     }
     raw_payload["ai_visibility"] = build_ai_visibility_payload(raw_payload).to_dict()
@@ -439,17 +440,19 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
 
 async def _collect_integrations(
     url: str, policy: ProfilePolicy
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """External integrations (CrUX / AI citations / GSC+GA4 / Semrush). H4 gates
-    them off entirely in LIGHTWEIGHT; STANDARD/DEEP attempt them, each still
-    self-gated by its own enable flag. Returns (crux, ai_citations, google, semrush)."""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """External integrations (CrUX / AI citations / GSC+GA4 / Semrush / AI SOV).
+    H4 gates them off entirely in LIGHTWEIGHT; STANDARD/DEEP attempt them, each
+    still self-gated by its own enable flag. Returns (crux, ai_citations,
+    google, semrush, ai_sov)."""
     if not policy.run_integrations:
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {}
     return (
         await _collect_crux(url),
         await _collect_ai_citations(url),
         await _collect_google_metrics(url),
         await _collect_semrush(url),
+        await _collect_ai_sov(url),
     )
 
 
@@ -480,6 +483,25 @@ async def _collect_brand_mentions(url: str, soup: BeautifulSoup, policy: Profile
     og_site_name = str(og_tag.get("content", "")) if og_tag else ""
     payload = await fetch_brand_mentions(url, og_site_name=og_site_name)
     return payload.to_dict()
+
+
+async def _collect_ai_sov(url: str) -> dict[str, Any]:
+    """v3 G3 Stage 1 — BYO-key AI-engine share-of-voice sampling (ChatGPT /
+    Perplexity / Gemini), gated on SILENTFROG_AI_SOV_ENABLE + at least one
+    per-engine key (keyring or env). Returns {} (unmeasured) on a stock
+    audit. Never raises."""
+    from .brand_mentions import derive_brand
+    from .integrations.ai_engines import fetch_share_of_voice
+
+    host = urlparse(url or "").netloc.split(":")[0]
+    brand = derive_brand(url)
+    if not host or not brand:
+        return {}
+    try:
+        report = await fetch_share_of_voice(host, brand)
+    except Exception:  # noqa: BLE001 — integration failure degrades silently
+        return {}
+    return report.to_dict()
 
 
 def _collect_tech_stack(response: Any, soup: BeautifulSoup, crawl_options: CrawlOptions) -> dict[str, Any]:

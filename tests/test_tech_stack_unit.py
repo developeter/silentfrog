@@ -121,3 +121,104 @@ def test_settings_dialog_semrush_defaults(qtbot, monkeypatch, tmp_path) -> None:
     assert dialog.edit_semrush_key.text() == ""
     assert dialog.edit_semrush_key.echoMode() == QtWidgets.QLineEdit.EchoMode.Password
     assert dialog.spin_semrush_max_calls.value() == 100
+
+
+class _FakeKeyringModule:
+    """Stand-in for the optional ``keyring`` module — records every
+    ``set_password`` call so persistence tests don't touch the real OS
+    keychain."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.calls.append((service, username, password))
+
+
+def test_settings_dialog_sov_defaults(qtbot, monkeypatch, tmp_path) -> None:
+    # v3 G3 Stage 2 — the three AI-engine BYO-key fields are empty + masked
+    # by default. Stub the keychain lookup and point the settings seam at a
+    # temp ini, same isolation as test_settings_dialog_semrush_defaults.
+    monkeypatch.delenv("SILENTFROG_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("SILENTFROG_PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("SILENTFROG_GEMINI_API_KEY", raising=False)
+    from qtpy import QtCore, QtWidgets
+
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(
+        CrawlSettingsDialog,
+        "_app_settings",
+        staticmethod(lambda: QtCore.QSettings(ini, QtCore.QSettings.IniFormat)),
+    )
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_sov_key", staticmethod(lambda engine: ""))
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    assert set(dialog.edit_sov_keys) == {"openai", "perplexity", "gemini"}
+    for edit in dialog.edit_sov_keys.values():
+        assert edit.text() == ""
+        assert edit.echoMode() == QtWidgets.QLineEdit.EchoMode.Password
+
+
+def test_settings_dialog_sov_persist_calls_keyring_set_password(qtbot, monkeypatch, tmp_path) -> None:
+    # accept() with a filled BYO-key field must persist it to the
+    # `silentfrog-ai-engines` keychain service under the engine's own name.
+    import sys
+
+    from qtpy import QtCore
+
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(
+        CrawlSettingsDialog,
+        "_app_settings",
+        staticmethod(lambda: QtCore.QSettings(ini, QtCore.QSettings.IniFormat)),
+    )
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_sov_key", staticmethod(lambda engine: ""))
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    dialog.edit_sov_keys["openai"].setText("sk-test-123")
+
+    fake_keyring = _FakeKeyringModule()
+    monkeypatch.setitem(sys.modules, "keyring", fake_keyring)
+
+    dialog.accept()
+
+    assert ("silentfrog-ai-engines", "openai", "sk-test-123") in fake_keyring.calls
+    # Untouched engines stay unpersisted (empty fields are skipped).
+    assert not any(call[1] == "perplexity" for call in fake_keyring.calls)
+
+
+def test_settings_dialog_sov_persist_swallows_missing_keyring(qtbot, monkeypatch, tmp_path) -> None:
+    # keyring is an optional extra; accept() must not raise when it's absent.
+    import sys
+
+    from qtpy import QtCore
+
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(
+        CrawlSettingsDialog,
+        "_app_settings",
+        staticmethod(lambda: QtCore.QSettings(ini, QtCore.QSettings.IniFormat)),
+    )
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_sov_key", staticmethod(lambda engine: ""))
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    dialog.edit_sov_keys["gemini"].setText("gk-test-456")
+
+    monkeypatch.setitem(sys.modules, "keyring", None)  # simulates keyring not installed
+
+    dialog.accept()  # must not raise

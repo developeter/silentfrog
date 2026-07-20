@@ -239,6 +239,40 @@ def comprehensive_audit_raw() -> dict[str, Any]:
             "paid_traffic": 10,
             "measured": True,
         },
+        "ai_sov": {
+            "host": "e.com",
+            "brand": "Example",
+            "measured": True,
+            "engines": [
+                {
+                    "engine": "openai",
+                    "prompts_sampled": 3,
+                    "mention_count": 2,
+                    "citation_count": 1,
+                    "sentiment": "positive",
+                    "competitor_mention_count": 1,
+                    "measured": True,
+                },
+                {
+                    "engine": "perplexity",
+                    "prompts_sampled": 3,
+                    "mention_count": 1,
+                    "citation_count": 1,
+                    "sentiment": "neutral",
+                    "competitor_mention_count": 0,
+                    "measured": True,
+                },
+                {
+                    "engine": "gemini",
+                    "prompts_sampled": 3,
+                    "mention_count": 0,
+                    "citation_count": 0,
+                    "sentiment": "neutral",
+                    "competitor_mention_count": 0,
+                    "measured": True,
+                },
+            ],
+        },
     }
 
 

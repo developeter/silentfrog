@@ -13,6 +13,13 @@ _PROFILE_CHOICES = (
     (AuditProfile.DEEP, "Deep — full probing, rendering, integrations"),
 )
 
+# v3 G3 Stage 2 — engine id -> field label for the "AI share of voice" group.
+_SOV_ENGINES: tuple[tuple[str, str], ...] = (
+    ("openai", "ChatGPT (OpenAI) key"),
+    ("perplexity", "Perplexity key"),
+    ("gemini", "Gemini key"),
+)
+
 
 def _playwright_available() -> bool:
     """Return True when the optional silentfrog[geo-render] extra is importable."""
@@ -30,6 +37,23 @@ def _embeddings_available() -> bool:
     except Exception:
         return False
     return True
+
+
+async def _summarize_sov_test(keys: dict[str, str]) -> str:
+    """Test each keyed AI-engine and join 'engine: message' results with
+    ' · ' — 'no key' for empty fields, never awaiting a network call for
+    those. Runs inside the single ``asyncio.run()`` call ``_on_sov_test``
+    starts on its worker thread."""
+    from .integrations.ai_engines import test_connection
+
+    parts: list[str] = []
+    for engine, key in keys.items():
+        if not key:
+            parts.append(f"{engine}: no key")
+            continue
+        _ok, message = await test_connection(engine, key)
+        parts.append(f"{engine}: {message}")
+    return " · ".join(parts)
 
 
 class CrawlSettingsDialog(QtWidgets.QDialog):
@@ -53,6 +77,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         body_layout.addWidget(self._build_general_group())
         body_layout.addWidget(self._build_geo_group())
         body_layout.addWidget(self._build_semrush_group(theme))
+        body_layout.addWidget(self._build_ai_engines_group(theme))
         body_layout.addWidget(self._build_advanced_group(theme))
         body_layout.addStretch(1)
         scroll = QtWidgets.QScrollArea()
@@ -159,6 +184,40 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         test_row.setContentsMargins(0, 0, 0, 0)
         test_row.addWidget(self.btn_semrush_test)
         test_row.addWidget(self.lbl_semrush_test)
+        test_row.addStretch(1)
+        form.addRow(test_widget)
+        return box
+
+    def _build_ai_engines_group(self, theme: str) -> QtWidgets.QGroupBox:
+        """BYO-key AI share-of-voice controls (v3 G3). Optional + empty by
+        default — each key is persisted to the OS keychain only, never to
+        QSettings or disk; sampling itself stays gated on
+        SILENTFROG_AI_SOV_ENABLE regardless of whether a key is set."""
+        box = QtWidgets.QGroupBox("AI share of voice (BYO keys)")
+        form = QtWidgets.QFormLayout(box)
+        intro = QtWidgets.QLabel(
+            "Samples ChatGPT, Perplexity and Gemini with your own API keys. Off by default — enable "
+            "with SILENTFROG_AI_SOV_ENABLE=1. Keys are stored in the OS keychain, never in the repo."
+        )
+        intro.setWordWrap(True)
+        form.addRow(intro)
+        self.edit_sov_keys: dict[str, QtWidgets.QLineEdit] = {}
+        for engine, label in _SOV_ENGINES:
+            edit = QtWidgets.QLineEdit()
+            edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+            edit.setPlaceholderText(f"{label} (stored in the OS keychain)")
+            edit.setStyleSheet(self._field_stylesheet(theme))
+            form.addRow(label, edit)
+            self.edit_sov_keys[engine] = edit
+        self.btn_sov_test = QtWidgets.QPushButton("Test keys")
+        self.btn_sov_test.clicked.connect(self._on_sov_test)
+        self.lbl_sov_test = QtWidgets.QLabel("")
+        self.lbl_sov_test.setWordWrap(True)
+        test_widget = QtWidgets.QWidget()
+        test_row = QtWidgets.QHBoxLayout(test_widget)
+        test_row.setContentsMargins(0, 0, 0, 0)
+        test_row.addWidget(self.btn_sov_test)
+        test_row.addWidget(self.lbl_sov_test)
         test_row.addStretch(1)
         form.addRow(test_widget)
         return box
@@ -318,6 +377,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         profile_index = self.profile_combo.findData(options.profile.value)
         self.profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
         self._initialize_semrush()
+        self._initialize_ai_engines()
         self._load_from_options(options)
         self._sync_state()
         self._apply_sized_geometry()
@@ -354,6 +414,21 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
         try:
             return resolve_api_key()
+        except Exception:
+            return ""
+
+    def _initialize_ai_engines(self) -> None:
+        """Prefill each masked BYO key from the keychain/env. Degrades to
+        empty per field when neither is available."""
+        for engine, edit in self.edit_sov_keys.items():
+            edit.setText(self._load_sov_key(engine))
+
+    @staticmethod
+    def _load_sov_key(engine: str) -> str:
+        from .integrations.ai_engines import resolve_api_key
+
+        try:
+            return resolve_api_key(engine)
         except Exception:
             return ""
 
@@ -446,9 +521,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         )
 
     def accept(self) -> None:
-        """Persist the Semrush key to the keychain and the daily cap to
-        QSettings, then close. Persistence failures never block accept."""
+        """Persist the Semrush key + AI-engine BYO keys to the keychain and
+        the Semrush daily cap to QSettings, then close. Persistence
+        failures never block accept."""
         self._persist_semrush()
+        self._persist_ai_engine_keys()
         super().accept()
 
     def _persist_semrush(self) -> None:
@@ -462,6 +539,24 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         except Exception:
             # keyring is optional; without it the key falls back to env only.
             return
+
+    def _persist_ai_engine_keys(self) -> None:
+        """Persist each non-empty BYO key to the OS keychain only — never to
+        QSettings or disk. Swallows when keyring is unavailable, same as
+        ``_persist_semrush``."""
+        try:
+            import keyring
+        except Exception:
+            # keyring is optional; without it the keys fall back to env only.
+            return
+        for engine, edit in self.edit_sov_keys.items():
+            key = edit.text().strip()
+            if not key:
+                continue
+            try:
+                keyring.set_password("silentfrog-ai-engines", engine, key)
+            except Exception:
+                continue
 
     def _on_semrush_test(self) -> None:
         """Run test_connection off the UI thread and show ✓/✗. Tiny by
@@ -485,6 +580,31 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "setText",
                 QtCore.Qt.ConnectionType.QueuedConnection,
                 QtCore.Q_ARG(str, f"{mark} {message}"),
+            )
+
+        threading.Thread(target=_target, daemon=True).start()
+
+    def _on_sov_test(self) -> None:
+        """Test every keyed engine off the UI thread and show a combined
+        'engine: message' summary. Mirrors ``_on_semrush_test``'s
+        daemon-thread + QueuedConnection pattern; clicking is the consent
+        for these on-demand probes, no extra gate."""
+        import asyncio
+        import threading
+
+        keys = {engine: edit.text().strip() for engine, edit in self.edit_sov_keys.items()}
+        self.lbl_sov_test.setText("Testing…")
+
+        def _target() -> None:
+            try:
+                summary = asyncio.run(_summarize_sov_test(keys))
+            except Exception as exc:  # noqa: BLE001
+                summary = str(exc)
+            QtCore.QMetaObject.invokeMethod(
+                self.lbl_sov_test,
+                "setText",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, summary),
             )
 
         threading.Thread(target=_target, daemon=True).start()

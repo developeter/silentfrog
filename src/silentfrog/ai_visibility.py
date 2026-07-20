@@ -25,6 +25,8 @@ from .discovery_files import DiscoveryPayload, build_discovery_checks
 from .eeat_signals import EeatPayload, build_eeat_checks
 from .embeddings import TopicEmbeddingsPayload, build_topic_embedding_check
 from .hreflang_validator import build_hreflang_checks
+from .integrations.ai_engines.checks import build_sov_checks
+from .integrations.ai_engines.types import ShareOfVoiceReport
 from .integrations.google.checks import (
     build_lighthouse_checks,
     build_real_performance_checks,
@@ -56,6 +58,8 @@ AI_VISIBILITY_AREAS = (
     "Engagement",
     # v2.0 V17 — only populated when Semrush is connected (optional).
     "Authority signals",
+    # v3 G3 Stage 1 — only populated when BYO-key AI-engine sampling ran.
+    "AI Share of Voice",
 )
 
 _STATUS_ALIASES = {
@@ -509,6 +513,36 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Purely informational context on the domain's marketing footprint; it neither helps nor hurts "
         "the GEO Score. Present => good; absent or not connected => info."
     ),
+    # v3 G3 Stage 1 — BYO-key AI-engine share-of-voice (optional
+    # `silentfrog[ai-engines]`, off by default).
+    "sov_openai": (
+        "Samples a small fixed prompt set against ChatGPT (OpenAI, BYO API key) and counts brand "
+        "mentions, domain citations, and word-level sentiment across the answers.\n\n"
+        "Purely observational: a few sampled prompts is not a statistically representative view of "
+        "what ChatGPT says about the brand. Opt-in via Settings -> AI Share of Voice; not connected "
+        "=> the row is not emitted at all (never a penalty, §1.5)."
+    ),
+    "sov_perplexity": (
+        "Samples a small fixed prompt set against Perplexity (BYO API key) and counts brand mentions, "
+        "domain citations (Perplexity's own citation list when present), and word-level sentiment.\n\n"
+        "Purely observational: a few sampled prompts is not a statistically representative view of "
+        "what Perplexity says about the brand. Opt-in via Settings -> AI Share of Voice; not connected "
+        "=> the row is not emitted at all (never a penalty, §1.5)."
+    ),
+    "sov_gemini": (
+        "Samples a small fixed prompt set against Gemini (BYO API key) and counts brand mentions and "
+        "word-level sentiment across the answers (Gemini's API does not return browsing citations).\n\n"
+        "Purely observational: a few sampled prompts is not a statistically representative view of "
+        "what Gemini says about the brand. Opt-in via Settings -> AI Share of Voice; not connected "
+        "=> the row is not emitted at all (never a penalty, §1.5)."
+    ),
+    "sov_share": (
+        "Brand mentions vs configured competitor mentions (SILENTFROG_AI_SOV_COMPETITORS) across the "
+        "same sampled answers.\n\n"
+        "A directional read on how often the brand shows up relative to named competitors in a small "
+        "BYO-key prompt sample — not a market-share measurement. Only emitted when at least one "
+        "competitor mention was tallied; absence is informational, never a penalty (§1.5)."
+    ),
 }
 
 
@@ -898,6 +932,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     lighthouse = LighthouseScores.from_dict(data.get("lighthouse", {}))
     rich_results = RichResultsReport.from_dict(data.get("rich_results", {}))
     semrush = SemrushMetrics.from_dict(data.get("semrush", {}))
+    ai_sov = ShareOfVoiceReport.from_dict(data.get("ai_sov", {}))
     render_diff = _render_diff_from_raw(data.get("render"))
     vitals = WebVitals.from_raw(data.get("perf_vitals", {}))
     crux = CruxData.from_raw(data.get("perf_crux", {}))
@@ -924,7 +959,28 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
         *build_hreflang_checks(page_url, hreflang_rows, cluster=None),
         *build_eeat_checks(eeat),
         *build_performance_checks(vitals, crux),
+        *_build_optional_integration_checks(data, ai_citations, gsc, ga4, semrush, ai_sov, rich_results, lighthouse),
     ]
+    # H6: stamp every check with its evidence class + source IDs at the single
+    # aggregation seam. Additive metadata only — never touches status or score.
+    return [attach_evidence(check) for check in checks]
+
+
+def _build_optional_integration_checks(
+    data: Mapping[str, Any],
+    ai_citations: AiCitationsPayload,
+    gsc: GscMetrics,
+    ga4: Ga4Metrics,
+    semrush: SemrushMetrics,
+    ai_sov: ShareOfVoiceReport,
+    rich_results: RichResultsReport,
+    lighthouse: LighthouseScores,
+) -> list[AiVisibilityCheck]:
+    """Rows from opt-in integrations/features. Each builder already returns
+    ``[]`` (or is skipped) when its own data isn't measured, so a stock audit
+    stays clean — split out of ``build_ai_visibility_checks`` purely to keep
+    that function under the length cap; same aggregation semantics."""
+    checks: list[AiVisibilityCheck] = []
     # Per-bot SSR rendering (V10): only emitted when the opt-in feature ran.
     bot_render_check = build_bot_render_check(data.get("bot_render"))
     if bot_render_check is not None:
@@ -934,6 +990,9 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     if topic_check is not None:
         checks.append(topic_check)
     checks.extend(build_brand_mention_checks(BrandMentionsPayload.from_raw(data.get("brand_mentions", {}))))
+    # AI Share of Voice (v3 G3 Stage 1): only when the opt-in BYO-key sampling
+    # ran; build_sov_checks itself returns [] when unmeasured.
+    checks.extend(build_sov_checks(ai_sov))
     # AI Citations area (N4a): only emitted when actually measured, so
     # the optional 8th area stays invisible on stock audits.
     if ai_citations.measured:
@@ -953,9 +1012,7 @@ def build_ai_visibility_checks(value: CrawlPayload | Mapping[str, Any]) -> list[
     # discoverability anchor the button has (the old measured-gate hid it
     # and made a failed run indistinguishable from the feature not existing).
     checks.extend(build_lighthouse_checks(lighthouse))
-    # H6: stamp every check with its evidence class + source IDs at the single
-    # aggregation seam. Additive metadata only — never touches status or score.
-    return [attach_evidence(check) for check in checks]
+    return checks
 
 
 def _render_diff_from_raw(value: Any) -> RenderDiff | None:
