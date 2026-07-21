@@ -79,6 +79,15 @@ _LIVE_ROW_WINDOW = 5000
 # item 6: cap nodes fed to the O(n^2) force-directed layout so a large crawl's
 # Link graph stays responsive (sampled to the most-central nodes).
 _GRAPH_NODE_CAP = 500
+# v3 G5: cap how many VECTORED pages the Topic map collects before it stops
+# streaming, so a crawl with the flag on never decompresses every payload of
+# a huge site looking for more.
+_CLUSTER_MAX_VECTORS = 2000
+# The zero-vector case (topic embeddings off — the default) must stay bounded
+# too: whenever the crawl-wide flag was on, vectors appear from the first
+# measured pages, so scanning a few thousand payloads is enough to prove there
+# are none without decompressing a 100k-row store on the GUI thread.
+_CLUSTER_MAX_SCANNED = 5000
 # v3: how many crawl databases the rolling prune keeps on disk for "View past
 # scans" (newest first, the window's live/previous stores always excluded).
 _STORED_CRAWL_RETENTION = 10
@@ -593,6 +602,12 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             "first linked to each URL. Orphan pages (reached via sitemap, not internal links) "
             "are listed."
         )
+        self.btn_cluster_map = QtWidgets.QPushButton("Topic map")
+        self.btn_cluster_map.setToolTip(
+            "Visualise pages as a content-cluster scatter: dots are pages, colour is topic cluster, "
+            'position comes from their stored topic-embedding vectors. Needs the opt-in "Topic '
+            'embeddings (local model)" crawl setting (silentfrog[embeddings]).'
+        )
         self.btn_history = QtWidgets.QPushButton("View past scans")
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
@@ -600,6 +615,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row.addWidget(self.btn_export_ai)
         row.addWidget(self.btn_diff)
         row.addWidget(self.btn_graph)
+        row.addWidget(self.btn_cluster_map)
         row.addWidget(self.btn_history)
         row.addWidget(self.btn_new_crawl)
         row.addStretch()
@@ -621,6 +637,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.clicked.connect(self._export_ai)
         self.btn_diff.clicked.connect(self._show_diff)
         self.btn_graph.clicked.connect(self._show_graph)
+        self.btn_cluster_map.clicked.connect(self._show_cluster_map)
         self.btn_new_crawl.clicked.connect(self._show_setup)
         self.btn_history.clicked.connect(self._open_history_browser)
         self.btn_history_setup.clicked.connect(self._open_history_browser)
@@ -642,6 +659,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.setEnabled(False)
         self.btn_diff.setEnabled(False)
         self.btn_graph.setEnabled(False)
+        self.btn_cluster_map.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
         self.recap_widget.reset("Start a crawl to build the site action recap.")
         self.lbl_history.setText("History: no completed crawl yet.")
@@ -903,6 +921,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
         self.btn_graph.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
+        self.btn_cluster_map.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
         self.btn_new_crawl.setEnabled(not running)
         if running:
             self._eta_timer.start()
@@ -1107,6 +1126,65 @@ class SiteCrawlWindow(QtWidgets.QWidget):
                 store.close()
         except Exception:
             return []
+
+    def _show_cluster_map(self) -> None:
+        from .content_clusters import build_cluster_map
+        from .link_graph.cluster_view import ClusterMapView
+
+        items = self._cluster_inputs_from_report()
+        if not items:
+            QtWidgets.QMessageBox.information(self, "No topic vectors", _NO_VECTORS_MESSAGE)
+            return
+        # Clustering (KMeans/PCA) runs synchronously on the GUI thread; a busy
+        # cursor covers it the same way the Link graph's O(n^2) layout does.
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            cluster_map = build_cluster_map(items)
+            view = ClusterMapView()
+            view.set_cluster_map(cluster_map)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if not cluster_map.measured:
+            QtWidgets.QMessageBox.information(self, "Topic map unavailable", cluster_map.reason)
+            return
+        dialog = self._build_cluster_dialog(cluster_map, view)
+        self._detail_windows.append(dialog)
+        dialog.show()
+
+    def _build_cluster_dialog(self, cluster_map: Any, view: Any) -> QtWidgets.QDialog:
+        view.node_clicked.connect(self._open_node_detail)  # clicking a dot opens its page, like the link graph
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Topic map — content clusters")
+        dialog.resize(900, 680)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(_cluster_caption(cluster_map))
+        layout.addWidget(view, 1)
+        layout.addWidget(_cluster_legend())
+        layout.addLayout(_graph_controls(view, dialog))  # Fit all / Reset zoom / Close — view-agnostic
+        return dialog
+
+    def _cluster_inputs_from_report(self) -> list[tuple[str, str, tuple[float, ...]]]:
+        """(url, title, vector) for every page with a stored topic-embedding
+        vector, read through the same run-bound repository the charts use."""
+        if self._latest_report is None:
+            return []
+        try:
+            return self._stream_cluster_inputs()
+        except Exception:
+            return []
+
+    def _stream_cluster_inputs(self) -> list[tuple[str, str, tuple[float, ...]]]:
+        collected: list[tuple[str, str, tuple[float, ...]]] = []
+        scanned = 0
+        with open_report_repository(self._latest_report) as repo:
+            for result in repo.stream_results():
+                scanned += 1
+                vector = _topic_vector(result.payload)
+                if vector:
+                    collected.append((result.url, result.title, vector))
+                if len(collected) >= _CLUSTER_MAX_VECTORS or scanned >= _CLUSTER_MAX_SCANNED:
+                    break
+        return collected
 
     def _show_diff(self) -> None:
         if self._latest_report is None or self._previous_report is None:
@@ -1371,6 +1449,34 @@ def _graph_controls(view: Any, dialog: QtWidgets.QDialog) -> QtWidgets.QHBoxLayo
     row.addStretch(1)
     row.addWidget(close)
     return row
+
+
+_NO_VECTORS_MESSAGE = (
+    'No pages have a stored topic-embedding vector yet. Enable "Topic embeddings (local model)" '
+    "in Crawl settings (needs silentfrog[embeddings]) and re-crawl."
+)
+
+
+def _topic_vector(payload: CrawlPayload | None) -> tuple[float, ...]:
+    if payload is None:
+        return ()
+    raw = payload.topic_embeddings.get("vector")
+    if not isinstance(raw, list) or not raw:
+        return ()
+    return tuple(float(component) for component in raw)
+
+
+def _cluster_caption(cluster_map: Any) -> QtWidgets.QLabel:
+    sample_note = f" (sampled to the first {len(cluster_map.points)} vectored pages)" if cluster_map.sampled else ""
+    text = f"{len(cluster_map.points)} pages in {cluster_map.cluster_count} topic clusters{sample_note}"
+    return QtWidgets.QLabel(text)
+
+
+def _cluster_legend() -> QtWidgets.QLabel:
+    legend = QtWidgets.QLabel("Dot color = topic cluster · click a dot to open the page · wheel to zoom.")
+    legend.setWordWrap(True)
+    legend.setStyleSheet("font-size:11px; color:#9aa0a6;")
+    return legend
 
 
 def _title_from_meta(rows: object) -> str:

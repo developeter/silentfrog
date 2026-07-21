@@ -39,6 +39,9 @@ class TopicEmbeddingsPayload:
     coherence: float = 0.0
     paragraphs_scored: int = 0
     model: str = ""
+    # v3 G5: the document vector (L2-normalized mean of title + paragraph
+    # embeddings) kept for the content-cluster map. Empty when unmeasured.
+    vector: tuple[float, ...] = ()
 
     @classmethod
     def from_raw(cls, value: Any) -> TopicEmbeddingsPayload:
@@ -50,6 +53,7 @@ class TopicEmbeddingsPayload:
             coherence=float(value.get("coherence", 0.0) or 0.0),
             paragraphs_scored=int(value.get("paragraphs_scored", 0) or 0),
             model=str(value.get("model", "")),
+            vector=_decode_vector(value.get("vector")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,7 +63,14 @@ class TopicEmbeddingsPayload:
             "coherence": self.coherence,
             "paragraphs_scored": self.paragraphs_scored,
             "model": self.model,
+            "vector": list(self.vector),
         }
+
+
+def _decode_vector(raw: Any) -> tuple[float, ...]:
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(float(component) for component in raw)
 
 
 def _default_embedder() -> Embedder | None:
@@ -93,6 +104,22 @@ def select_paragraphs(paragraphs: Sequence[str]) -> list[str]:
     return chosen[:_MAX_PARAGRAPHS]
 
 
+def _mean_vector(vectors: Sequence[Sequence[float]]) -> tuple[float, ...]:
+    """L2-normalized mean of every embedded vector (title + paragraphs),
+    rounded to 4 decimals to keep the zlib+JSON blob small (~384 floats/page,
+    stored only when the opt-in ``topic_embeddings`` flag is on)."""
+    dim = len(vectors[0])
+    sums = [0.0] * dim
+    for vec in vectors:
+        for i, component in enumerate(vec):
+            sums[i] += component
+    mean = [total / len(vectors) for total in sums]
+    norm = math.sqrt(sum(component * component for component in mean))
+    if norm == 0.0:
+        return tuple(round(component, 4) for component in mean)
+    return tuple(round(component / norm, 4) for component in mean)
+
+
 def topic_coherence(
     title: str,
     paragraphs: Sequence[str],
@@ -122,6 +149,7 @@ def topic_coherence(
         coherence=round(coherence, 4),
         paragraphs_scored=len(body),
         model=_MODEL_NAME,
+        vector=_mean_vector(vectors),
     )
 
 

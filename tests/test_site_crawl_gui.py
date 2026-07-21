@@ -11,6 +11,7 @@ from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
     IssueCategory,
     IssueSeverity,
 )
+from silentfrog.content_clusters import ClusterMap, ClusterPoint  # type: ignore[reportMissingImports]
 from silentfrog.crawl_diff import diff_reports  # type: ignore[reportMissingImports]
 from silentfrog.crawl_history import CrawlHistoryStore  # type: ignore[reportMissingImports]
 from silentfrog.crawl_run_repository import CrawlRunRef  # type: ignore[reportMissingImports]
@@ -23,6 +24,7 @@ from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
     normalize_image_row,
 )
 from silentfrog.link_graph import GraphInput, build_link_graph  # type: ignore[reportMissingImports]
+from silentfrog.link_graph.cluster_view import ClusterMapView  # type: ignore[reportMissingImports]
 from silentfrog.link_graph.graph_view import LinkGraphView  # type: ignore[reportMissingImports]
 from silentfrog.site_crawl_gui import (  # type: ignore[reportMissingImports]
     SiteCrawlDetailDialog,
@@ -779,3 +781,129 @@ def test_graph_dialog_assembles_controls_and_banner(qtbot) -> None:
     labels = " ".join(lbl.text() for lbl in dialog.findChildren(QtWidgets.QLabel))
     assert "orphan page(s)" in labels  # caption
     assert "no parent" in labels  # orphan banner (high ratio)
+
+
+# --- v3 G5: Topic map (content-cluster) dialog wiring ---
+
+
+def test_cluster_map_view_renders_dots_and_click_emits_url(qtbot) -> None:
+    cluster_map = ClusterMap(
+        points=(
+            ClusterPoint(url="https://e.com/a", title="A", x=0.0, y=0.0, cluster=0),
+            ClusterPoint(url="https://e.com/b", title="B", x=1.0, y=1.0, cluster=1),
+            ClusterPoint(url="https://e.com/c", title="C", x=2.0, y=0.5, cluster=0),
+        ),
+        cluster_count=2,
+        sampled=False,
+        measured=True,
+    )
+    view = ClusterMapView()
+    qtbot.addWidget(view)
+    view.set_cluster_map(cluster_map)
+
+    from silentfrog.link_graph.cluster_view import _DotItem  # type: ignore[reportMissingImports]
+
+    dots = [i for i in view.scene().items() if isinstance(i, _DotItem)]
+    assert len(dots) == 3
+
+    captured: list[str] = []
+    view.node_clicked.connect(captured.append)
+    dots[0]._on_click(dots[0]._url)
+    assert captured and captured[0].startswith("https://e.com/")
+
+
+def test_cluster_dialog_assembles_caption_legend_controls_and_wires_click(monkeypatch, qtbot) -> None:
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    monkeypatch.setattr(win, "_load_payload_for_detail", lambda url: _payload(url))
+    cluster_map = ClusterMap(
+        points=(
+            ClusterPoint(url="https://e.com/a", title="A", x=0.0, y=0.0, cluster=0),
+            ClusterPoint(url="https://e.com/b", title="B", x=1.0, y=0.0, cluster=1),
+        ),
+        cluster_count=2,
+        sampled=True,
+        measured=True,
+    )
+    view = ClusterMapView()
+    qtbot.addWidget(view)
+    view.set_cluster_map(cluster_map)
+
+    dialog = win._build_cluster_dialog(cluster_map, view)
+    qtbot.addWidget(dialog)
+
+    buttons = {b.text(): b for b in dialog.findChildren(QtWidgets.QPushButton)}
+    assert "Fit all" in buttons
+    assert "Reset zoom" in buttons
+    assert "Close" in buttons
+    buttons["Fit all"].click()  # callable without crashing
+    buttons["Reset zoom"].click()
+
+    labels = " ".join(lbl.text() for lbl in dialog.findChildren(QtWidgets.QLabel))
+    assert "2 pages in 2 topic clusters" in labels  # caption
+    assert "sampled" in labels.lower()  # sampled note
+    assert "topic cluster" in labels.lower()  # legend
+
+    # item 1 (link graph) reuse: a dot click opens the page detail dialog too.
+    view.node_clicked.emit("https://e.com/a")
+    assert win._detail_windows
+    assert isinstance(win._detail_windows[-1], SiteCrawlDetailDialog)
+
+
+def test_show_cluster_map_reports_no_vectors(monkeypatch, qtbot) -> None:
+    # Stock crawls never set the opt-in topic_embeddings flag, so every payload's
+    # vector is empty; the button must explain why instead of opening an empty map.
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda parent, title, text, *a, **k: captured.update(title=title, text=text),
+    )
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._latest_report = report
+
+    win._show_cluster_map()
+
+    assert captured
+    assert "topic" in captured["text"].lower()
+    assert "embeddings" in captured["text"].lower()
+    assert win._detail_windows == []
+
+
+class _EndlessVectorlessRepo:
+    """Streams far more vectorless results than any sane bound — the zero-vector
+    scan must stop at _CLUSTER_MAX_SCANNED, not at the store's natural end."""
+
+    def __init__(self, result: SiteCrawlResult) -> None:
+        self._result = result
+        self.consumed = 0
+
+    def __enter__(self) -> _EndlessVectorlessRepo:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def stream_results(self):
+        for _ in range(50_000):
+            self.consumed += 1
+            yield self._result
+
+
+def test_stream_cluster_inputs_bounds_the_zero_vector_scan(monkeypatch, qtbot) -> None:
+    # With topic embeddings off (the default) no payload carries a vector; the
+    # scan must stop at _CLUSTER_MAX_SCANNED instead of decompressing an entire
+    # 100k-row store on the GUI thread before the "no vectors" info box shows.
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    repo = _EndlessVectorlessRepo(result)
+    monkeypatch.setattr(site_crawl_gui, "open_report_repository", lambda _report: repo)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._latest_report = report
+
+    assert win._stream_cluster_inputs() == []
+    assert repo.consumed == site_crawl_gui._CLUSTER_MAX_SCANNED

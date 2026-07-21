@@ -16,8 +16,8 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up (operator-decided queue, 2026-07-20):** **G5 → G6**
-  (G2 ✅, G3 ✅ shipped 2026-07-20; G4 ✅ shipped 2026-07-21), one
+- **Next up (operator-decided queue, 2026-07-20):** **G6** (last in queue;
+  G2 ✅, G3 ✅ shipped 2026-07-20; G4 ✅, G5 ✅ shipped 2026-07-21), one
   `ship-roadmap-pr` PR at a time via the matching `docs/PLAYBOOKS.md` recipe.
   Remaining must-haves (G8, G9) and the nice-to-haves come after.
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
@@ -137,9 +137,16 @@ Shipped:
   moderate/minor→info) feeding recap/hints, plus an Accessibility tab (Trust
   bucket, both surfaces) and an "Accessibility actions" Excel sheet.
 
-Next (operator-decided 2026-07-20): **G5** interactive visualisations →
-**G6** MCP server revival. Then G8 HTML report · G9 scheduled crawls + alert
-digest · the nice-to-have tail.
+- **Topic map (G5):** the force-directed link graph already shipped in V9;
+  G5 adds the content-cluster map. Measured pages now retain their rounded
+  MiniLM document vector inside `topic_embeddings` (opt-in flag only);
+  `content_clusters.py` clusters via KMeans+PCA (sklearn rides the locked
+  `[embeddings]` extra — zero dependency changes); a "Topic map" button opens
+  a cluster-colored scatter dialog (click → page detail). Store collection is
+  bounded both ways: 2000 vectored pages, 5000 scanned rows.
+
+Next (operator-decided 2026-07-20): **G6** MCP server revival. Then G8 HTML
+report · G9 scheduled crawls + alert digest · the nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

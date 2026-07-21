@@ -96,3 +96,32 @@ def test_check_emitted_only_when_measured_with_heuristic_threshold() -> None:
 def test_payload_round_trips_json_native() -> None:
     payload = TopicEmbeddingsPayload(measured=True, coherence=0.5, paragraphs_scored=3, model="m")
     assert TopicEmbeddingsPayload.from_raw(payload.to_dict()) == payload
+
+
+def test_measured_payload_retains_rounded_l2_normalized_vector() -> None:
+    # v3 G5: the document vector (mean of title + paragraph embeddings, L2-normalized,
+    # rounded to 4dp) feeds the content-cluster map. [3, 4] normalizes to (0.6, 0.8).
+    title = "Espresso brewing guide"
+    body = _LONG
+    embedder = _fake_embedder({title: [3.0, 4.0], body: [3.0, 4.0]})
+    payload = topic_coherence(title, [body], embedder=embedder)
+    assert payload.measured is True
+    assert payload.vector == (0.6, 0.8)
+    assert all(isinstance(component, float) for component in payload.vector)
+
+
+def test_unmeasured_payload_has_empty_vector() -> None:
+    payload = topic_coherence("", [_LONG], embedder=_fake_embedder({}))
+    assert payload.measured is False
+    assert payload.vector == ()
+
+
+def test_vector_round_trips_json_native() -> None:
+    payload = TopicEmbeddingsPayload(
+        measured=True, coherence=0.5, paragraphs_scored=3, model="m", vector=(0.1234, -0.5678)
+    )
+    data = payload.to_dict()
+    assert data["vector"] == [0.1234, -0.5678]  # JSON-native list, not a tuple
+    restored = TopicEmbeddingsPayload.from_raw(data)
+    assert restored == payload
+    assert isinstance(restored.vector, tuple)
