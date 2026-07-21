@@ -204,6 +204,31 @@ $ poetry run python -m silentfrog
 - Preferred: `poetry run silentfrog`
 - Alternative: `poetry run python -m silentfrog`
 
+### MCP server
+
+`silentfrog-mcp serve` runs a local [Model Context Protocol](https://modelcontextprotocol.io/) server over stdio (JSON-RPC 2.0, newline-delimited) so AI clients such as Claude Desktop or Claude Code can drive Silentfrog audits directly. It exposes three tools:
+
+- `audit_page` — audit one URL and return an LLM-ready Markdown + JSON summary (same formatter as `silentfrog-cli export`).
+- `list_crawls` — list saved Site Crawl runs from local history.
+- `get_crawl_summary` — counts, health score, top hints, and health-score trend for one saved run.
+
+Every tool runs through the same TLS-verified / SSRF-guarded audit path as the GUI and CLI, and every optional integration (Google, Semrush, AI providers, stealth fetching, embeddings) stays off unless you've separately enabled it — the MCP server adds no new opt-in surface of its own.
+
+Add it to Claude Desktop's config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "silentfrog": {
+      "command": "silentfrog-mcp",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Run `poetry run silentfrog-mcp serve` (or `silentfrog-mcp serve` from a source install) to start it manually and confirm it is on your `PATH`.
+
 ### Running without Poetry
 
 This is a manual developer alternative. For normal end-user installation, prefer **Section 2**.

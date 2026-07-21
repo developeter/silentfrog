@@ -35,7 +35,9 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > nice-to-haves. The G3 policy question is resolved: the v2.0 "no new
 > AI-engine APIs" lockout is reopened strictly as BYO-key opt-in (OFF by
 > default, user-supplied keys only). G2 ✅ and G3 ✅ shipped the same day;
-> G4 ✅ and G5 ✅ shipped 2026-07-21.
+> G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the operator queue is complete.
+> Top remaining must-haves: **G8** (HTML report) and **G9** (scheduled
+> crawls + alert digest), then the nice-to-have tail.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -44,7 +46,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G3 ✅ | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | SHIPPED: `integrations/ai_engines/` (plain REST, no SDKs, per-host once-per-session sampling memo), "AI Share of Voice" checks area + badge group, Settings BYO-key group, local JSON history. Strictly opt-in: `SILENTFROG_AI_SOV_ENABLE=1` + keys |
 | G4 ✅ | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | SHIPPED: vendored axe-core 4.10.3 (MPL-2.0, `_vendor/`) injected via the render pool's new `inject_js`/`evaluate_js` seam; opt-in flag + DEEP profile; issues (impact→severity map) + Accessibility tab (Trust bucket) + Excel sheet |
 | G5 ✅ | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | SHIPPED: link graph was already live (V9); G5 added the Topic map — per-page embedding vectors retained in the payload (opt-in flag), `content_clusters.py` KMeans+PCA (rides the locked `[embeddings]` extra, zero new deps), cluster-scatter dialog with bounded store scan |
-| G6 | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | Was V18, dropped in v2.0; SF validated the bet — revive it |
+| G6 ✅ | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | SHIPPED: hand-rolled stdlib JSON-RPC/stdio server (`mcp_server.py`, zero new deps — supersedes V18's planned `mcp` extra); tools: `audit_page` (STANDARD default, TLS/SSRF guards inherited), `list_crawls`, `get_crawl_summary` |
 | G7 | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | Local Ollama default keeps the local-first story |
 | G8 | A | **Client-ready HTML/PDF report export** | Sitebulb's consultant staple | Excel doesn't demo well; single self-contained HTML first, print-to-PDF free |
 | G9 | C | **Scheduled runs + notifications with auto-diff digest** (email/webhook) | SF v24 auto-compare, Sitebulb alerts | Watch mode exists; missing the alerting transport + scheduling |

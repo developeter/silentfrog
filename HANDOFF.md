@@ -16,10 +16,11 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up (operator-decided queue, 2026-07-20):** **G6** (last in queue;
-  G2 ✅, G3 ✅ shipped 2026-07-20; G4 ✅, G5 ✅ shipped 2026-07-21), one
-  `ship-roadmap-pr` PR at a time via the matching `docs/PLAYBOOKS.md` recipe.
-  Remaining must-haves (G8, G9) and the nice-to-haves come after.
+- **Operator queue (2026-07-20) COMPLETE:** G2 ✅, G3 ✅ (2026-07-20);
+  G4 ✅, G5 ✅, G6 ✅ (2026-07-21) — each via `ship-roadmap-pr` with the
+  matching `docs/PLAYBOOKS.md` recipe. **Next candidates:** the remaining
+  must-haves **G8** (client-ready HTML report) and **G9** (scheduled crawls +
+  alert digest), then the nice-to-have tail (G7, G10, G11, G13–G15).
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
   reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
@@ -145,8 +146,15 @@ Shipped:
   a cluster-colored scatter dialog (click → page detail). Store collection is
   bounded both ways: 2000 vectored pages, 5000 scanned rows.
 
-Next (operator-decided 2026-07-20): **G6** MCP server revival. Then G8 HTML
-report · G9 scheduled crawls + alert digest · the nice-to-have tail.
+- **MCP server (G6, the revived V18):** `silentfrog-mcp serve` — a hand-rolled
+  stdlib JSON-RPC/stdio MCP server (`mcp_server.py`, zero new deps). Tools:
+  `audit_page` (headless single-page audit, STANDARD profile default,
+  TLS/SSRF guards inherited, integrations stay env-gated off), `list_crawls`,
+  `get_crawl_summary` (history + hints + trend reuse). Claude Desktop config
+  example in README §MCP server.
+
+Next: **G8** HTML report · **G9** scheduled crawls + alert digest · the
+nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

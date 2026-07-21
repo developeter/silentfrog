@@ -21,14 +21,15 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 - **v2.0 roadmap V1..V20: complete.** Full milestone history in
   `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in `HANDOFF.md`.
 - **v3 gap analysis: `docs/v3_roadmap.md`** — ranked gaps vs the paid tools,
-  with a must-have/nice-to-have verdict. Shipped from it so far: prioritized
-  hints engine (G1), JS-rendered link crawl (M8), reopenable past scans,
-  Multi-URL Dashboard retired (folded into Site Crawl URL-list mode + a GEO
-  column), Lighthouse-button fix, GUI design-token pass.
-- **Biggest open v3 gaps:** health-score + issue trends across crawls (G2),
-  BYO-key AI citation share-of-voice (G3, needs a policy decision — v2.0
-  locked out new AI-engine APIs), accessibility audits via axe-core (G4),
-  client-ready HTML report (G8), scheduled crawls + alert digest (G9).
+  with a must-have/nice-to-have verdict. Shipped from it: G1 hints engine
+  (+G12 for free), JS-rendered link crawl (M8), reopenable past scans,
+  Multi-URL Dashboard retirement, Lighthouse-button fix, GUI token pass,
+  **G2** health-score + issue trends, **G3** BYO-key AI citation
+  share-of-voice (policy reopened 2026-07-20 as strictly BYO-key opt-in),
+  **G4** axe-core accessibility, **G5** Topic map (content clusters),
+  **G6** MCP server (`silentfrog-mcp serve`).
+- **Biggest open v3 gaps:** client-ready HTML report (G8), scheduled crawls +
+  alert digest (G9), then the nice-to-have tail (G7, G10, G11, G13–G15).
 
 ## Where the rules live
 
@@ -75,6 +76,8 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 - `silentfrog-cli aggregate <sitemap_url>` — sitemap-level GEO report
 - `silentfrog-cli watch <urls>` — watch mode with regression alerts
 - `silentfrog-cli export --format llm <url|crawl.db>` — LLM-friendly export (V5)
+- `silentfrog-mcp serve` — local MCP server over stdio (G6): `audit_page`,
+  `list_crawls`, `get_crawl_summary` tools for AI clients
 
 ## Invariants (hold on EVERY change — these are load-bearing)
 

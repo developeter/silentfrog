@@ -49,6 +49,9 @@ silentfrog = "silentfrog.gui:main"
 # terminal cleanly.
 [project.scripts]
 silentfrog-cli = "silentfrog.cli:main"
+# v3 G6 — local Model Context Protocol server (JSON-RPC 2.0 over stdio) so
+# AI clients (Claude Desktop/Code) can drive Silentfrog audits directly.
+silentfrog-mcp = "silentfrog.mcp_server:main"
 
 [project.optional-dependencies]
 pyqt5-backend = [
