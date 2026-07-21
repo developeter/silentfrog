@@ -60,7 +60,9 @@ class CrawlHistoryIssue:
 
     def to_audit_issue(self) -> AuditIssue:
         """Inverse of ``from_audit_issue`` — lets an opened past scan rebuild
-        its recap from the stored issues instead of re-streaming payloads."""
+        its recap from the stored issues instead of re-streaming payloads.
+        History records carry no evidence rows, so the rebuilt issue gets an
+        empty tuple — recap counts and hints never read evidence."""
         return AuditIssue(
             issue_id=self.issue_id,
             severity=self.severity,
@@ -68,6 +70,7 @@ class CrawlHistoryIssue:
             url=self.url,
             reason=self.reason,
             recommendation=self.recommendation,
+            evidence=(),
             source=self.source,
             confidence=self.confidence,
         )

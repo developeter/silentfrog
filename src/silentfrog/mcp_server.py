@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 from typing import Any, TextIO
 
-from .audit_issues import AuditIssue, IssueSeverity
+from .audit_issues import IssueSeverity
 from .crawl_history import CrawlHistoryRun, CrawlHistoryStore
 from .crawl_options import AuditProfile
 from .crawl_trends import CrawlTrend, TrendPoint, build_trend
@@ -300,26 +300,6 @@ _GET_CRAWL_SUMMARY_SCHEMA = {
 }
 
 
-def _to_audit_issue(issue: Any) -> AuditIssue:
-    # CrawlHistoryIssue.to_audit_issue() (crawl_history.py) never supplies
-    # AuditIssue.evidence — a required field added after that method was
-    # written — so it raises TypeError on every call (also hit by
-    # site_crawl_gui.py's "reopen scan" recap). crawl_history.py is out of
-    # scope for this change, so build the AuditIssue directly here instead
-    # of relying on that broken method.
-    return AuditIssue(
-        issue_id=issue.issue_id,
-        category=issue.category,
-        severity=issue.severity,
-        source=issue.source,
-        reason=issue.reason,
-        recommendation=issue.recommendation,
-        evidence=(),
-        url=issue.url,
-        confidence=issue.confidence,
-    )
-
-
 def _hint_lines(hints: list[Hint]) -> list[str]:
     if not hints:
         return ["_No hints — clean crawl._"]
@@ -384,7 +364,7 @@ async def _call_get_crawl_summary(arguments: dict[str, Any], _ctx: ServerContext
     if run is None:
         return _tool_error(f"No saved crawl with run_id={run_id!r}.")
     scoped = [item for item in runs if item.scope_key == run.scope_key]
-    hints = build_hints(_to_audit_issue(issue) for issue in run.issues)[:_TOP_HINTS_CAP]
+    hints = build_hints(issue.to_audit_issue() for issue in run.issues)[:_TOP_HINTS_CAP]
     trend = build_trend(scoped)
     return _tool_ok(_summary_markdown(run, hints, trend), _summary_structured(run, hints, trend))
 

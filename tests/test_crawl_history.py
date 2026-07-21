@@ -145,6 +145,21 @@ def _run(run_id: str, issues: list[CrawlHistoryIssue]) -> CrawlHistoryRun:
     )
 
 
+def test_history_issue_rebuilds_a_full_audit_issue() -> None:
+    # Regression: to_audit_issue() omitted the required `evidence` argument
+    # (added to AuditIssue after this method was written), so reopening a past
+    # scan crashed the recap rebuild with a TypeError.
+    issue = _issue("meta.title_missing", IssueSeverity.WARNING, "https://example.com/a")
+
+    audit = issue.to_audit_issue()
+
+    assert audit.issue_id == issue.issue_id
+    assert audit.severity is issue.severity
+    assert audit.category is issue.category
+    assert audit.url == issue.url
+    assert audit.evidence == ()  # history records carry no evidence rows
+
+
 def test_build_history_run_extracts_site_scope_and_issue_counts() -> None:
     failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
     report = SiteCrawlReport.from_results([failed], discovered_count=1, base_url="https://example.com/fail")
