@@ -21,6 +21,14 @@ def test_crawl_options_bot_render_off_by_default() -> None:
     assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, bot_render=True).bot_render is True
 
 
+def test_crawl_options_accessibility_audit_off_by_default() -> None:
+    # v3 G4 Stage 1: axe-core accessibility scan is strictly opt-in.
+    assert CrawlOptions.default().accessibility_audit is False
+    assert CrawlOptions.from_ui(gentle_mode=False, max_parallel=4).accessibility_audit is False
+    opted_in = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, accessibility_audit=True)
+    assert opted_in.accessibility_audit is True
+
+
 def test_crawl_options_topic_embeddings_off_by_default() -> None:
     # V20: local embedding inference is strictly opt-in.
     assert CrawlOptions.default().topic_embeddings is False

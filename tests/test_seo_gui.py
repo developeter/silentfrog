@@ -26,6 +26,7 @@ from silentfrog.image_diagnostics import (
 from silentfrog.seo_gui import WebpageSeoWindow  # type: ignore[reportMissingImports]
 from silentfrog.settings_dialog import CrawlSettingsDialog  # type: ignore[reportMissingImports]
 from silentfrog.tabs import (  # type: ignore[reportMissingImports]
+    AccessibilityTab,
     AiVisibilityTab,
     CanonicalTab,
     ContentQualityTab,
@@ -577,6 +578,7 @@ def test_seo_window_groups_tabs_into_buckets(qtbot):
         "AI Visibility",
         "Performance",
         "SERP",
+        "Accessibility",
     ]
     leaves = [
         win.tabs.widget(i).tabText(j) for i in range(1, win.tabs.count()) for j in range(win.tabs.widget(i).count())
@@ -1408,6 +1410,70 @@ def test_performance_tab_empty_state_is_stable(qtbot) -> None:
     assert offender_model.rowCount() == 1
     assert offender_model.data(offender_model.index(0, 0)) == "-"
     assert offender_model.data(offender_model.index(0, 1)) == "-"
+
+
+def test_accessibility_tab_renders_violations(qtbot) -> None:
+    tab = AccessibilityTab()
+    qtbot.addWidget(tab)
+
+    payload = {
+        "measured": True,
+        "violations": [
+            {
+                "id": "image-alt",
+                "impact": "critical",
+                "help": "Images must have alternate text",
+                "help_url": "https://dequeuniversity.com/rules/axe/4.10/image-alt",
+                "nodes": 2,
+                "sample_targets": ["img.hero", "img.footer"],
+            },
+            {
+                "id": "region",
+                "impact": "moderate",
+                "help": "All page content must be contained by landmarks",
+                "help_url": "https://dequeuniversity.com/rules/axe/4.10/region",
+                "nodes": 1,
+                "sample_targets": [],
+            },
+        ],
+        "counts": {"critical": 1, "serious": 0, "moderate": 1, "minor": 0},
+    }
+
+    tab.update(payload)
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 2
+    # TableTab has sorting enabled, so row order is not guaranteed — look
+    # rows up by id rather than assuming a position (same convention as
+    # test_performance_tab_renders_summary_and_opportunities).
+    rows = {model.data(model.index(row, 0)): row for row in range(model.rowCount())}
+    critical_row = rows["image-alt"]
+    moderate_row = rows["region"]
+    assert model.data(model.index(critical_row, 1)) == "critical"
+    assert model.data(model.index(critical_row, 2)) == "2"
+    assert model.data(model.index(critical_row, 4)) == "img.hero"
+    assert model.data(model.index(critical_row, 1), QtCore.Qt.ItemDataRole.BackgroundRole) is not None
+    assert model.data(model.index(moderate_row, 4)) == "-"
+    assert model.data(model.index(moderate_row, 1), QtCore.Qt.ItemDataRole.BackgroundRole) is None
+
+
+def test_accessibility_tab_empty_state_is_stable(qtbot) -> None:
+    tab = AccessibilityTab()
+    qtbot.addWidget(tab)
+
+    tab.update({})
+
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 1
+    assert "not run" in str(model.data(model.index(0, 3))).lower()
+
+    tab.update({"measured": True, "violations": []})
+    model = tab.view.model()
+    assert model is not None
+    assert model.rowCount() == 1
+    assert model.data(model.index(0, 3)) == "No accessibility violations detected."
 
 
 def test_robots_tab_appends_empty_state(qtbot):

@@ -26,6 +26,7 @@ ACTION_SHEET_NAMES = [
     "Technical actions",
     "Images actions",
     "AI-GEO actions",
+    "Accessibility actions",
     "Appendix - raw data",
 ]
 
@@ -141,6 +142,7 @@ def _write_category_sheets(
         },
         "Images actions": {IssueCategory.IMAGES},
         "AI-GEO actions": {IssueCategory.AI_GEO},
+        "Accessibility actions": {IssueCategory.ACCESSIBILITY},
     }
     for name, categories in specs.items():
         _write_issue_sheet(workbook, formats, name, _issues_in_categories(issues, categories))

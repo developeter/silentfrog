@@ -29,6 +29,7 @@ class IssueCategory(str, Enum):
     AI_GEO = "ai_geo"
     LOGS = "logs"
     CRAWL = "crawl"
+    ACCESSIBILITY = "accessibility"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,7 @@ def issues_for_payload(url: str, payload: CrawlPayload) -> list[AuditIssue]:
     issues.extend(_structured_data_issues(url, payload))
     issues.extend(_performance_issues(url, payload))
     issues.extend(_ai_visibility_issues(url, payload))
+    issues.extend(_accessibility_issues(url, payload))
     return dedupe_issues(issues)
 
 
@@ -384,6 +386,48 @@ def _ai_visibility_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:
             )
         )
     return output
+
+
+# v3 G4 Stage 1: axe-core "impact" tiers -> issue severity. §1.5 — a
+# measured-but-bad signal may warn/critical, but moderate/minor axe findings
+# are numerous and often low real-world impact (e.g. redundant ARIA), so they
+# stay info-level to keep the hints view high-signal; only critical/serious
+# (broken keyboard access, missing labels, failed contrast, etc.) surface as
+# actionable issues.
+_IMPACT_SEVERITY = {
+    "critical": IssueSeverity.CRITICAL,
+    "serious": IssueSeverity.WARNING,
+    "moderate": IssueSeverity.INFO,
+    "minor": IssueSeverity.INFO,
+}
+
+
+def _accessibility_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:
+    violations = payload.accessibility.get("violations")
+    if not isinstance(violations, list):
+        return []
+    return [_accessibility_issue(url, item) for item in violations if isinstance(item, dict)]
+
+
+def _accessibility_issue(url: str, violation: dict[str, object]) -> AuditIssue:
+    rule_id = str(violation.get("id") or "unknown")
+    impact = str(violation.get("impact") or "")
+    help_text = str(violation.get("help") or "An accessibility rule failed.")
+    help_url = str(violation.get("help_url") or "")
+    node_count = violation.get("nodes", 0)
+    recommendation = (
+        f"Fix per {help_url}" if help_url else "Review the axe-core violation and fix the affected elements."
+    )
+    return _issue(
+        f"accessibility.{rule_id}",
+        IssueCategory.ACCESSIBILITY,
+        _IMPACT_SEVERITY.get(impact, IssueSeverity.INFO),
+        url,
+        f"{help_text} ({node_count} element(s) affected).",
+        recommendation,
+        "Accessibility",
+        [("Rule", rule_id), ("Impact", impact or "-"), ("Elements affected", node_count)],
+    )
 
 
 def _issue(

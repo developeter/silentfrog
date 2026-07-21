@@ -21,6 +21,7 @@ from .exporters import export_page_analysis, export_page_for_llm, write_llm_expo
 from .settings_dialog import CrawlSettingsDialog
 from .tab_buckets import RECAP_SOURCE_TABS, TabEntry, build_bucketed_tabs
 from .tabs import (
+    AccessibilityTab,
     AiVisibilityTab,
     BotMatrixTab,
     CanonicalTab,
@@ -273,6 +274,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.ai_visibility_tab = AiVisibilityTab()
         self.performance_tab = PerformanceTab()
         self.serp_tab = SerpTab()
+        self.accessibility_tab = AccessibilityTab()
         # v2.0 V19-A1: the flat tabs are regrouped into 5 user-goal buckets
         # (+ a top-level Recap/Overview). The tab instances and their
         # .update()/signal wiring are unchanged; only the nesting changes.
@@ -295,6 +297,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             TabEntry("AI Visibility", self.ai_visibility_tab),
             TabEntry("Performance", self.performance_tab),
             TabEntry("SERP", self.serp_tab),
+            TabEntry("Accessibility", self.accessibility_tab),
         )
         self._bucketed = build_bucketed_tabs(self.tabs, entries)
 
@@ -553,6 +556,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.bot_matrix_tab.update([])
         self.ai_visibility_tab.update({})
         self.performance_tab.update({})
+        self.accessibility_tab.update({})
         self.schema_tab.update({})
         self.serp_tab.update({}, {})
         self.recap_tab.reset()
@@ -682,6 +686,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.bot_matrix_tab.update, data),
             (self.ai_visibility_tab.update, data.get("ai_visibility", {})),
             (self.performance_tab.update, data.get("performance", {})),
+            (self.accessibility_tab.update, data.get("accessibility", {})),
             (self.schema_tab.update, data.get("schema", {})),
             (self.social_tab.update, data.get("social", {})),
         ]

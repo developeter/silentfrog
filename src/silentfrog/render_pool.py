@@ -48,8 +48,33 @@ def _default_browser_factory() -> BrowserManager:
     return BrowserManager()
 
 
+def _run_page_script(page: Any, inject_js: str, evaluate_js: str) -> Any:
+    """v3 G4: optionally inject a script tag then evaluate an expression in
+    the rendered page (used to run the vendored axe-core accessibility
+    engine). A script failure must never fail the render — this returns
+    ``None`` on any error and the caller leaves ``RenderResult.error`` alone,
+    since existing consumers treat a populated ``error`` as render failure."""
+    if not inject_js and not evaluate_js:
+        return None
+    try:
+        if inject_js:
+            page.add_script_tag(content=inject_js)
+        if evaluate_js:
+            # Playwright's sync API auto-awaits a returned promise.
+            return page.evaluate(evaluate_js)
+        return None
+    except Exception:
+        return None
+
+
 def _render_with_browser(
-    browser: Any, url: str, timeout: int, collect_vitals: bool, user_agent: str = ""
+    browser: Any,
+    url: str,
+    timeout: int,
+    collect_vitals: bool,
+    user_agent: str = "",
+    inject_js: str = "",
+    evaluate_js: str = "",
 ) -> RenderResult:
     try:
         # v2.0 V10: only pass user_agent when set, so pre-V10 fakes (and the
@@ -60,7 +85,13 @@ def _render_with_browser(
     try:
         page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
         vitals_payload = _collect_cdp_vitals(page) if collect_vitals else None
-        return RenderResult(url=url, rendered_html=page.content(), vitals_payload=vitals_payload)
+        script_result = _run_page_script(page, inject_js, evaluate_js)
+        return RenderResult(
+            url=url,
+            rendered_html=page.content(),
+            vitals_payload=vitals_payload,
+            script_result=script_result,
+        )
     except Exception as exc:  # pragma: no cover - real navigation failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
     finally:
@@ -83,6 +114,9 @@ class _RenderJob:
     future: asyncio.Future[RenderResult]
     # v2.0 V10: render with this exact user-agent ("" = browser default).
     user_agent: str = ""
+    # v3 G4: optional in-page script injection + evaluation (e.g. axe-core).
+    inject_js: str = ""
+    evaluate_js: str = ""
 
 
 def _resolve(future: asyncio.Future[RenderResult], result: RenderResult) -> None:
@@ -114,11 +148,14 @@ class RenderPool:
         timeout: int = 15,
         collect_vitals: bool = False,
         user_agent: str = "",
+        inject_js: str = "",
+        evaluate_js: str = "",
     ) -> RenderResult:
         self._ensure_started()
         loop = asyncio.get_running_loop()
         future: asyncio.Future[RenderResult] = loop.create_future()
-        self._queue.put(_RenderJob(url, timeout, collect_vitals, loop, future, user_agent))
+        job = _RenderJob(url, timeout, collect_vitals, loop, future, user_agent, inject_js, evaluate_js)
+        self._queue.put(job)
         return await future
 
     def _run(self) -> None:
@@ -178,7 +215,9 @@ def _relaunch(manager: Any) -> tuple[Any, str]:
 def _job_result(browser: Any, job: _RenderJob, launch_error: str) -> RenderResult:
     if browser is None:
         return RenderResult(url=job.url, rendered_html="", error=f"Browser launch failed: {launch_error}")
-    return _render_with_browser(browser, job.url, job.timeout, job.collect_vitals, job.user_agent)
+    return _render_with_browser(
+        browser, job.url, job.timeout, job.collect_vitals, job.user_agent, job.inject_js, job.evaluate_js
+    )
 
 
 __all__ = ["BrowserManager", "RenderPool"]

@@ -141,6 +141,10 @@ class CrawlOptions:
     # link-local / reserved hosts. Enable only to audit trusted intranet hosts;
     # the seam logs a visible warning while it is active.
     allow_private_network: bool = False
+    # v3 (G4 Stage 1): run the vendored axe-core WCAG engine against the
+    # rendered page. Off by default; needs Playwright and a rendering
+    # profile (DEEP), same gating shape as ``bot_render``.
+    accessibility_audit: bool = False
 
     @classmethod
     def default(cls) -> CrawlOptions:
@@ -160,6 +164,7 @@ class CrawlOptions:
             profile=AuditProfile.DEEP,
             allow_insecure_tls=False,
             allow_private_network=False,
+            accessibility_audit=False,
         )
 
     @classmethod
@@ -182,6 +187,7 @@ class CrawlOptions:
         profile: AuditProfile | str | None = None,
         allow_insecure_tls: bool | None = None,
         allow_private_network: bool | None = None,
+        accessibility_audit: bool | None = None,
     ) -> CrawlOptions:
         base = cls.default()
         ua = (user_agent or base.user_agent).strip() or base.user_agent
@@ -207,6 +213,7 @@ class CrawlOptions:
             profile=base.profile if profile is None else AuditProfile.from_value(profile),
             allow_insecure_tls=bool(allow_insecure_tls),
             allow_private_network=bool(allow_private_network),
+            accessibility_audit=bool(accessibility_audit),
         )
 
 

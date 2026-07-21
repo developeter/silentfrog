@@ -44,7 +44,7 @@ BUCKET_ORDER: tuple[BucketSpec, ...] = (
         ("Meta tag", "Header H1-H6", "Images", "Content quality", "Keywords"),
     ),
     BucketSpec("speed", "Speed", ("Performance",)),
-    BucketSpec("trust", "Trust", ("Structured data", "Social", "SERP")),
+    BucketSpec("trust", "Trust", ("Structured data", "Social", "SERP", "Accessibility")),
     BucketSpec("ai_geo", "AI/GEO", ("Bot Matrix", "AI Visibility")),
 )
 
@@ -67,6 +67,7 @@ RECAP_SOURCE_TABS: dict[str, str] = {
     "Content quality": "Content quality",
     "AI Visibility": "AI Visibility",
     "Performance": "Performance",
+    "Accessibility": "Accessibility",
 }
 
 

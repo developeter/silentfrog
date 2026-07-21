@@ -1313,6 +1313,9 @@ class CrawlPayload:
     brand_mentions: dict[str, Any] = field(default_factory=dict)
     # v3 G3 Stage 1: BYO-key AI-engine share-of-voice (off by default).
     ai_sov: dict[str, Any] = field(default_factory=dict)
+    # v3 G4 Stage 1: axe-core accessibility scan {measured, violations, counts}
+    # (off by default; needs Playwright + DEEP profile).
+    accessibility: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1368,6 +1371,7 @@ class CrawlPayload:
             "topic_embeddings": _extra_group(data, "topic_embeddings"),
             "brand_mentions": _extra_group(data, "brand_mentions"),
             "ai_sov": _extra_group(data, "ai_sov"),
+            "accessibility": _extra_group(data, "accessibility"),
         }
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1414,6 +1418,7 @@ class CrawlPayload:
             "topic_embeddings": dict(self.topic_embeddings),
             "brand_mentions": dict(self.brand_mentions),
             "ai_sov": dict(self.ai_sov),
+            "accessibility": dict(self.accessibility),
         }
 
     def __getitem__(self, key: str) -> Any:

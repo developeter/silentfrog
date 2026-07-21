@@ -136,6 +136,20 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 "`pip install silentfrog[geo-render]` and `playwright install chromium`."
             )
         geo_layout.addRow(self.chk_render_js)
+        self.chk_accessibility_audit = QtWidgets.QCheckBox("Accessibility audit (axe-core, WCAG)")
+        self.chk_accessibility_audit.setToolTip(
+            "Optional. Runs the Deque axe-core WCAG engine against the rendered page — surfaces "
+            "keyboard, contrast, ARIA and labeling violations. Results feed the recap and a per-page "
+            "Accessibility tab. Slow (one render per page); off by default. Requires Playwright and a "
+            "Deep audit profile."
+        )
+        if not _playwright_available():
+            self.chk_accessibility_audit.setEnabled(False)
+            self.chk_accessibility_audit.setToolTip(
+                self.chk_accessibility_audit.toolTip() + "\n\nPlaywright is not installed: enable by running "
+                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
+            )
+        geo_layout.addRow(self.chk_accessibility_audit)
         self.chk_tech_stack = QtWidgets.QCheckBox("Detect tech stack (Wappalyzer-style)")
         self.chk_tech_stack.setToolTip(
             "Optional. Identifies the CMS, frameworks, analytics, CDN and server from the page's "
@@ -370,6 +384,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             self.chk_ssr_parity.setChecked(False)
         self.chk_bot_render.setChecked(self.chk_bot_render.isEnabled() and options.bot_render)
         self.chk_render_js.setChecked(self.chk_render_js.isEnabled() and options.render_js)
+        self.chk_accessibility_audit.setChecked(
+            self.chk_accessibility_audit.isEnabled() and options.accessibility_audit
+        )
         self.chk_tech_stack.setChecked(options.tech_stack_detection)
         self.chk_topic_embeddings.setChecked(self.chk_topic_embeddings.isEnabled() and options.topic_embeddings)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
@@ -511,6 +528,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             ssr_parity_check=ssr,
             bot_render=bot_render,
             render_js=bool(self.chk_render_js.isEnabled() and self.chk_render_js.isChecked()),
+            accessibility_audit=bool(
+                self.chk_accessibility_audit.isEnabled() and self.chk_accessibility_audit.isChecked()
+            ),
             custom_rules_text=self.txt_custom_extraction.toPlainText(),
             tech_stack_detection=self.chk_tech_stack.isChecked(),
             topic_embeddings=bool(self.chk_topic_embeddings.isEnabled() and self.chk_topic_embeddings.isChecked()),

@@ -34,14 +34,15 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > **G2 → G3 → G4 → G5 → G6**, then the remaining must-haves (G8, G9), then
 > nice-to-haves. The G3 policy question is resolved: the v2.0 "no new
 > AI-engine APIs" lockout is reopened strictly as BYO-key opt-in (OFF by
-> default, user-supplied keys only). G2 ✅ and G3 ✅ shipped the same day.
+> default, user-supplied keys only). G2 ✅ and G3 ✅ shipped the same day;
+> G4 ✅ shipped 2026-07-21.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
 | G1 ✅ | A | **Prioritized hints engine** — severity + plain-English *why* + *how to fix* per finding | Sitebulb Hints (300+), Semrush thematic reports | SHIPPED: `hints.py` + recap. Data already existed in check details/recommendations; this is the ranking + grouping layer |
 | G2 ✅ | A | **Audit health score + per-issue trend history** across stored crawls | Ahrefs always-on audits, Sitebulb Audit Scores | SHIPPED: `crawl_trends.py` pure derivation over `CrawlHistoryStore` + Trends panel (health-score series chart + per-issue count chains with signed deltas) in the past-scans dialog |
 | G3 ✅ | B | **AI citation share-of-voice** — BYO-key prompt sampling of ChatGPT/Perplexity/Gemini with mention/citation/sentiment scoring | Profound ($499+/mo), Peec, Otterly ($29/mo) | SHIPPED: `integrations/ai_engines/` (plain REST, no SDKs, per-host once-per-session sampling memo), "AI Share of Voice" checks area + badge group, Settings BYO-key group, local JSON history. Strictly opt-in: `SILENTFROG_AI_SOV_ENABLE=1` + keys |
-| G4 | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | Rides the existing render pool; axe-core JS injectable via Playwright |
+| G4 ✅ | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | SHIPPED: vendored axe-core 4.10.3 (MPL-2.0, `_vendor/`) injected via the render pool's new `inject_js`/`evaluate_js` seam; opt-in flag + DEEP profile; issues (impact→severity map) + Accessibility tab (Trust bucket) + Excel sheet |
 | G5 | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | Link graph + local embeddings already exist; clustering = presentation |
 | G6 | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | Was V18, dropped in v2.0; SF validated the bet — revive it |
 | G7 | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | Local Ollama default keeps the local-first story |
@@ -81,7 +82,7 @@ Tier C (parity nits): G13, G14, G15.
 | M3 ✅ | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
 | M4 ✅ | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
 | M5 | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
-| M6 | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |
+| M6 ✅ | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |
 | M7 | Scheduled re-crawl + alert digest (G9) | Watch mode exists; without transport (email/webhook) it's a demo |
 | M8 ✅ | Rendered-DOM link discovery for SPAs | Spider misses JS-routed sites entirely — a correctness gap, not a feature |
 

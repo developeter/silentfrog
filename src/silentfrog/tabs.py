@@ -3,6 +3,7 @@ from __future__ import annotations
 import html as _html
 import json
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -23,6 +24,7 @@ from .crawl_types import (
 from .image_diagnostics import DIAGNOSTIC_COL, merge_image_row, normalize_image_rows
 from .indexability import build_indexability_rows
 from .models import (
+    AccessibilityModel,
     AiVisibilityModel,
     BotMatrixModel,
     CanonicalModel,
@@ -416,6 +418,46 @@ class HreflangTab(TableTab):
         headers = ["Lang", "Target URL", "Status", "Lang-OK?", "Return?"]
         self.set_model(HreflangModel(headers, rows))
         _set_header_modes(_header(self.view), (1, QtWidgets.QHeaderView.Stretch))
+
+
+_ACCESSIBILITY_HEADERS = ["Rule", "Impact", "Affected nodes", "Help", "Sample selector"]
+
+_ACCESSIBILITY_NOT_MEASURED_ROW = [
+    "Info",
+    "-",
+    "-",
+    "Accessibility audit not run. Enable it in Crawl Settings (requires Playwright + a Deep profile).",
+    "-",
+]
+_ACCESSIBILITY_NO_VIOLATIONS_ROW = ["Info", "-", "0", "No accessibility violations detected.", "-"]
+
+
+def _accessibility_row(violation: Mapping[str, Any]) -> list[str]:
+    samples = violation.get("sample_targets")
+    sample = str(samples[0]) if isinstance(samples, list) and samples else "-"
+    return [
+        str(violation.get("id") or "-"),
+        str(violation.get("impact") or "-"),
+        str(violation.get("nodes", 0)),
+        str(violation.get("help") or "-"),
+        sample,
+    ]
+
+
+def _accessibility_rows(payload: Mapping[str, Any]) -> list[list[str]]:
+    violations = payload.get("violations")
+    if not payload.get("measured") or not isinstance(violations, list):
+        return [list(_ACCESSIBILITY_NOT_MEASURED_ROW)]
+    if not violations:
+        return [list(_ACCESSIBILITY_NO_VIOLATIONS_ROW)]
+    return [_accessibility_row(item) for item in violations if isinstance(item, Mapping)]
+
+
+class AccessibilityTab(TableTab):
+    def update(self, data: object) -> None:
+        payload = data if isinstance(data, Mapping) else {}
+        self.set_model(AccessibilityModel(_ACCESSIBILITY_HEADERS, _accessibility_rows(payload)))
+        _set_header_modes(_header(self.view), (3, QtWidgets.QHeaderView.Stretch))
 
 
 class BotMatrixTab(TableTab):
@@ -1530,6 +1572,7 @@ class SerpTab(QtWidgets.QWidget):
 
 __all__ = [
     "TableTab",
+    "AccessibilityTab",
     "MetaTab",
     "HeadersTab",
     "ImagesTab",

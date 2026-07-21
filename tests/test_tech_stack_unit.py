@@ -97,6 +97,24 @@ def test_settings_dialog_tech_stack_toggle(qtbot) -> None:
     assert dialog.options().tech_stack_detection is True
 
 
+def test_settings_dialog_accessibility_audit_toggle_disabled_without_playwright(qtbot) -> None:
+    # v3 G4 Stage 2 — the checkbox exists but is gated on Playwright, same
+    # idiom as chk_render_js/chk_bot_render. The dev venv has no Playwright,
+    # so it must be disabled and options() must stay False even after a
+    # forced setChecked(True) — mirrors the `isEnabled() and isChecked()`
+    # guard in CrawlSettingsDialog.options().
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    assert hasattr(dialog, "chk_accessibility_audit")
+    assert dialog.chk_accessibility_audit.isEnabled() is False
+    assert dialog.chk_accessibility_audit.isChecked() is False
+    dialog.chk_accessibility_audit.setChecked(True)
+    assert dialog.options().accessibility_audit is False
+
+
 def test_settings_dialog_semrush_defaults(qtbot, monkeypatch, tmp_path) -> None:
     # V17 — the API-key field is empty + masked by default and the
     # max-calls spinbox defaults to 100. Stub the keychain lookup and point

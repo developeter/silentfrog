@@ -354,6 +354,15 @@ async def _collect_bot_renders(response: Any, crawl_options: CrawlOptions, polic
     return await render_for_bots(response.url, response.body)
 
 
+async def _collect_accessibility(response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy) -> dict[str, Any]:
+    """v3 G4 Stage 1 — axe-core WCAG scan through the shared render pool. Off
+    by default; ``{}`` (unmeasured) when the flag is off or the profile does
+    not render (same gating shape as ``_collect_bot_renders``)."""
+    from .accessibility_audit import collect_accessibility
+
+    return await collect_accessibility(response.url, crawl_options, policy)
+
+
 async def analyse(url: str, timeout: int = 10, options: CrawlOptions | None = None) -> CrawlPayload:
     """Audit one URL. TLS is verified and SSRF is guarded by default; a crawl
     that opted into ``allow_insecure_tls`` / ``allow_private_network`` relaxes
@@ -401,6 +410,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
     seo_basics = extract_seo_basics(soup, response.url)
     render_payload, vitals_payload = await _collect_render_diff_and_vitals(response, crawl_options, policy)
     bot_render_payload = await _collect_bot_renders(response, crawl_options, policy)
+    accessibility_payload = await _collect_accessibility(response, crawl_options, policy)
     crux_payload, ai_citations_payload, google_metrics, semrush_metrics, ai_sov_metrics = await _collect_integrations(
         response.url, policy
     )
@@ -422,6 +432,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         "seo_basics": seo_basics.to_dict(),
         "render": render_payload,
         "bot_render": bot_render_payload,
+        "accessibility": accessibility_payload,
         "perf_vitals": vitals_payload,
         "perf_crux": crux_payload,
         "ai_citations": ai_citations_payload,

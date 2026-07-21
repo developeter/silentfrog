@@ -16,10 +16,10 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Next up (operator-decided queue, 2026-07-20):** **G4 → G5 → G6**
-  (G2 ✅ and G3 ✅ shipped 2026-07-20), one `ship-roadmap-pr` PR at a time via
-  the matching `docs/PLAYBOOKS.md` recipe. Remaining must-haves (G8, G9) and
-  the nice-to-haves come after.
+- **Next up (operator-decided queue, 2026-07-20):** **G5 → G6**
+  (G2 ✅, G3 ✅ shipped 2026-07-20; G4 ✅ shipped 2026-07-21), one
+  `ship-roadmap-pr` PR at a time via the matching `docs/PLAYBOOKS.md` recipe.
+  Remaining must-haves (G8, G9) and the nice-to-haves come after.
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
   reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
@@ -129,10 +129,17 @@ Shipped:
   checks badge group. Later-scope: retire the fabricated
   `ai_citations_perplexity` proxy; a per-engine comparison panel (G5).
 
-Next (operator-decided 2026-07-20): **G4** accessibility (axe-core via the
-render pool) → **G5** interactive visualisations → **G6** MCP server
-revival. Then G8 HTML report · G9 scheduled crawls + alert digest · the
-nice-to-have tail.
+- **Accessibility audit (G4):** vendored axe-core 4.10.3 (MPL-2.0,
+  `_vendor/axe.min.js` + license, pinned + sha-recorded) runs in the rendered
+  page via the render pool's new `inject_js`/`evaluate_js` seam. Opt-in
+  `accessibility_audit` flag + DEEP profile + Playwright; violations become
+  `accessibility.*` issues (critical→critical, serious→warning,
+  moderate/minor→info) feeding recap/hints, plus an Accessibility tab (Trust
+  bucket, both surfaces) and an "Accessibility actions" Excel sheet.
+
+Next (operator-decided 2026-07-20): **G5** interactive visualisations →
+**G6** MCP server revival. Then G8 HTML report · G9 scheduled crawls + alert
+digest · the nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

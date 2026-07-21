@@ -54,6 +54,10 @@ REQUIRED_PATHS = (
     Path("src/silentfrog/resources/stopwords_it.txt"),
     Path("src/silentfrog/resources/stopwords_es.txt"),
     Path("src/silentfrog/resources/stopwords_fr.txt"),
+    # v3 G4 Stage 1: vendored axe-core (accessibility audit), never fetched
+    # at runtime.
+    Path("src/silentfrog/_vendor/axe.min.js"),
+    Path("src/silentfrog/_vendor/AXE_CORE_LICENSE.txt"),
 )
 REQUIRED_PACKAGE_FILES = (
     "assets/icon.png",
@@ -62,6 +66,8 @@ REQUIRED_PACKAGE_FILES = (
     "resources/stopwords_it.txt",
     "resources/stopwords_es.txt",
     "resources/stopwords_fr.txt",
+    "_vendor/axe.min.js",
+    "_vendor/AXE_CORE_LICENSE.txt",
 )
 QUICK_TESTS = (
     "tests/test_sanity.py",

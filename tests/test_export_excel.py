@@ -264,6 +264,20 @@ def _sample_payload() -> CrawlPayload:
                 },
             ],
         },
+        "accessibility": {
+            "measured": True,
+            "violations": [
+                {
+                    "id": "image-alt",
+                    "impact": "critical",
+                    "help": "Images must have alternate text",
+                    "help_url": "https://dequeuniversity.com/rules/axe/4.10/image-alt",
+                    "nodes": 2,
+                    "sample_targets": ["img.hero"],
+                }
+            ],
+            "counts": {"critical": 1, "serious": 0, "moderate": 0, "minor": 0},
+        },
     }
     return CrawlPayload.from_raw(raw)
 
@@ -286,11 +300,18 @@ def test_export_page_analysis_creates_workbook(tmp_path: Path) -> None:
         assert workbook.sheetnames[: len(ACTION_SHEET_NAMES)] == ACTION_SHEET_NAMES
         assert workbook["Executive summary"]["B2"].value == "Single page"
         assert workbook["Prioritized issues"]["A1"].value == "Severity"
-        assert workbook["Prioritized issues"]["D2"].value == "Total page weight is very high."
+        # Both are Critical; ties break on category, and "accessibility" sorts
+        # before "performance" alphabetically, so the new issue lands first.
+        assert workbook["Prioritized issues"]["D2"].value == "Images must have alternate text (2 element(s) affected)."
+        assert workbook["Prioritized issues"]["D3"].value == "Total page weight is very high."
         assert workbook["Affected URLs"]["A2"].value == "https://example.com"
         assert workbook["Technical actions"]["B2"].value == "Performance"
         assert (
             workbook["AI-GEO actions"]["D2"].value == "OpenGraph title/description: Yes; Twitter title/description: No."
+        )
+        assert workbook["Accessibility actions"]["A2"].value == "Critical"
+        assert (
+            workbook["Accessibility actions"]["D2"].value == "Images must have alternate text (2 element(s) affected)."
         )
         assert workbook["Appendix - raw data"]["A2"].value == "Meta / Headers / Images"
         assert "Meta" in workbook.sheetnames

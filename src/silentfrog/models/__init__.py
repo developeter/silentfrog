@@ -1,3 +1,4 @@
+from .accessibility import AccessibilityModel
 from .ai_visibility import AiVisibilityModel
 from .base import GenericModel, _BaseModel
 from .bot_matrix import BotMatrixModel, build_bot_rows
@@ -19,6 +20,7 @@ from .social import SocialIssuesModel
 __all__ = [
     "GenericModel",
     "_BaseModel",
+    "AccessibilityModel",
     "MetaModel",
     "ImagesModel",
     "RobotsModel",

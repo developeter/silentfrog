@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -10,8 +11,12 @@ from silentfrog.render_pool import RenderPool
 
 
 class _FakePage:
-    def __init__(self, html: str) -> None:
+    def __init__(self, html: str, evaluate_result: Any = None, evaluate_raises: bool = False) -> None:
         self._html = html
+        self.injected_scripts: list[str] = []
+        self.evaluated: list[str] = []
+        self._evaluate_result = evaluate_result
+        self._evaluate_raises = evaluate_raises
 
     def goto(self, url: str, timeout: int = 0, wait_until: str = "") -> None:
         self._url = url
@@ -19,36 +24,57 @@ class _FakePage:
     def content(self) -> str:
         return self._html
 
+    # v3 G4: recorders mirroring Playwright's real API surface.
+    def add_script_tag(self, content: str = "") -> None:
+        self.injected_scripts.append(content)
+
+    def evaluate(self, expression: str) -> Any:
+        self.evaluated.append(expression)
+        if self._evaluate_raises:
+            raise RuntimeError("evaluate failed")
+        return self._evaluate_result
+
     def close(self) -> None:
         pass
 
 
 class _FakeBrowser:
-    def __init__(self, html_for) -> None:
+    def __init__(self, html_for, evaluate_result: Any = None, evaluate_raises: bool = False) -> None:
         self._html_for = html_for
         self.pages_created = 0
         self.closed = False
         self.user_agents: list[str] = []
+        self.pages: list[_FakePage] = []
+        self._evaluate_result = evaluate_result
+        self._evaluate_raises = evaluate_raises
 
     def new_page(self, user_agent: str = "") -> _FakePage:
         self.pages_created += 1
         self.user_agents.append(user_agent)
-        return _FakePage(self._html_for())
+        page = _FakePage(self._html_for(), evaluate_result=self._evaluate_result, evaluate_raises=self._evaluate_raises)
+        self.pages.append(page)
+        return page
 
     def close(self) -> None:
         self.closed = True
 
 
 class _FakeManager:
-    def __init__(self) -> None:
+    def __init__(self, evaluate_result: Any = None, evaluate_raises: bool = False) -> None:
         self.launch_count = 0
         self.stopped = False
         self.browsers: list[_FakeBrowser] = []
         self._current_url = "x"
+        self._evaluate_result = evaluate_result
+        self._evaluate_raises = evaluate_raises
 
     def launch(self) -> _FakeBrowser:
         self.launch_count += 1
-        browser = _FakeBrowser(lambda: f"<html>{self._current_url}</html>")
+        browser = _FakeBrowser(
+            lambda: f"<html>{self._current_url}</html>",
+            evaluate_result=self._evaluate_result,
+            evaluate_raises=self._evaluate_raises,
+        )
         self.browsers.append(browser)
         return browser
 
@@ -159,4 +185,44 @@ async def test_concurrent_renders_all_resolve() -> None:
     results = await asyncio.gather(*[pool.render(f"https://e.com/{i}") for i in range(10)])
     assert len(results) == 10
     assert all("<html>" in r.rendered_html for r in results)
+    pool.close()
+
+
+# --- v3 G4: inject_js / evaluate_js (axe-core accessibility scan) -----------
+
+
+@pytest.mark.asyncio
+async def test_render_injects_and_evaluates_script_when_requested() -> None:
+    manager = _FakeManager(evaluate_result={"violations": []})
+    pool = RenderPool(browser_factory=lambda: manager)
+    result = await pool.render("https://e.com/a", inject_js="window.axe = {}", evaluate_js="axe.run()")
+    assert result.script_result == {"violations": []}
+    page = manager.browsers[0].pages[0]
+    assert page.injected_scripts == ["window.axe = {}"]
+    assert page.evaluated == ["axe.run()"]
+    pool.close()
+
+
+@pytest.mark.asyncio
+async def test_render_evaluate_failure_leaves_script_result_none_and_html_intact() -> None:
+    # A script failure must never fail the render (error stays "").
+    manager = _FakeManager(evaluate_raises=True)
+    pool = RenderPool(browser_factory=lambda: manager)
+    result = await pool.render("https://e.com/a", inject_js="window.axe = {}", evaluate_js="axe.run()")
+    assert result.script_result is None
+    assert result.error == ""
+    assert "<html>" in result.rendered_html
+    pool.close()
+
+
+@pytest.mark.asyncio
+async def test_render_without_script_args_leaves_page_untouched() -> None:
+    # Existing (no-script) render path stays exactly as before.
+    manager = _FakeManager()
+    pool = RenderPool(browser_factory=lambda: manager)
+    result = await pool.render("https://e.com/a")
+    assert result.script_result is None
+    page = manager.browsers[0].pages[0]
+    assert page.injected_scripts == []
+    assert page.evaluated == []
     pool.close()

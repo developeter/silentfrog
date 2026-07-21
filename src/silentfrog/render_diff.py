@@ -36,6 +36,10 @@ class RenderResult:
     # ``perf_vitals.WebVitals.from_raw``). ``None`` means CWV were
     # not requested.
     vitals_payload: dict[str, Any] | None = None
+    # v3 G4: return value of an ``evaluate_js`` expression passed to
+    # ``RenderPool.render`` (e.g. the axe-core scan result). ``None`` means
+    # no script was requested, or it failed/returned nothing.
+    script_result: Any = None
 
 
 RenderStatus = Literal["good", "warning", "critical", "not_measured"]

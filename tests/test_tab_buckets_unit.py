@@ -32,6 +32,7 @@ ALL_LEAVES = [
     "AI Visibility",
     "Performance",
     "SERP",
+    "Accessibility",
 ]
 
 

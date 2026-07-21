@@ -372,6 +372,7 @@ def test_row_detail_uses_cached_payload(qtbot) -> None:
         "AI Visibility",
         "Performance",
         "SERP",
+        "Accessibility",
     ]:
         assert detail._bucketed.contains(label)
     assert detail.btn_img_dl.text() == "Analyze images"

@@ -41,6 +41,7 @@ from .site_crawl_types import (
 )
 from .tab_buckets import RECAP_SOURCE_TABS, TabEntry, build_bucketed_tabs
 from .tabs import (
+    AccessibilityTab,
     AiVisibilityTab,
     BotMatrixTab,
     CanonicalTab,
@@ -1256,6 +1257,7 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
             ("AI Visibility", AiVisibilityTab(), data.get("ai_visibility", {})),
             ("Performance", PerformanceTab(), data.get("performance", {})),
             ("Structured data", SchemaTab(), data.get("schema", {})),
+            ("Accessibility", AccessibilityTab(), data.get("accessibility", {})),
         ]
         entries: list[TabEntry] = []
         for label, tab, value in single_value_specs:
