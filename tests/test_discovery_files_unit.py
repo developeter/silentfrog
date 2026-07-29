@@ -191,6 +191,30 @@ def test_llms_txt_parser_extracts_title_and_headings() -> None:
     assert parsed["title"] == "Example Knowledge Base"
     assert "Documentation" in parsed["headings"]
     assert "Contact" in parsed["headings"]
+    # v3 G10 widening (add-only): summary + per-section link accounting.
+    # "Documentation" has 3 URL-shaped bullets; "Contact" is prose with no
+    # bullets at all, so it counts as an empty (0-link) section.
+    assert parsed["summary_present"] is True
+    assert parsed["section_link_counts"] == [3, 0]
+    assert parsed["malformed_bullets"] == 0
+
+
+def test_llms_txt_parser_flags_malformed_bullets_and_missing_summary() -> None:
+    text = _load("llms_txt_block.txt")
+    parsed = discovery_files._parse_llms_txt(text)
+    # The "Policy" section's three bullets are prose, not `- Label: URL` links.
+    assert parsed["section_link_counts"] == [0]
+    assert parsed["malformed_bullets"] == 3
+    assert parsed["summary_present"] is True  # this fixture does carry a blockquote
+
+
+def test_llms_txt_parser_old_shape_missing_new_keys_is_impossible_by_construction() -> None:
+    # Documents the add-only contract from the reader side: a hand-built dict
+    # that predates the widening (e.g. deserialized from an old crawl blob)
+    # simply lacks the new keys — reading it must not raise.
+    old_style_parsed: dict = {"title": "x", "headings": []}
+    assert old_style_parsed.get("summary_present") is None
+    assert old_style_parsed.get("section_link_counts", []) == []
 
 
 def test_well_known_ai_json_parser_returns_mapping() -> None:
@@ -273,6 +297,68 @@ def test_build_discovery_checks_all_absent_are_info_mapped_to_good() -> None:
     assert all(check.status in {"good", "info"} for check in checks)
     assert all(check.status != "warning" for check in checks)
     assert all(check.status != "critical" for check in checks)
+
+
+def _llms_txt_entry(text: str) -> DiscoveryEntry:
+    return DiscoveryEntry(
+        url="https://example.com/llms.txt",
+        status=200,
+        present=True,
+        body_excerpt=text[:50],
+        parsed=discovery_files._parse_llms_txt(text),
+        source="fetch",
+    )
+
+
+def test_llms_txt_conformance_absent_emits_no_row() -> None:
+    checks = build_discovery_checks(DiscoveryPayload.empty())
+    assert all(check.key != "access_llms_txt_conformance" for check in checks)
+
+
+def test_llms_txt_conformance_good_when_shape_is_conformant() -> None:
+    text = (
+        "# Example Site\n\n"
+        "> A short, honest summary of what this site offers AI assistants.\n\n"
+        "## Docs\n\n"
+        "- Guide: https://example.com/guide\n"
+        "- API: https://example.com/api\n"
+    )
+    payload = DiscoveryPayload(llms_txt=_llms_txt_entry(text))
+    checks = {check.key: check for check in build_discovery_checks(payload)}
+    assert checks["access_llms_txt_conformance"].status == "good"
+
+
+def test_llms_txt_conformance_warns_on_missing_summary() -> None:
+    text = "# Example Site\n\n## Docs\n\n- Guide: https://example.com/guide\n"
+    payload = DiscoveryPayload(llms_txt=_llms_txt_entry(text))
+    checks = {check.key: check for check in build_discovery_checks(payload)}
+    check = checks["access_llms_txt_conformance"]
+    assert check.status == "warning"
+    assert "summary" in check.details.lower()
+
+
+def test_llms_txt_conformance_warns_on_empty_section() -> None:
+    # llms_txt_allow.txt's "Contact" section is prose with no linked bullets.
+    payload = DiscoveryPayload(llms_txt=_llms_txt_entry(_load("llms_txt_allow.txt")))
+    checks = {check.key: check for check in build_discovery_checks(payload)}
+    check = checks["access_llms_txt_conformance"]
+    assert check.status == "warning"
+    assert "section" in check.details.lower()
+
+
+def test_llms_txt_conformance_skips_old_parsed_dict_without_new_keys() -> None:
+    # A pre-widening blob's parsed dict has no "summary_present" key — treated
+    # as unmeasured (skip emission), never as an invented defect.
+    entry = DiscoveryEntry(
+        url="https://example.com/llms.txt",
+        status=200,
+        present=True,
+        body_excerpt="# x",
+        parsed={"title": "x", "headings": []},
+        source="fetch",
+    )
+    checks = build_discovery_checks(DiscoveryPayload(llms_txt=entry))
+    assert all(check.key != "access_llms_txt_conformance" for check in checks)
 
 
 def test_discovery_payload_roundtrips_through_dict() -> None:

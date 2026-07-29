@@ -27,7 +27,13 @@ from .crawl_run_repository import (
 )
 from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
-from .exporters import export_crawl_for_llm, export_site_crawl_html, export_site_crawl_report, write_llm_export
+from .exporters import (
+    export_crawl_for_llm,
+    export_llms_txt,
+    export_site_crawl_html,
+    export_site_crawl_report,
+    write_llm_export,
+)
 from .settings_dialog import CrawlSettingsDialog
 from .site_crawl_history_gui import CrawlHistoryDialog
 from .site_crawl_types import (
@@ -597,6 +603,12 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             "Write a Markdown + JSON bundle you can paste into a Claude chat for a "
             "prioritised fix list. Compact by default (worst pages + recurring issues)."
         )
+        self.btn_llms_txt = QtWidgets.QPushButton("Generate llms.txt")
+        self.btn_llms_txt.setToolTip(
+            "Propose an llms.txt (llmstxt.org shape) from this crawl: a title, a summary, and "
+            "H2 sections of links to the indexable pages that were actually crawled. Review "
+            "before publishing — this is a starting draft, not a validated policy file."
+        )
         self.btn_diff = QtWidgets.QPushButton("Compare with previous")
         self.btn_diff.setToolTip(
             "Diff this crawl against the previous one in this session: new / removed URLs, "
@@ -620,6 +632,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row.addWidget(self.btn_export)
         row.addWidget(self.btn_html_report)
         row.addWidget(self.btn_export_ai)
+        row.addWidget(self.btn_llms_txt)
         row.addWidget(self.btn_diff)
         row.addWidget(self.btn_graph)
         row.addWidget(self.btn_cluster_map)
@@ -643,6 +656,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.clicked.connect(self._export_excel)
         self.btn_html_report.clicked.connect(self._export_html_report)
         self.btn_export_ai.clicked.connect(self._export_ai)
+        self.btn_llms_txt.clicked.connect(self._export_llms_txt)
         self.btn_diff.clicked.connect(self._show_diff)
         self.btn_graph.clicked.connect(self._show_graph)
         self.btn_cluster_map.clicked.connect(self._show_cluster_map)
@@ -666,6 +680,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False)
         self.btn_html_report.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
+        self.btn_llms_txt.setEnabled(False)
         self.btn_diff.setEnabled(False)
         self.btn_graph.setEnabled(False)
         self.btn_cluster_map.setEnabled(False)
@@ -929,6 +944,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export.setEnabled(False if running else has_results)
         self.btn_html_report.setEnabled(False if running else has_results)
         self.btn_export_ai.setEnabled(False if running else has_results)
+        self.btn_llms_txt.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
         self.btn_graph.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
         self.btn_cluster_map.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
@@ -1263,6 +1279,27 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
         QtWidgets.QMessageBox.information(self, "Export completed", "HTML report exported successfully.")
+
+    def _export_llms_txt(self) -> None:
+        if not self._latest_report or not self._latest_report.has_rows:
+            return
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Generate llms.txt",
+            str(Path.home() / "llms.txt"),
+            "Text files (*.txt)",
+        )
+        if not file_path:
+            return
+        target = Path(file_path if file_path.lower().endswith(".txt") else f"{file_path}.txt")
+        # Same cost class as the HTML report / AI export: streams the whole
+        # crawl once (H1/H2), so it gets the same busy-cursor pattern.
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            export_llms_txt(self._latest_report, target)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        QtWidgets.QMessageBox.information(self, "Export completed", "llms.txt generated successfully.")
 
     def _export_ai(self) -> None:
         if not self._latest_report or not self._latest_report.has_rows:

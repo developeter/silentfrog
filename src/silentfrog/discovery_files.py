@@ -207,25 +207,83 @@ def _parse_body(text: str, parser: str) -> Mapping[str, Any]:
     return {}
 
 
-def _parse_llms_txt(text: str) -> Mapping[str, Any]:
-    """Light-touch llms.txt parser: pulls the title and headings.
+@dataclass
+class _LlmsTxtParseState:
+    """Mutable accumulator for :func:`_parse_llms_txt`'s single line-by-line
+    pass — kept as a small dataclass so the per-line dispatcher can use plain
+    guard clauses instead of nesting the section-bookkeeping inside the
+    heading branch (code-shape nesting cap)."""
 
-    The current llms.txt spec is an unofficial Markdown convention.
-    We do not attempt full parsing — only enough to confirm the file
-    is genuine content and not an HTML 404 page returned with 200.
+    title: str = ""
+    headings: list[str] = field(default_factory=list)
+    summary_present: bool = False
+    section_link_counts: list[int] = field(default_factory=list)
+    malformed_bullets: int = 0
+    in_section: bool = False
+    current_links: int = 0
+
+
+def _looks_like_link_bullet(bullet: str) -> bool:
+    """``- Label: URL`` shaped bullet: a full URL, or a ``: /path``-style link."""
+    return "http" in bullet or ": /" in bullet
+
+
+def _start_llms_txt_section(state: _LlmsTxtParseState, heading: str) -> None:
+    if state.in_section:
+        state.section_link_counts.append(state.current_links)
+    state.headings.append(heading)
+    state.in_section = True
+    state.current_links = 0
+
+
+def _consume_llms_txt_bullet(state: _LlmsTxtParseState, bullet: str) -> None:
+    if _looks_like_link_bullet(bullet):
+        state.current_links += 1
+        return
+    state.malformed_bullets += 1
+
+
+def _consume_llms_txt_line(state: _LlmsTxtParseState, stripped: str) -> None:
+    if stripped.startswith("# ") and not state.title:
+        state.title = stripped[2:].strip()
+        return
+    if stripped.startswith("## "):
+        _start_llms_txt_section(state, stripped[3:].strip())
+        return
+    if stripped.startswith(">") and not state.in_section:
+        state.summary_present = True
+        return
+    if stripped.startswith("- ") and state.in_section:
+        _consume_llms_txt_bullet(state, stripped)
+
+
+def _parse_llms_txt(text: str) -> Mapping[str, Any]:
+    """Light-touch llms.txt parser: title, headings, plus llmstxt.org
+    conformance signals (add-only: ``summary_present``, per-section
+    ``section_link_counts``, ``malformed_bullets``).
+
+    The current llms.txt spec is an unofficial Markdown convention. We do
+    not attempt full parsing — only enough to confirm the file is genuine
+    content (not an HTML 404 page returned with 200) and to gauge whether
+    it follows the llmstxt.org shape: an H1 title, a blockquote summary
+    before the first H2, and H2 sections whose bullet lines are link
+    entries (``- Label: URL``).
     """
-    title = ""
-    headings: list[str] = []
+    state = _LlmsTxtParseState()
     for raw in text.splitlines():
         stripped = raw.strip()
         if not stripped:
             continue
-        if stripped.startswith("# ") and not title:
-            title = stripped[2:].strip()
-            continue
-        if stripped.startswith("## "):
-            headings.append(stripped[3:].strip())
-    return {"title": title, "headings": headings[:10]}
+        _consume_llms_txt_line(state, stripped)
+    if state.in_section:
+        state.section_link_counts.append(state.current_links)
+    return {
+        "title": state.title,
+        "headings": state.headings[:10],
+        "summary_present": state.summary_present,
+        "section_link_counts": state.section_link_counts,
+        "malformed_bullets": state.malformed_bullets,
+    }
 
 
 async def fetch_discovery_files(
@@ -373,8 +431,10 @@ def _check_for(key: str, entry: DiscoveryEntry, detail: str) -> AiVisibilityChec
 
 
 def build_discovery_checks(payload: DiscoveryPayload) -> list[AiVisibilityCheck]:
-    """Build the four AI Visibility rows for the discovery files."""
-    return [
+    """Build the AI Visibility rows for the discovery files: the four
+    presence rows, plus an llms.txt conformance row when the file is
+    present and was parsed by the widened parser (v3 G10)."""
+    checks = [
         _check_for("access_llms_txt", payload.llms_txt, _llms_detail(payload.llms_txt)),
         _check_for("access_llms_full_txt", payload.llms_full_txt, _llms_detail(payload.llms_full_txt)),
         _check_for(
@@ -384,6 +444,69 @@ def build_discovery_checks(payload: DiscoveryPayload) -> list[AiVisibilityCheck]
         ),
         _check_for("access_sitemap", payload.sitemap, _sitemap_detail(payload.sitemap)),
     ]
+    conformance = _llms_txt_conformance_check(payload.llms_txt)
+    if conformance is not None:
+        checks.append(conformance)
+    return checks
+
+
+_LLMS_TXT_CONFORMANCE_KEY = "access_llms_txt_conformance"
+
+
+def _llms_txt_conformance_check(entry: DiscoveryEntry) -> AiVisibilityCheck | None:
+    """llms.txt CONFORMANCE (not presence — see ``access_llms_txt``): emitted
+    only when llms.txt is present AND its ``parsed`` dict carries the widened
+    keys. A pre-widening blob (old crawl history) has no ``summary_present``
+    key — its conformance is unknown, not "bad", so we skip emission rather
+    than guess (§1.5-adjacent: don't invent a defect from missing data)."""
+    if not entry.present:
+        return None
+    parsed = entry.parsed if isinstance(entry.parsed, Mapping) else {}
+    if "summary_present" not in parsed:
+        return None
+    problems = _llms_txt_conformance_problems(parsed)
+    return AiVisibilityCheck(
+        area="Access",
+        check="llms.txt follows the llmstxt.org conventions",
+        status="warning" if problems else "good",
+        details=_llms_txt_conformance_detail(parsed, problems),
+        recommendation=_llms_txt_conformance_recommendation(problems),
+        key=_LLMS_TXT_CONFORMANCE_KEY,
+    )
+
+
+def _llms_txt_conformance_problems(parsed: Mapping[str, Any]) -> list[str]:
+    problems: list[str] = []
+    if not str(parsed.get("title", "")).strip():
+        problems.append("missing H1 title")
+    if not parsed.get("summary_present"):
+        problems.append("missing blockquote summary")
+    counts = parsed.get("section_link_counts")
+    empty_sections = sum(1 for count in counts if not count) if isinstance(counts, list) else 0
+    if empty_sections:
+        problems.append(f"{empty_sections} section(s) with no linked entries")
+    return problems
+
+
+def _llms_txt_conformance_detail(parsed: Mapping[str, Any], problems: list[str]) -> str:
+    if problems:
+        base = f"Conformance gaps: {'; '.join(problems)}."
+    else:
+        section_count = len(parsed.get("headings") or [])
+        base = f"Title, summary, and {section_count} linked section(s) all conform."
+    malformed = int(parsed.get("malformed_bullets", 0) or 0)
+    if malformed:
+        base += f" {malformed} bullet line(s) are not shaped as `- Label: URL` link entries."
+    return base
+
+
+def _llms_txt_conformance_recommendation(problems: list[str]) -> str:
+    if not problems:
+        return "Keep following the llmstxt.org conventions as the site grows."
+    return (
+        "Follow the llmstxt.org conventions: an H1 title, a blockquote summary, and H2 sections "
+        "whose bullet lines are `- Label: URL` entries."
+    )
 
 
 # v2.0 V11 — per-agent .well-known/ai.json policy parsing.

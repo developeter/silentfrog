@@ -16,7 +16,7 @@ Subcommands:
                         [--out report.json]
     silentfrog-cli crawl <base_url> [--sitemap URL] [--url-list FILE]
                          [--limit N] [--timeout N] [--digest]
-                         [--out-report report.html]
+                         [--out-report report.html] [--out-llms-txt llms.txt]
 """
 
 from __future__ import annotations
@@ -160,6 +160,12 @@ def _add_crawl_parser(subparsers: Any) -> None:
         type=Path,
         default=None,
         help="Also write the HTML report (v3 G8) to this path.",
+    )
+    crawl.add_argument(
+        "--out-llms-txt",
+        type=Path,
+        default=None,
+        help="Also write a proposed llms.txt (v3 G10) to this path.",
     )
 
 
@@ -308,6 +314,8 @@ async def _crawl_cmd(
     _print_encodable(digest.markdown)
     if args.out_report is not None:
         _write_html_report(report, args.out_report)
+    if args.out_llms_txt is not None:
+        _write_llms_txt(report, args.out_llms_txt)
     if args.digest:
         await _deliver_digest(digest, deliver_fn)
     return 0
@@ -323,6 +331,13 @@ def _write_html_report(report: Any, out_path: Path) -> None:
     from .exporters import export_site_crawl_html
 
     export_site_crawl_html(report, out_path)
+    print(f"[crawl] wrote {out_path}")
+
+
+def _write_llms_txt(report: Any, out_path: Path) -> None:
+    from .exporters import export_llms_txt
+
+    export_llms_txt(report, out_path)
     print(f"[crawl] wrote {out_path}")
 
 

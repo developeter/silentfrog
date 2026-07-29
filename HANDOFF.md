@@ -178,7 +178,15 @@ Shipped:
   `_redirected` warnings, `_no_activity` info per §1.5); the CLI logs
   summary reports AI-agent traffic. GUI log window remains M6-deferred.
 
-Next: G10 → G7 → G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
+- **llms.txt generator/validator (G10):** validator = new
+  `access_llms_txt_conformance` check on widened (add-only) discovery
+  parsing — present-but-malformed warns naming the gaps, absent stays
+  silent, pre-widening blobs are skipped; generator =
+  `exporters/llms_txt.py` builds a path-sectioned, sanitized, capped
+  llms.txt from indexable crawled pages ("Generate llms.txt" button +
+  `--out-llms-txt` on the crawl command).
+
+Next: G7 → G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
 `ai_citations_perplexity` proxy is retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal

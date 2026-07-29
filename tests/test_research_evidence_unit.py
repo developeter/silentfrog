@@ -110,7 +110,19 @@ def comprehensive_audit_raw() -> dict[str, Any]:
             "twitter": {"title": "Example Page Title", "description": "desc"},
         },
         "discovery": {
-            "llms_txt": {"present": True, "status": 200},
+            "llms_txt": {
+                "present": True,
+                "status": 200,
+                # v3 G10: a fully-conformant parsed dict so the comprehensive
+                # audit also exercises access_llms_txt_conformance.
+                "parsed": {
+                    "title": "Example Knowledge Base",
+                    "headings": ["Docs"],
+                    "summary_present": True,
+                    "section_link_counts": [2],
+                    "malformed_bullets": 0,
+                },
+            },
             "llms_full_txt": {"present": True, "status": 200},
             "well_known_ai_json": {"present": True, "status": 200},
             "sitemap": {"present": True, "status": 200},

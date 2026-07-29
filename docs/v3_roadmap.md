@@ -38,8 +38,8 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the first operator queue is
 > complete. Second queue (2026-07-21): G8 ✅ and G9 ✅ shipped — every
 > must-have is done — and the fake `ai_citations_perplexity` proxy is
-> retired (real coverage: `sov_perplexity`). G11 ✅ shipped. Remaining:
-> G10 → G7 → G13 → G14 → G15.
+> retired (real coverage: `sov_perplexity`). G11 ✅ and G10 ✅ shipped.
+> Remaining: G7 → G13 → G14 → G15.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -52,7 +52,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G7 | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | Local Ollama default keeps the local-first story |
 | G8 ✅ | A | **Client-ready HTML/PDF report export** | Sitebulb's consultant staple | SHIPPED: `exporters/html_report.py` — one self-contained inline-CSS HTML (SVG charts, @media print, everything escaped), "Export HTML report" button; single-stream via new `issues_for_results` (Excel's double-stream not copied) |
 | G9 ✅ | C | **Scheduled runs + notifications with auto-diff digest** (email/webhook) | SF v24 auto-compare, Sitebulb alerts | SHIPPED: one-shot `silentfrog-cli crawl` (headless, store-backed, saved to history so the GUI reopens it) + history-diff digest; `alert_transport.py` webhook (aiohttp) + email (stdlib SMTP, keyring password); scheduling via OS Task Scheduler/cron — no daemon |
-| G10 | B | **llms.txt generator/validator** | Sitebulb ships one | Cheap; complements the existing per-bot matrix |
+| G10 ✅ | B | **llms.txt generator/validator** | Sitebulb ships one | SHIPPED: validator = `access_llms_txt_conformance` check (present+malformed may warn; absent stays silent per §1.5) on widened discovery parsing; generator = `exporters/llms_txt.py` ("Generate llms.txt" button + `--out-llms-txt`), path-sectioned, sanitized, capped |
 | G11 ✅ | B | **AI-agent log analytics view** — classify 40+ AI crawlers in the existing log module | Peec server-log integration (€169/mo tier) | SHIPPED: taxonomy 20→48 signatures (30 ai_*) with vendor/kind, `classify_bot`, `CrawlBudgetReport.ai_agents` section, three additive AI findings in `log_analysis` (no_activity=info per §1.5), CLI summary. GUI log window stays M6-deferred |
 | G12 ✅ | A | **"Blocked from AI Search" rollup + AI Readiness Score** | Semrush AI widget, Rankscale score | DELIVERED VIA G1: AI-access checks flow into `ai_geo.*` issues, so `build_hints` groups them into "AI crawler blocked — N pages" site-wide. A separate AI-readiness number would duplicate the existing GEO Score — deliberately not added |
 | G13 | B | **Semantic redirect mapping** (embedding old→new URL matching for migrations) | SF v23 | Embeddings extra already in the tree |

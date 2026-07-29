@@ -149,6 +149,7 @@ CHECK_EVIDENCE: dict[str, tuple[str, tuple[str, ...]]] = {
     "access_llms_full_txt": (EVIDENCE_OFFICIAL, _AIF),
     "access_well_known_ai_json": (EVIDENCE_OFFICIAL, _AIF),
     "access_sitemap": (EVIDENCE_OFFICIAL, _AIF),
+    "access_llms_txt_conformance": (EVIDENCE_HEURISTIC, ()),
     # Topic clarity
     "topic_alignment": (EVIDENCE_HEURISTIC, ()),
     "topic_language": (EVIDENCE_HEURISTIC, ()),

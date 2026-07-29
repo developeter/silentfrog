@@ -213,6 +213,13 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "sitemap is part of standard crawlability hygiene; not specific to AI. "
         "Absent => info, present => good. Never warned."
     ),
+    "access_llms_txt_conformance": (
+        "Checks whether an EXISTING llms.txt follows the llmstxt.org conventions: an H1 title, "
+        "a blockquote summary, and H2 sections whose bullet lines are `- Label: URL` link entries.\n\n"
+        "This is a conformance check, not a presence check (see access_llms_txt): only emitted "
+        "when llms.txt is present. A missing title, missing summary, or an empty section => "
+        "warning. It never runs on absent files, and it does not fetch or validate the linked URLs."
+    ),
     "eeat_author_byline": (
         "Checks whether the page exposes a visible author byline near the title.\n\n"
         "Best practice: show the author name in the page body and link it to a stable profile."
