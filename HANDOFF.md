@@ -16,11 +16,12 @@ durable detail lives there, not here.
   wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
   into the shared issue model). All work is committed AND **pushed** —
   `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Operator queue (2026-07-20) COMPLETE:** G2 ✅, G3 ✅ (2026-07-20);
+- **Operator queue 1 (2026-07-20) COMPLETE:** G2 ✅, G3 ✅ (2026-07-20);
   G4 ✅, G5 ✅, G6 ✅ (2026-07-21) — each via `ship-roadmap-pr` with the
-  matching `docs/PLAYBOOKS.md` recipe. **Next candidates:** the remaining
-  must-haves **G8** (client-ready HTML report) and **G9** (scheduled crawls +
-  alert digest), then the nice-to-have tail (G7, G10, G11, G13–G15).
+  matching `docs/PLAYBOOKS.md` recipe.
+- **Operator queue 2 (2026-07-21, run to the end of the roadmap):** G8 ✅ →
+  G9 → proxy retirement (`ai_citations_perplexity`) → G11 → G10 → G7 →
+  G13 → G14 → G15.
   **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
   reopened for G3 — strictly BYO-key, opt-in, OFF by default.
 
@@ -153,8 +154,15 @@ Shipped:
   `get_crawl_summary` (history + hints + trend reuse). Claude Desktop config
   example in README §MCP server.
 
-Next: **G8** HTML report · **G9** scheduled crawls + alert digest · the
-nice-to-have tail.
+- **Client-ready HTML report (G8):** `exporters/html_report.py` builds one
+  self-contained HTML (inline CSS from the light theme tokens, hand-rolled
+  SVG charts, @media print, every crawl-derived string escaped): summary,
+  top hints, GEO distribution, status/indexability, worst pages, and a
+  health trend (labeled lower-is-better) when ≥2 history runs exist.
+  "Export HTML report" button; single crawl stream via the new
+  `audit_issues.issues_for_results` (the Excel double-stream was not copied).
+
+Next: **G9** scheduled crawls + alert digest · the nice-to-have tail.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

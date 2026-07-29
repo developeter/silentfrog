@@ -35,9 +35,9 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > nice-to-haves. The G3 policy question is resolved: the v2.0 "no new
 > AI-engine APIs" lockout is reopened strictly as BYO-key opt-in (OFF by
 > default, user-supplied keys only). G2 ✅ and G3 ✅ shipped the same day;
-> G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the operator queue is complete.
-> Top remaining must-haves: **G8** (HTML report) and **G9** (scheduled
-> crawls + alert digest), then the nice-to-have tail.
+> G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the first operator queue is
+> complete. Second queue (2026-07-21): G8 ✅ shipped; next **G9**, then the
+> nice-to-have tail (G11 → G10 → G7 → G13 → G14 → G15).
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G5 ✅ | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | SHIPPED: link graph was already live (V9); G5 added the Topic map — per-page embedding vectors retained in the payload (opt-in flag), `content_clusters.py` KMeans+PCA (rides the locked `[embeddings]` extra, zero new deps), cluster-scatter dialog with bounded store scan |
 | G6 ✅ | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | SHIPPED: hand-rolled stdlib JSON-RPC/stdio server (`mcp_server.py`, zero new deps — supersedes V18's planned `mcp` extra); tools: `audit_page` (STANDARD default, TLS/SSRF guards inherited), `list_crawls`, `get_crawl_summary` |
 | G7 | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | Local Ollama default keeps the local-first story |
-| G8 | A | **Client-ready HTML/PDF report export** | Sitebulb's consultant staple | Excel doesn't demo well; single self-contained HTML first, print-to-PDF free |
+| G8 ✅ | A | **Client-ready HTML/PDF report export** | Sitebulb's consultant staple | SHIPPED: `exporters/html_report.py` — one self-contained inline-CSS HTML (SVG charts, @media print, everything escaped), "Export HTML report" button; single-stream via new `issues_for_results` (Excel's double-stream not copied) |
 | G9 | C | **Scheduled runs + notifications with auto-diff digest** (email/webhook) | SF v24 auto-compare, Sitebulb alerts | Watch mode exists; missing the alerting transport + scheduling |
 | G10 | B | **llms.txt generator/validator** | Sitebulb ships one | Cheap; complements the existing per-bot matrix |
 | G11 | B | **AI-agent log analytics view** — classify 40+ AI crawlers in the existing log module | Peec server-log integration (€169/mo tier) | bot_fingerprint.py already exists; extend taxonomy + dedicated view |
@@ -83,7 +83,7 @@ Tier C (parity nits): G13, G14, G15.
 | M2 ✅ | Fully browsable past scans | Stored runs users can't reopen page-by-page make the SQLite store invisible value |
 | M3 ✅ | Health score + issue trends (G2) | The retention loop: "is my site getting better?" is THE recurring question |
 | M4 ✅ | AI readiness rollup / "Blocked from AI Search" (G12) | The moat data exists but has no headline surface |
-| M5 | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
+| M5 ✅ | Client-ready HTML report (G8) | Consultants demo with reports, not Excel |
 | M6 ✅ | Accessibility audits via axe-core (G4) | Table stakes since Screaming Frog v21; legal pressure makes it a checklist item |
 | M7 | Scheduled re-crawl + alert digest (G9) | Watch mode exists; without transport (email/webhook) it's a demo |
 | M8 ✅ | Rendered-DOM link discovery for SPAs | Spider misses JS-routed sites entirely — a correctness gap, not a feature |

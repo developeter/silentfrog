@@ -701,6 +701,62 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
     assert called["path"] == target
 
 
+def test_html_report_button_present_and_disabled(qtbot) -> None:
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    assert win.btn_html_report.text() == "Export HTML report"
+    assert win.btn_html_report.isEnabled() is False  # nothing crawled yet
+
+
+def test_export_html_report_button_uses_export_site_crawl_html(monkeypatch, qtbot, tmp_path: Path) -> None:
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    target = tmp_path / "silentfrog_report.html"
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "silentfrog.site_crawl_gui.export_site_crawl_html",
+        lambda value, path: called.update(report=value, path=path),
+    )
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._latest_report = report
+    win.btn_html_report.setEnabled(True)
+    qtbot.mouseClick(win.btn_html_report, QtCore.Qt.MouseButton.LeftButton)
+
+    assert called["report"] is report
+    assert called["path"] == target
+
+
+def test_export_html_report_button_writes_real_self_contained_file(monkeypatch, qtbot, tmp_path: Path) -> None:
+    # No ".html" suffix supplied by the save dialog — the handler must enforce
+    # it (same convention as _export_excel), and the export itself is real
+    # (not mocked) so this exercises the busy-cursor + suffix-enforcement path.
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1, base_url="https://example.com")
+    target_stub = tmp_path / "silentfrog_report"
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target_stub), ""))
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path / "data"))
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._latest_report = report
+    win.btn_html_report.setEnabled(True)
+    qtbot.mouseClick(win.btn_html_report, QtCore.Qt.MouseButton.LeftButton)
+
+    written = tmp_path / "silentfrog_report.html"
+    assert written.exists()
+    text = written.read_text(encoding="utf-8")
+    assert "https://example.com" in text
+    assert "Generated" in text
+    assert "<script" not in text.lower()
+
+
 # --- item 1/3: link-graph dialog wiring (node click + caption/banner/controls) ---
 
 

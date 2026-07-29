@@ -93,12 +93,22 @@ def issues_for_site_report(report: SiteCrawlReport) -> list[AuditIssue]:
     silently truncated to the first in-memory window. Successful rows carry their
     full payload (losslessly rebuilt, H0); failed/skipped rows contribute only
     their crawl-level issue."""
-    issues: list[AuditIssue] = []
     with open_report_repository(report) as repo:
-        for result in repo.stream_results():
-            issues.extend(_site_result_issues(result))
-            if result.payload:
-                issues.extend(issues_for_payload(result.url, result.payload))
+        return issues_for_results(repo.stream_results())
+
+
+def issues_for_results(results: Iterable[SiteCrawlResult]) -> list[AuditIssue]:
+    """Aggregate issues from an already-streamed ``results`` sequence (v3 G8).
+
+    Shares the per-result issue logic with :func:`issues_for_site_report` — a
+    consumer that also needs the raw results (e.g. the HTML report) streams the
+    crawl once via ``stream_report_results`` and reuses that list here instead
+    of triggering a second full payload stream."""
+    issues: list[AuditIssue] = []
+    for result in results:
+        issues.extend(_site_result_issues(result))
+        if result.payload:
+            issues.extend(issues_for_payload(result.url, result.payload))
     return dedupe_issues(issues)
 
 
@@ -520,6 +530,7 @@ __all__ = [
     "IssueSeverity",
     "dedupe_issues",
     "issues_for_payload",
+    "issues_for_results",
     "issues_for_site_report",
     "severity_color_role",
     "severity_rank",

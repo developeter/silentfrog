@@ -27,7 +27,7 @@ from .crawl_run_repository import (
 )
 from .crawl_store import CrawlStore, new_crawl_db_path
 from .crawl_types import CrawlPayload
-from .exporters import export_crawl_for_llm, export_site_crawl_report, write_llm_export
+from .exporters import export_crawl_for_llm, export_site_crawl_html, export_site_crawl_report, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
 from .site_crawl_history_gui import CrawlHistoryDialog
 from .site_crawl_types import (
@@ -586,6 +586,12 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_export = QtWidgets.QPushButton("Export Excel")
+        self.btn_html_report = QtWidgets.QPushButton("Export HTML report")
+        self.btn_html_report.setToolTip(
+            "Write a single self-contained HTML file — executive summary, prioritised "
+            "actions, GEO Score distribution, worst pages, and health trend — ready to "
+            "email a client or print to PDF."
+        )
         self.btn_export_ai = QtWidgets.QPushButton("Export for AI analysis")
         self.btn_export_ai.setToolTip(
             "Write a Markdown + JSON bundle you can paste into a Claude chat for a "
@@ -612,6 +618,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_new_crawl = QtWidgets.QPushButton("New crawl")
         row.addWidget(self.btn_stop)
         row.addWidget(self.btn_export)
+        row.addWidget(self.btn_html_report)
         row.addWidget(self.btn_export_ai)
         row.addWidget(self.btn_diff)
         row.addWidget(self.btn_graph)
@@ -634,6 +641,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_start.clicked.connect(self._start_crawl)
         self.btn_stop.clicked.connect(self._stop_crawl)
         self.btn_export.clicked.connect(self._export_excel)
+        self.btn_html_report.clicked.connect(self._export_html_report)
         self.btn_export_ai.clicked.connect(self._export_ai)
         self.btn_diff.clicked.connect(self._show_diff)
         self.btn_graph.clicked.connect(self._show_graph)
@@ -656,6 +664,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.setEnabled(False)
         self.btn_stop.setVisible(False)
         self.btn_export.setEnabled(False)
+        self.btn_html_report.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
         self.btn_diff.setEnabled(False)
         self.btn_graph.setEnabled(False)
@@ -918,6 +927,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         # holds whether the report is store-backed or carries inline results.
         has_results = bool(self._latest_report and self._latest_report.has_rows)
         self.btn_export.setEnabled(False if running else has_results)
+        self.btn_html_report.setEnabled(False if running else has_results)
         self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
         self.btn_graph.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
@@ -1232,6 +1242,27 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         target = Path(file_path if file_path.lower().endswith(".xlsx") else f"{file_path}.xlsx")
         export_site_crawl_report(self._latest_report, target)
         QtWidgets.QMessageBox.information(self, "Export completed", "Site crawl report exported successfully.")
+
+    def _export_html_report(self) -> None:
+        if not self._latest_report or not self._latest_report.has_rows:
+            return
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export HTML report",
+            str(Path.home() / "silentfrog_report.html"),
+            "HTML files (*.html)",
+        )
+        if not file_path:
+            return
+        target = Path(file_path if file_path.lower().endswith(".html") else f"{file_path}.html")
+        # This streams the whole crawl (H1/H2), same cost class as the link
+        # graph / topic map builds, so it gets the same busy-cursor pattern.
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            export_site_crawl_html(self._latest_report, target)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        QtWidgets.QMessageBox.information(self, "Export completed", "HTML report exported successfully.")
 
     def _export_ai(self) -> None:
         if not self._latest_report or not self._latest_report.has_rows:
