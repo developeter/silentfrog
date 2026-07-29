@@ -14,6 +14,9 @@ Subcommands:
     silentfrog-cli export --format llm <url> [--mode compact|full]
     silentfrog-cli logs <access.log> [--base-url URL] [--known-urls FILE]
                         [--out report.json]
+    silentfrog-cli crawl <base_url> [--sitemap URL] [--url-list FILE]
+                         [--limit N] [--timeout N] [--digest]
+                         [--out-report report.html]
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import argparse
 import asyncio
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _add_export_parser(subparsers)
     _add_logs_parser(subparsers)
+    _add_crawl_parser(subparsers)
     return parser
 
 
@@ -121,6 +125,41 @@ def _add_logs_parser(subparsers: Any) -> None:
         type=Path,
         default=None,
         help="File with one known URL per line; unlocks orphan-crawl and important-URL-not-hit findings.",
+    )
+
+
+def _add_crawl_parser(subparsers: Any) -> None:
+    from .site_crawl_types import DEFAULT_SITE_CRAWL_LIMIT
+
+    crawl = subparsers.add_parser(
+        "crawl",
+        help="Run one full site crawl, save it to history, and print a change digest (v3 G9, for OS schedulers).",
+    )
+    crawl.add_argument("base_url", help="Base URL to crawl (site root or start page).")
+    crawl.add_argument("--sitemap", dest="sitemap_url", default="", help="Sitemap URL to seed the crawl from.")
+    crawl.add_argument(
+        "--url-list",
+        type=Path,
+        default=None,
+        help="File with one URL per line to audit exactly (LIST mode).",
+    )
+    crawl.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_SITE_CRAWL_LIMIT,
+        help=f"Max URLs to crawl (default: {DEFAULT_SITE_CRAWL_LIMIT}).",
+    )
+    crawl.add_argument("--timeout", type=int, default=10, help="Per-request timeout in seconds (default: 10).")
+    crawl.add_argument(
+        "--digest",
+        action="store_true",
+        help="Send the digest via configured transports (SILENTFROG_ALERT_WEBHOOK_URL / SMTP env vars).",
+    )
+    crawl.add_argument(
+        "--out-report",
+        type=Path,
+        default=None,
+        help="Also write the HTML report (v3 G8) to this path.",
     )
 
 
@@ -233,11 +272,78 @@ def _read_known_urls(path: Path | None) -> tuple[str, ...]:
     return tuple(line.strip() for line in lines if line.strip())
 
 
+def _print_encodable(text: str) -> None:
+    """Print without ever raising UnicodeEncodeError: scheduled runs redirect
+    stdout through the console codepage (cp1252 under Windows Task Scheduler),
+    and crawl-derived characters outside it must not kill a run that already
+    succeeded — unencodable characters degrade to replacements instead."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
+async def _crawl_cmd(
+    args: argparse.Namespace,
+    crawl_fn: Any | None = None,
+    deliver_fn: Callable[[Any], Awaitable[dict[str, bool]]] | None = None,
+) -> int:
+    from .scheduled_crawl import build_digest, run_scheduled_crawl
+    from .site_crawl_types import SiteCrawlConfig
+
+    config = SiteCrawlConfig.from_text(
+        base_url=args.base_url,
+        sitemap_url=args.sitemap_url,
+        url_list_text=_read_url_list_file(args.url_list),
+        limit=args.limit,
+    )
+    try:
+        report, run, diff = await run_scheduled_crawl(config, timeout=args.timeout, crawl_fn=crawl_fn)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[crawl] failed: {exc}", file=sys.stderr)
+        return 1
+    digest = build_digest(run, diff, config.base_url)
+    _print_encodable(digest.subject)
+    _print_encodable(digest.markdown)
+    if args.out_report is not None:
+        _write_html_report(report, args.out_report)
+    if args.digest:
+        await _deliver_digest(digest, deliver_fn)
+    return 0
+
+
+def _read_url_list_file(path: Path | None) -> str:
+    if path is None:
+        return ""
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _write_html_report(report: Any, out_path: Path) -> None:
+    from .exporters import export_site_crawl_html
+
+    export_site_crawl_html(report, out_path)
+    print(f"[crawl] wrote {out_path}")
+
+
+async def _deliver_digest(
+    digest: Any,
+    deliver_fn: Callable[[Any], Awaitable[dict[str, bool]]] | None,
+) -> None:
+    from .alert_transport import deliver_digest as default_deliver_fn
+
+    deliver = deliver_fn or default_deliver_fn
+    results = await deliver(digest)
+    if not results:
+        print("[crawl] --digest set but no transport is configured (see README)", file=sys.stderr)
+        return
+    for transport, ok in results.items():
+        print(f"[crawl] {transport}: {'sent' if ok else 'failed'}", file=sys.stderr)
+
+
 _DISPATCH: dict[str, Callable[..., Any]] = {
     "aggregate": _aggregate_cmd,
     "watch": _watch_cmd,
     "export": _export_cmd,
     "logs": _logs_cmd,
+    "crawl": _crawl_cmd,
 }
 
 

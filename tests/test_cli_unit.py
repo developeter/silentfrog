@@ -195,6 +195,126 @@ async def test_watch_cmd_runs_for_iterations(monkeypatch, tmp_path) -> None:
     assert exit_code == 0
 
 
+def test_build_parser_accepts_crawl_subcommand() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(
+        [
+            "crawl",
+            "https://example.com/",
+            "--limit",
+            "50",
+            "--timeout",
+            "5",
+            "--digest",
+            "--sitemap",
+            "https://e.com/s.xml",
+        ]
+    )
+    assert args.command == "crawl"
+    assert args.base_url == "https://example.com/"
+    assert args.sitemap_url == "https://e.com/s.xml"
+    assert args.limit == 50
+    assert args.timeout == 5
+    assert args.digest is True
+    assert args.out_report is None
+
+
+def test_build_parser_crawl_defaults() -> None:
+    from silentfrog.site_crawl_types import DEFAULT_SITE_CRAWL_LIMIT
+
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/"])
+    assert args.limit == DEFAULT_SITE_CRAWL_LIMIT
+    assert args.timeout == 10
+    assert args.digest is False
+    assert args.url_list is None
+
+
+async def _stub_crawl_fn(config, timeout, store):
+    from silentfrog.site_crawl_types import SiteCrawlReport
+
+    return SiteCrawlReport.from_results([], discovered_count=0, base_url=config.base_url)
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_prints_digest_and_returns_zero(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/"])
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_stub_crawl_fn)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "History: saved first run" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_failure_returns_one(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/"])
+
+    async def _boom(config, timeout, store):
+        raise RuntimeError("network down")
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_boom)
+
+    assert exit_code == 1
+    assert "network down" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_with_digest_calls_deliver_fn(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/", "--digest"])
+    delivered = []
+
+    async def _stub_deliver(digest):
+        delivered.append(digest)
+        return {"webhook": True}
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_stub_crawl_fn, deliver_fn=_stub_deliver)
+
+    assert exit_code == 0
+    assert len(delivered) == 1
+    assert "webhook: sent" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_without_digest_flag_never_delivers(tmp_path, monkeypatch) -> None:
+    # Zero-network-by-default contract: --digest omitted must never call deliver_fn,
+    # even if transports happen to be configured in the environment.
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/"])
+    delivered = []
+
+    async def _stub_deliver(digest):
+        delivered.append(digest)
+        return {"webhook": True}
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_stub_crawl_fn, deliver_fn=_stub_deliver)
+
+    assert exit_code == 0
+    assert delivered == []
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_out_report_writes_html_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    out = tmp_path / "report.html"
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/", "--out-report", str(out)])
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_stub_crawl_fn)
+
+    assert exit_code == 0
+    assert out.exists()
+    assert "<html" in out.read_text(encoding="utf-8")
+
+
 def test_main_dispatches_to_aggregate(monkeypatch) -> None:
     called = {}
 
@@ -206,3 +326,20 @@ def test_main_dispatches_to_aggregate(monkeypatch) -> None:
     code = cli.main(["aggregate", "https://example.com/sitemap.xml"])
     assert code == 0
     assert called["args"].sitemap_url == "https://example.com/sitemap.xml"
+
+
+def test_print_encodable_survives_cp1252_stdout(monkeypatch) -> None:
+    # Windows Task Scheduler redirects stdout through the console codepage;
+    # a digest carrying non-cp1252 crawl content (non-Latin titles, arrows)
+    # must degrade to replacement characters, never UnicodeEncodeError.
+    import io
+    import sys
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    cli._print_encodable("Health → 標題 · ok")
+
+    stream.flush()
+    raw = stream.buffer.getvalue().decode("cp1252")
+    assert "ok" in raw

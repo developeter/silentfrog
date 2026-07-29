@@ -229,6 +229,49 @@ Add it to Claude Desktop's config (`claude_desktop_config.json`):
 
 Run `poetry run silentfrog-mcp serve` (or `silentfrog-mcp serve` from a source install) to start it manually and confirm it is on your `PATH`.
 
+### Scheduled crawls & alerts
+
+`silentfrog-cli crawl <base_url> [options]` runs one full Site Crawl, saves it to crawl history (the same history "View past scans" reads), and prints a change digest vs the previous run for that host. There is no bundled scheduler — per the repo's supply-chain policy (see `watch_mode.py`), scheduling is delegated to the OS: point Windows Task Scheduler or cron at the command and let it run on its own interval.
+
+```bash
+silentfrog-cli crawl https://example.com \
+  --limit 500 --timeout 10 \
+  --out-report report.html \
+  --digest
+```
+
+Key options: `--sitemap URL`, `--url-list FILE` (one URL per line), `--limit N` (default 500), `--timeout N` (default 10 seconds), `--out-report PATH` (also writes the v3 G8 HTML report), `--digest` (send the digest via the configured transports below).
+
+Every scheduled run is saved under the crawl's own on-disk SQLite store (`<data dir>/cli_crawls/`, newest 10 kept) and lands in crawl history exactly like a GUI-run crawl, so it appears in **View past scans** with a working "Open scan" button.
+
+#### Alert delivery (`--digest`)
+
+`--digest` is your consent to send; each transport additionally needs its own env config below, and an unconfigured transport is skipped silently (a note goes to stderr, exit code is unaffected).
+
+| Env var | Purpose |
+|---|---|
+| `SILENTFROG_ALERT_WEBHOOK_URL` | POST the digest JSON to this URL (Slack/Teams/generic webhook receiver). |
+| `SILENTFROG_SMTP_HOST` | SMTP server host — required to enable email. |
+| `SILENTFROG_SMTP_PORT` | SMTP port (default `587`). |
+| `SILENTFROG_SMTP_USER` | SMTP username (omit for an anonymous relay). |
+| `SILENTFROG_SMTP_FROM` | From address. |
+| `SILENTFROG_SMTP_TO` | `;`-separated recipient list. |
+| `SILENTFROG_SMTP_PASSWORD` | SMTP password, env fallback (see keyring note). |
+
+Keyring note: with the optional `keyring` package installed, store the SMTP password instead of a plaintext env var: `keyring.set_password("silentfrog-smtp", "password", "...")`. Password resolution tries keyring first, then falls back to `SILENTFROG_SMTP_PASSWORD`.
+
+Windows Task Scheduler (daily at 03:00):
+
+```bat
+schtasks /create /tn "Silentfrog nightly crawl" /tr "C:\path\to\.venv\Scripts\silentfrog-cli.exe crawl https://example.com --digest" /sc daily /st 03:00
+```
+
+cron (daily at 03:00):
+
+```cron
+0 3 * * * /path/to/.venv/bin/silentfrog-cli crawl https://example.com --digest >> /var/log/silentfrog-crawl.log 2>&1
+```
+
 ### Running without Poetry
 
 This is a manual developer alternative. For normal end-user installation, prefer **Section 2**.

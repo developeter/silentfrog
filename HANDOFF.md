@@ -162,7 +162,17 @@ Shipped:
   "Export HTML report" button; single crawl stream via the new
   `audit_issues.issues_for_results` (the Excel double-stream was not copied).
 
-Next: **G9** scheduled crawls + alert digest · the nice-to-have tail.
+- **Scheduled crawls + alert digest (G9):** one-shot `silentfrog-cli crawl`
+  runs a headless store-backed site crawl, saves it to crawl history (the
+  GUI's "View past scans" reopens it), prints a history-diff digest, and with
+  `--digest` delivers it via webhook (`SILENTFROG_ALERT_WEBHOOK_URL`) and/or
+  stdlib SMTP (`SILENTFROG_SMTP_*`, password keyring-first). Scheduling is
+  the OS's job (Task Scheduler/cron — README has examples); no daemon, zero
+  new deps. `--out-report` also writes the G8 HTML report.
+
+Next: the nice-to-have tail — G11 → G10 → G7 → G13 → G14 → G15 — plus
+retiring the fake `ai_citations_perplexity` proxy. All must-haves (M1–M8)
+are ✅.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
