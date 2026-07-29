@@ -155,7 +155,6 @@ def _populated_h0_groups() -> dict[str, Any]:
             brave_indexed=True,
             brave_summary_mentions=3,
             common_crawl_references=2,
-            perplexity_likely_indexed=True,
             measured=True,
         ).to_dict(),
         "gsc": GscMetrics(
@@ -274,7 +273,7 @@ def test_lighthouse_recompute_structurally_identical_after_store_reload() -> Non
     assert status_by_key["perf_crux_lcp"] == "critical"  # perf_crux breaching
     assert status_by_key["access_ssr_parity"] == "critical"  # render critical
     gated = {
-        "ai_citations_perplexity",
+        "ai_citations_common_crawl",
         "gsc_impressions_present",
         "ga4_engagement_above_median",
         "lighthouse_perf_above_90",

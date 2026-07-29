@@ -22,7 +22,7 @@ Groups recognised:
   ``perf_crux_cls``
 - ``SSR parity`` — ``access_ssr_parity``
 - ``AI Citations`` — ``ai_citations_brave``,
-  ``ai_citations_common_crawl``, ``ai_citations_perplexity``
+  ``ai_citations_common_crawl``
 - ``AI Share of Voice`` — ``sov_openai``, ``sov_perplexity``, ``sov_gemini``,
   ``sov_share``
 """
@@ -48,7 +48,6 @@ _GROUPS: dict[str, tuple[str, ...]] = {
     "AI Citations": (
         "ai_citations_brave",
         "ai_citations_common_crawl",
-        "ai_citations_perplexity",
     ),
     "AI Share of Voice": (
         "sov_openai",

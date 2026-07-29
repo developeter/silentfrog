@@ -128,8 +128,8 @@ Shipped:
   keeps a local per-host JSON series. Strictly BYO-key opt-in
   (`SILENTFROG_AI_SOV_ENABLE=1` + keys in Settings), sampled once per host
   per session; results surface as "AI Share of Voice" `ok` rows + a GEO
-  checks badge group. Later-scope: retire the fabricated
-  `ai_citations_perplexity` proxy; a per-engine comparison panel (G5).
+  checks badge group. (The fabricated `ai_citations_perplexity` proxy was
+  retired on 2026-07-21 in favour of the real `sov_perplexity` signal.)
 
 - **Accessibility audit (G4):** vendored axe-core 4.10.3 (MPL-2.0,
   `_vendor/axe.min.js` + license, pinned + sha-recorded) runs in the rendered
@@ -170,9 +170,9 @@ Shipped:
   the OS's job (Task Scheduler/cron — README has examples); no daemon, zero
   new deps. `--out-report` also writes the G8 HTML report.
 
-Next: the nice-to-have tail — G11 → G10 → G7 → G13 → G14 → G15 — plus
-retiring the fake `ai_citations_perplexity` proxy. All must-haves (M1–M8)
-are ✅.
+Next: the nice-to-have tail — G11 → G10 → G7 → G13 → G14 → G15. All
+must-haves (M1–M8) are ✅; the fake `ai_citations_perplexity` proxy is
+retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

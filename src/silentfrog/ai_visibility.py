@@ -413,12 +413,6 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Anthropic's older Claude, Together, etc.). Index lags by ~3 months — positioned as a "
         "'historical' signal alongside Brave's fresh signal. Free and public, no API key required."
     ),
-    "ai_citations_perplexity": (
-        "Heuristic — whether Perplexity likely indexes the URL.\n\n"
-        "Perplexity composes from Brave + Bing-shaped indexes; we don't have a public API to query "
-        "Perplexity directly, so this signal is currently inferred from Brave presence. "
-        "Not measured => info; likely indexed => good."
-    ),
     # v2.0 V7 — Google Search Console + GA4 (optional `silentfrog[google]`).
     "gsc_impressions_present": (
         "Real Search Console impressions + clicks for this URL over the last 28 days.\n\n"

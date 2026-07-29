@@ -17,6 +17,9 @@ In-tree HTTP cache reuses the same pattern as ``perf_crux.py`` —
 24h on-disk JSON cache keyed by URL. Removed the planned
 ``httpx-cache`` dep per §4.5 supply-chain hygiene (smaller-maintainer
 risk + simple enough to do in-house).
+
+Real Perplexity coverage lives in "AI Share of Voice" (``sov_perplexity``,
+BYO key) — this module no longer guesses at Perplexity indexing.
 """
 
 from __future__ import annotations
@@ -48,7 +51,6 @@ class AiCitationsPayload:
     brave_indexed: bool = False
     brave_summary_mentions: int = 0
     common_crawl_references: int = 0
-    perplexity_likely_indexed: bool = False
     measured: bool = False
     reason: str = ""
 
@@ -64,7 +66,6 @@ class AiCitationsPayload:
             brave_indexed=bool(value.get("brave_indexed", False)),
             brave_summary_mentions=int(value.get("brave_summary_mentions", 0) or 0),
             common_crawl_references=int(value.get("common_crawl_references", 0) or 0),
-            perplexity_likely_indexed=bool(value.get("perplexity_likely_indexed", False)),
             measured=bool(value.get("measured", False)),
             reason=str(value.get("reason", "")),
         )
@@ -74,7 +75,6 @@ class AiCitationsPayload:
             "brave_indexed": self.brave_indexed,
             "brave_summary_mentions": self.brave_summary_mentions,
             "common_crawl_references": self.common_crawl_references,
-            "perplexity_likely_indexed": self.perplexity_likely_indexed,
             "measured": self.measured,
             "reason": self.reason,
         }
@@ -240,7 +240,6 @@ async def fetch_ai_citations(
         brave_indexed=brave_indexed,
         brave_summary_mentions=brave_mentions,
         common_crawl_references=cc_count,
-        perplexity_likely_indexed=brave_indexed,  # Perplexity uses Bing+Brave-ish indexes
         measured=measured,
         reason="; ".join(reasons),
     )
@@ -266,12 +265,6 @@ _CHECK_META: dict[str, tuple[str, str, str]] = {
         "Common Crawl powers the training and citation paths of many open AI engines. Pages "
         "absent from Common Crawl are invisible to those engines. Note: index lags by ~3 months.",
     ),
-    "ai_citations_perplexity": (
-        "AI Citations",
-        "Perplexity likely indexes the URL (Brave + Bing heuristic)",
-        "Perplexity composes from Brave + Bing-shaped indexes. Used as a heuristic when Perplexity's "
-        "own search API isn't available; Brave presence is the strongest single signal we can read.",
-    ),
 }
 
 
@@ -288,7 +281,7 @@ def _check(key: str, status: str, detail: str) -> AiVisibilityCheck:
 
 
 def build_ai_citations_checks(payload: AiCitationsPayload) -> list[AiVisibilityCheck]:
-    """Three rows in the optional 8th 'AI Citations' area.
+    """Two rows in the optional 8th 'AI Citations' area.
 
     All myth-friendly: when ``measured=False`` every row reports
     ``info`` and does NOT down-weight the GEO Score.
@@ -300,7 +293,6 @@ def build_ai_citations_checks(payload: AiCitationsPayload) -> list[AiVisibilityC
         return [
             _check("ai_citations_brave", "info", detail_base),
             _check("ai_citations_common_crawl", "info", detail_base),
-            _check("ai_citations_perplexity", "info", detail_base),
         ]
     rows = [
         _check(
@@ -313,11 +305,6 @@ def build_ai_citations_checks(payload: AiCitationsPayload) -> list[AiVisibilityC
             "ai_citations_common_crawl",
             "good" if payload.common_crawl_references > 0 else "info",
             f"Common Crawl references: {payload.common_crawl_references}.",
-        ),
-        _check(
-            "ai_citations_perplexity",
-            "good" if payload.perplexity_likely_indexed else "info",
-            f"Heuristic — Perplexity likely indexed: {'yes' if payload.perplexity_likely_indexed else 'no'}.",
         ),
     ]
     return rows

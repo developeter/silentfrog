@@ -145,7 +145,6 @@ def test_build_checks_routes_to_ai_citations_area() -> None:
         brave_indexed=True,
         brave_summary_mentions=2,
         common_crawl_references=5,
-        perplexity_likely_indexed=True,
         measured=True,
     )
     rows = build_ai_citations_checks(payload)
@@ -153,7 +152,6 @@ def test_build_checks_routes_to_ai_citations_area() -> None:
     assert {r.key for r in rows} == {
         "ai_citations_brave",
         "ai_citations_common_crawl",
-        "ai_citations_perplexity",
     }
     assert all(r.status == "good" for r in rows)
 
@@ -170,7 +168,6 @@ def test_ai_citations_payload_roundtrips_through_dict() -> None:
         brave_indexed=True,
         brave_summary_mentions=1,
         common_crawl_references=2,
-        perplexity_likely_indexed=True,
         measured=True,
         reason="",
     )

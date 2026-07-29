@@ -186,7 +186,6 @@ def comprehensive_audit_raw() -> dict[str, Any]:
             "brave_indexed": True,
             "brave_summary_mentions": 3,
             "common_crawl_references": 2,
-            "perplexity_likely_indexed": True,
             "measured": True,
         },
         "gsc": {

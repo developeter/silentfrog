@@ -37,9 +37,9 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > default, user-supplied keys only). G2 ✅ and G3 ✅ shipped the same day;
 > G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the first operator queue is
 > complete. Second queue (2026-07-21): G8 ✅ and G9 ✅ shipped — every
-> must-have is done. Remaining: the nice-to-have tail
-> (G11 → G10 → G7 → G13 → G14 → G15) + retiring the fake
-> `ai_citations_perplexity` proxy.
+> must-have is done — and the fake `ai_citations_perplexity` proxy is
+> retired (real coverage: `sov_perplexity`). Remaining: the nice-to-have
+> tail (G11 → G10 → G7 → G13 → G14 → G15).
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|

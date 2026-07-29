@@ -200,7 +200,6 @@ CHECK_EVIDENCE: dict[str, tuple[str, tuple[str, ...]]] = {
     # AI Citations (optional 8th area)
     "ai_citations_brave": (EVIDENCE_CORRELATION, ("BRAVE-CLAUDE-TECHCRUNCH-2025", "BRAVE-SEARCH-API")),
     "ai_citations_common_crawl": (EVIDENCE_DESCRIPTIVE, ("COMMON-CRAWL",)),
-    "ai_citations_perplexity": (EVIDENCE_HEURISTIC, ()),
     # V20 — topic embeddings + brand mentions
     "topic_embedding_coherence": (EVIDENCE_HEURISTIC, ()),
     "brand_mentions_visibility": (EVIDENCE_DESCRIPTIVE, ("BRAVE-SEARCH-API", "COMMON-CRAWL")),
