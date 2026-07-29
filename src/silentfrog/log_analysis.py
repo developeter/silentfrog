@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 from .audit_issues import AuditIssue, IssueCategory, IssueEvidence, IssueSeverity, dedupe_issues
+from .logs import AI_KINDS, classify_bot
 
 _COMBINED_LOG_RE = re.compile(
     r"^(?P<remote>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "
@@ -131,6 +132,7 @@ def issues_for_log_report(report: LogAnalysisReport) -> list[AuditIssue]:
 
 def _build_findings(entries: tuple[LogEntry, ...], config: LogAnalysisConfig) -> list[LogFinding]:
     bot_entries = tuple(entry for entry in entries if entry.is_googlebot)
+    ai_entries = _ai_agent_entries(entries)
     findings: list[LogFinding] = []
     findings.extend(_googlebot_presence_findings(bot_entries))
     findings.extend(_blocked_bot_findings(bot_entries, config))
@@ -138,6 +140,9 @@ def _build_findings(entries: tuple[LogEntry, ...], config: LogAnalysisConfig) ->
     findings.extend(_crawl_waste_findings(bot_entries, config))
     findings.extend(_orphan_findings(bot_entries, config))
     findings.extend(_missing_important_findings(bot_entries, config))
+    findings.extend(_ai_agent_presence_findings(ai_entries))
+    findings.extend(_ai_agent_blocked_findings(ai_entries, config))
+    findings.extend(_ai_agent_redirected_findings(ai_entries, config))
     return findings
 
 
@@ -251,6 +256,78 @@ def _missing_important_findings(bot_entries: tuple[LogEntry, ...], config: LogAn
         if missing
         else []
     )
+
+
+def _ai_bot_label(entry: LogEntry) -> str:
+    """Return the AI-agent bot label for entry's UA, or "" if it's not one
+    of the ai_* kinds (training / assistant / AI-search)."""
+    classification = classify_bot(entry.user_agent)
+    if classification is None or classification.kind not in AI_KINDS:
+        return ""
+    return classification.label
+
+
+def _ai_agent_entries(entries: tuple[LogEntry, ...]) -> tuple[tuple[LogEntry, str], ...]:
+    tagged = ((entry, _ai_bot_label(entry)) for entry in entries)
+    return tuple(pair for pair in tagged if pair[1])
+
+
+def _ai_agent_presence_findings(ai_entries: tuple[tuple[LogEntry, str], ...]) -> list[LogFinding]:
+    if ai_entries:
+        return []
+    return [
+        _finding(
+            "logs.ai_agent_no_activity",
+            IssueSeverity.INFO,
+            "No AI-agent crawler activity (training, assistant, or AI-search bots) "
+            "was found in the imported log sample.",
+            "Informational only: AI-agent traffic is not required. Re-check log "
+            "coverage and date range if you expected AI crawler hits.",
+            [("AI-agent hits", "0")],
+        )
+    ]
+
+
+def _ai_agent_blocked_findings(
+    ai_entries: tuple[tuple[LogEntry, str], ...], config: LogAnalysisConfig
+) -> list[LogFinding]:
+    blocked = [(entry, label) for entry, label in ai_entries if entry.status >= 400]
+    if not blocked:
+        return []
+    counts = Counter(label for _, label in blocked)
+    top = _top_path(entry for entry, _ in blocked)
+    return [
+        _finding(
+            "logs.ai_agent_blocked",
+            IssueSeverity.WARNING,
+            "AI-agent crawlers received client/server errors while fetching pages.",
+            "Review blocking rules (WAF/CDN/robots), origin stability, and rate limits for AI-agent user agents.",
+            [(label, str(count)) for label, count in counts.most_common()],
+            url=_absolute_url(top, config),
+            count=len(blocked),
+        )
+    ]
+
+
+def _ai_agent_redirected_findings(
+    ai_entries: tuple[tuple[LogEntry, str], ...], config: LogAnalysisConfig
+) -> list[LogFinding]:
+    redirected = [(entry, label) for entry, label in ai_entries if 300 <= entry.status < 400]
+    if not redirected:
+        return []
+    counts = Counter(label for _, label in redirected)
+    top = _top_path(entry for entry, _ in redirected)
+    return [
+        _finding(
+            "logs.ai_agent_redirected",
+            IssueSeverity.WARNING,
+            "AI-agent crawlers spent fetches on redirects instead of final content.",
+            "Reduce avoidable redirect chains on URLs that AI-agent crawlers fetch.",
+            [(label, str(count)) for label, count in counts.most_common()],
+            url=_absolute_url(top, config),
+            count=len(redirected),
+        )
+    ]
 
 
 def _issue_from_finding(finding: LogFinding) -> AuditIssue:

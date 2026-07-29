@@ -242,9 +242,12 @@ async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | N
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(body + "\n", encoding="utf-8")
         print(f"[logs] wrote {args.out}")
+    ai_requests = report.ai_agents.get("ai_requests", 0)
+    ai_bot_count = len(report.ai_agents.get("bots", {}))
     print(
         f"[logs] {report.total_requests} requests, {report.bot_requests} from bots, "
-        f"{report.wasted_404} 4xx, {report.wasted_redirect} 3xx, {len(issues)} issues",
+        f"{report.wasted_404} 4xx, {report.wasted_redirect} 3xx, {len(issues)} issues, "
+        f"{ai_requests} AI-agent requests from {ai_bot_count} bots",
         file=sys.stderr,
     )
     return 0

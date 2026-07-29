@@ -13,6 +13,7 @@ from silentfrog.log_analysis import (  # type: ignore[reportMissingImports]
 
 _GOOGLEBOT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 _USER = "Mozilla/5.0"
+_GPTBOT = "Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)"
 
 
 def _line(path: str, status: int, agent: str = _GOOGLEBOT) -> str:
@@ -59,6 +60,44 @@ def test_analyse_log_entries_reports_seo_bot_findings() -> None:
     assert findings["logs.crawl_waste"].count == 1
     assert findings["logs.orphan_crawled_urls"].count == 1
     assert findings["logs.important_urls_not_hit"].url == "https://example.com/missing-important"
+
+
+def test_analyse_log_entries_flags_ai_agent_blocked() -> None:
+    entries = [
+        parse_log_line(_line("/blocked-for-ai/", 403, _GPTBOT)),
+        parse_log_line(_line("/design/table/", 200)),
+    ]
+
+    report = analyse_log_entries([entry for entry in entries if entry])
+    findings = {finding.finding_id: finding for finding in report.findings}
+
+    assert "logs.ai_agent_blocked" in findings
+    blocked = findings["logs.ai_agent_blocked"]
+    assert blocked.severity == IssueSeverity.WARNING
+    assert blocked.count == 1
+    assert any(evidence.label == "GPTBot" for evidence in blocked.evidence)
+
+
+def test_analyse_log_entries_flags_ai_agent_redirected() -> None:
+    entries = [parse_log_line(_line("/moved-for-ai/", 301, _GPTBOT))]
+
+    report = analyse_log_entries([entry for entry in entries if entry])
+    findings = {finding.finding_id: finding for finding in report.findings}
+
+    assert findings["logs.ai_agent_redirected"].severity == IssueSeverity.WARNING
+    assert findings["logs.ai_agent_redirected"].count == 1
+
+
+def test_analyse_log_entries_ai_agent_no_activity_is_info_not_warning() -> None:
+    # Sec 1.5 myth rule: absence of a not-required signal is info, never a
+    # warning/critical penalty — even though the sibling Googlebot-absence
+    # finding (below) is a warning by longstanding precedent.
+    entries = [parse_log_line(_line("/page/", 200))]
+
+    report = analyse_log_entries([entry for entry in entries if entry])
+    findings = {finding.finding_id: finding for finding in report.findings}
+
+    assert findings["logs.ai_agent_no_activity"].severity == IssueSeverity.INFO
 
 
 def test_analyse_log_entries_flags_missing_googlebot_activity() -> None:

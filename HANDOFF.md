@@ -170,9 +170,16 @@ Shipped:
   the OS's job (Task Scheduler/cron — README has examples); no daemon, zero
   new deps. `--out-report` also writes the G8 HTML report.
 
-Next: the nice-to-have tail — G11 → G10 → G7 → G13 → G14 → G15. All
-must-haves (M1–M8) are ✅; the fake `ai_citations_perplexity` proxy is
-retired.
+- **AI-agent log analytics (G11):** the log bot taxonomy grew 20→48
+  signatures (30 AI-class, with vendor + kind metadata and a
+  specificity-ordering guard test); `CrawlBudgetReport` gains an
+  `ai_agents` section (per-bot requests/blocked, AI share of bot traffic);
+  `log_analysis` emits additive AI findings (`logs.ai_agent_blocked`/
+  `_redirected` warnings, `_no_activity` info per §1.5); the CLI logs
+  summary reports AI-agent traffic. GUI log window remains M6-deferred.
+
+Next: G10 → G7 → G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
+`ai_citations_perplexity` proxy is retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
