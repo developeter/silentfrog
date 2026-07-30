@@ -20,16 +20,15 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 
 - **v2.0 roadmap V1..V20: complete.** Full milestone history in
   `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in `HANDOFF.md`.
-- **v3 gap analysis: `docs/v3_roadmap.md`** — ranked gaps vs the paid tools,
-  with a must-have/nice-to-have verdict. Shipped from it: G1 hints engine
-  (+G12 for free), JS-rendered link crawl (M8), reopenable past scans,
-  Multi-URL Dashboard retirement, Lighthouse-button fix, GUI token pass,
-  **G2** health-score + issue trends, **G3** BYO-key AI citation
-  share-of-voice (policy reopened 2026-07-20 as strictly BYO-key opt-in),
-  **G4** axe-core accessibility, **G5** Topic map (content clusters),
-  **G6** MCP server (`silentfrog-mcp serve`).
-- **Biggest open v3 gaps:** client-ready HTML report (G8), scheduled crawls +
-  alert digest (G9), then the nice-to-have tail (G7, G10, G11, G13–G15).
+- **v3 gap analysis: `docs/v3_roadmap.md` — COMPLETE (2026-07-30).** Every
+  G-item (G1–G15) is shipped, retired, or delivered via another (G12 via
+  G1; V18 revived as G6); the fake `ai_citations_perplexity` proxy is
+  retired. Full shipped list + dates in `HANDOFF.md`.
+- **Remaining pools if work resumes:** unnumbered nice-to-haves (WARC
+  export · crawl segments · sitemap generation), PLAN.md foundations
+  (M5 GSC full deliverable · M6 GUI log window + parser unification ·
+  M8 remote-sync OAuth/UI · M9 future integrations), V19 Stage B (QML),
+  ~1M-URL scale (100k verified), Settings UI for the G7 provider keys.
 
 ## Where the rules live
 
