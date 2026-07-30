@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -169,6 +169,107 @@ def _verdict(
     return "Strong"
 
 
+# --- v3 G15: zero-dependency text-glitch detector --------------------------
+# Honest scope: no dictionary exists in-tree and downloading one is not
+# allowed (a bundled dictionary would need its own P4 dependency decision), so
+# this is NOT a spellchecker. It only catches language-agnostic copy/paste and
+# typing artifacts via cheap regex: consecutive duplicated words, doubled
+# punctuation, and a space stranded before a punctuation mark. True
+# dictionary spellcheck is later-scope.
+
+_TEXT_GLITCH_MIN_WORDS = 25  # unmeasured below this threshold — mirrors the
+# readability language-guard precedent in citation_advanced.py
+# (_flesch_reading_ease / _gulpease return None under 25 words rather than a
+# misleading score computed on too little text).
+_TEXT_GLITCH_MAX_SAMPLES = 5
+_TEXT_GLITCH_SAMPLE_CONTEXT = 40  # chars of context either side of a hit
+
+
+def _doubled_punct_pattern(char: str) -> re.Pattern[str]:
+    """Exactly two of the same mark: a 3+ run (e.g. the "..." ellipsis) is
+    excluded by the surrounding negative lookaround, uniformly for !?,. —
+    a dumb, language-agnostic rule that cannot tell "Wow!!" from a genuine
+    stutter, but two-in-a-row punctuation is rare enough in clean copy that
+    the tradeoff favors simplicity over dictionary-grade precision."""
+    escaped = re.escape(char)
+    return re.compile(rf"(?<!{escaped}){escaped}{{2}}(?!{escaped})")
+
+
+_DOUBLED_PUNCT_RES = tuple(_doubled_punct_pattern(char) for char in "!?,.")
+
+# A space directly before a punctuation mark; excludes the "..." ellipsis so
+# a paced "wait ... what" isn't flagged. French (and any language with a
+# space-before-punctuation typographic convention, e.g. "Bonjour !") is
+# skipped wholesale in detect_text_glitches rather than special-cased here —
+# a per-punctuation exception list would still misfire on French quotation
+# guillemets ("« like this »").
+_SPACE_BEFORE_PUNCT_RE = re.compile(r" (?=[,.!?;:])(?!\.\.\.)")
+
+
+def _duplicate_words_in_paragraph(paragraph: str) -> list[tuple[int, int]]:
+    """Consecutive case-insensitive duplicate tokens, len >= 2. Single-letter
+    tokens ("a a", "I I") are excluded to dodge initials/artifacts, but a
+    generic rule still can't tell a legitimate doubled word (an interjection
+    like "ha ha") from a genuine typo — that remains an accepted
+    false-positive source, not something this heuristic can fix."""
+    tokens = list(_WORD_RE.finditer(paragraph))
+    return [
+        (prev.start(), curr.end())
+        for prev, curr in zip(tokens, tokens[1:], strict=False)
+        if len(prev.group()) >= 2 and prev.group().casefold() == curr.group().casefold()
+    ]
+
+
+def _doubled_punct_in_paragraph(paragraph: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for pattern in _DOUBLED_PUNCT_RES for m in pattern.finditer(paragraph)]
+
+
+def _space_before_punct_in_paragraph(paragraph: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for m in _SPACE_BEFORE_PUNCT_RE.finditer(paragraph)]
+
+
+_GLITCH_KINDS = (
+    ("duplicate_words", "duplicate word", _duplicate_words_in_paragraph),
+    ("doubled_punctuation", "doubled punctuation", _doubled_punct_in_paragraph),
+    ("space_before_punct", "space before punctuation", _space_before_punct_in_paragraph),
+)
+
+
+def _paragraph_glitch_hits(paragraph: str) -> list[tuple[str, str, int, int]]:
+    return [(key, label, start, end) for key, label, finder in _GLITCH_KINDS for start, end in finder(paragraph)]
+
+
+def _glitch_sample(paragraph: str, label: str, start: int, end: int) -> str:
+    lo = max(start - _TEXT_GLITCH_SAMPLE_CONTEXT, 0)
+    hi = min(end + _TEXT_GLITCH_SAMPLE_CONTEXT, len(paragraph))
+    context = _SPACE_RE.sub(" ", paragraph[lo:hi]).strip()
+    return f'{label}: "{paragraph[start:end]}" — "{context}"'
+
+
+def detect_text_glitches(paragraph_texts: Sequence[str], language_code: str = "") -> dict[str, object]:
+    """Language-agnostic text-glitch pass: duplicated words, doubled
+    punctuation, space-before-punctuation. See the module comment above for
+    why this is not a spellchecker.
+
+    French is skipped wholesale (``{}``, unmeasured) because its typography
+    places a space before ``! ? ; :`` by convention — the dumb
+    space-before-punct rule cannot distinguish that from a typo, so the whole
+    detector would over-trigger on otherwise clean French copy.
+    """
+    if language_code.strip().lower().startswith("fr"):
+        return {}
+    if sum(_word_count(text) for text in paragraph_texts) < _TEXT_GLITCH_MIN_WORDS:
+        return {}
+    counts = {key: 0 for key, _label, _finder in _GLITCH_KINDS}
+    samples: list[str] = []
+    for paragraph in paragraph_texts:
+        for key, label, start, end in _paragraph_glitch_hits(paragraph):
+            counts[key] += 1
+            if len(samples) < _TEXT_GLITCH_MAX_SAMPLES:
+                samples.append(_glitch_sample(paragraph, label, start, end))
+    return {**counts, "total": sum(counts.values()), "samples": samples}
+
+
 def extract_content_quality(soup: BeautifulSoup) -> dict[str, object]:
     html_tag = soup.find("html")
     body = soup.body or soup
@@ -183,8 +284,9 @@ def extract_content_quality(soup: BeautifulSoup) -> dict[str, object]:
     body_text = body.get_text(" ", strip=True)
     word_count = _word_count(body_text)
     average_words = round(sum(paragraph_word_counts) / len(paragraph_word_counts), 1) if paragraph_word_counts else 0.0
+    raw_lang = html_tag.get("lang", "") if html_tag else ""
     quality = ContentQuality(
-        language=_language_label(html_tag.get("lang", "") if html_tag else ""),
+        language=_language_label(raw_lang),
         word_count=word_count,
         paragraph_count=len(paragraph_word_counts),
         substantial_paragraph_count=sum(count >= 12 for count in paragraph_word_counts),
@@ -224,6 +326,8 @@ def extract_content_quality(soup: BeautifulSoup) -> dict[str, object]:
         "thin_content_risk": quality.thin_content_risk,
         "heading_structure": quality.heading_structure,
         "verdict": verdict,
+        # v3 G15: add-only key, absent on pre-G15 blobs — consumers use .get().
+        "text_glitches": detect_text_glitches(paragraphs, raw_lang),
     }
 
 
@@ -268,4 +372,9 @@ def content_quality_tooltip(label: str) -> str:
     return _TOOLTIPS.get(label.strip().lower(), "")
 
 
-__all__ = ["build_content_quality_rows", "content_quality_tooltip", "extract_content_quality"]
+__all__ = [
+    "build_content_quality_rows",
+    "content_quality_tooltip",
+    "detect_text_glitches",
+    "extract_content_quality",
+]

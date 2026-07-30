@@ -213,6 +213,68 @@ def test_pseudo_link_issue_absent_when_group_missing_or_total_zero() -> None:
     assert "links.uncrawlable" not in zero_ids
 
 
+def test_text_glitch_issue_reports_counts_and_first_sample_at_threshold() -> None:
+    url = "https://example.com/page"
+    base = _payload(url)
+    payload = replace(
+        base,
+        content_quality=replace(
+            base.content_quality,
+            text_glitches={
+                "duplicate_words": 2,
+                "doubled_punctuation": 1,
+                "space_before_punct": 0,
+                "total": 3,
+                "samples": ['duplicate word: "the the" — "...the the cat sat..."'],
+            },
+        ),
+    )
+
+    issues = issues_for_payload(url, payload)
+    by_id = {issue.issue_id: issue for issue in issues}
+
+    assert "content.text_glitches" in by_id
+    issue = by_id["content.text_glitches"]
+    assert issue.severity == IssueSeverity.WARNING
+    assert issue.category == IssueCategory.CONTENT
+    assert "2 duplicate word" in issue.reason
+    assert "1 doubled punctuation" in issue.reason
+    assert "the the" in issue.reason
+    assert IssueEvidence("Total", "3") in issue.evidence
+
+
+def test_text_glitch_issue_silent_below_threshold() -> None:
+    url = "https://example.com/page"
+    base = _payload(url)
+    payload = replace(
+        base,
+        content_quality=replace(
+            base.content_quality,
+            text_glitches={
+                "duplicate_words": 2,
+                "doubled_punctuation": 0,
+                "space_before_punct": 0,
+                "total": 2,
+                "samples": [],
+            },
+        ),
+    )
+
+    ids = {issue.issue_id for issue in issues_for_payload(url, payload)}
+    assert "content.text_glitches" not in ids
+
+
+def test_text_glitch_issue_absent_when_group_missing_or_old_blob() -> None:
+    url = "https://example.com/page"
+    # _payload() never sets text_glitches — this doubles as the "old blob"
+    # case: a pre-G15 stored payload has no text_glitches key at all, and
+    # ContentQuality.from_raw defaults it to {} rather than failing to load.
+    payload = _payload(url)
+    assert payload.content_quality.text_glitches == {}
+    ids = {issue.issue_id for issue in issues_for_payload(url, payload)}
+    assert "content.text_glitches" not in ids
+
+
 def test_severity_order_and_color_roles_are_conservative() -> None:
     assert severity_rank(IssueSeverity.CRITICAL) < severity_rank(IssueSeverity.WARNING)
     assert severity_rank(IssueSeverity.WARNING) < severity_rank(IssueSeverity.INFO)

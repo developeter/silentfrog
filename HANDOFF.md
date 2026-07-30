@@ -210,8 +210,20 @@ Shipped:
   `links.uncrawlable` warning issue when any are found. Real links and
   in-page `#fragment` anchors are never flagged.
 
-Next: G15 spelling/grammar (last roadmap item). All must-haves (M1–M8)
-are ✅; the fake `ai_citations_perplexity` proxy is retired.
+- **Text-glitch detection (G15, honest zero-dep scope):** language-agnostic
+  detector in `content_quality` (consecutive duplicate words, doubled
+  punctuation — ellipsis-safe, space-before-punctuation; French declared
+  pages skipped like the readability guard) riding the typed
+  `ContentQuality` dataclass add-only; `content.text_glitches` warning at
+  ≥3 findings. True dictionary spellcheck stays later-scope (P4 decision).
+
+**THE v3 ROADMAP IS COMPLETE (2026-07-30):** every G-item shipped, retired,
+or delivered via another. Remaining pools if work resumes: the unnumbered
+nice-to-haves (WARC export · crawl segments · sitemap generation), the
+"Deliberately out" policy list (unchanged), PLAN.md's remaining foundations
+(M5 GSC full deliverable · M6 GUI log window + parser unification · M8
+remote-sync OAuth/UI · M9 future integrations), V19 Stage B (QML), and the
+~1M-URL scale goal (100k verified).
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new

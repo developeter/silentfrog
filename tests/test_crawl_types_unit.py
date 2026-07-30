@@ -190,6 +190,31 @@ def test_from_raw_legacy_blob_loads_as_version_1_with_empty_groups() -> None:
         assert getattr(payload, group) == {}, group
 
 
+def test_content_quality_text_glitches_round_trips_and_defaults_empty() -> None:
+    # v3 G15: nested add-only field on ContentQuality (not a top-level
+    # CrawlPayload group) — a pre-G15 blob has no "text_glitches" key inside
+    # "content_quality" at all, so it must default to {} rather than fail.
+    raw = _raw_payload()
+    raw["content_quality"] = {
+        "verdict": "Strong",
+        "word_count": 120,
+        "text_glitches": {
+            "duplicate_words": 1,
+            "doubled_punctuation": 0,
+            "space_before_punct": 0,
+            "total": 1,
+            "samples": ["x"],
+        },
+    }
+    payload = CrawlPayload.from_raw(raw)
+    assert payload.content_quality.text_glitches["total"] == 1
+    restored = CrawlPayload.from_raw(payload.to_mapping())
+    assert restored.content_quality.text_glitches == payload.content_quality.text_glitches
+
+    legacy_payload = CrawlPayload.from_raw(_raw_payload())  # content_quality lacks the key entirely
+    assert legacy_payload.content_quality.text_glitches == {}
+
+
 def test_url_normalization_none_becomes_empty_unicode_preserved() -> None:
     raw = _raw_payload()
     raw["requested_url"] = None  # explicit None value, not an absent key

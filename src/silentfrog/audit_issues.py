@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from .crawl_run_repository import open_report_repository
 from .crawl_types import CrawlPayload
@@ -278,7 +279,54 @@ def _content_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:
                 _content_evidence(payload),
             )
         )
+    issues.extend(_text_glitch_issues(url, payload))
     return issues
+
+
+# v3 G15: 3+ total glitches before surfacing an issue — one stray "the the"
+# or "!!" is common enough in real copy that a threshold of 1 would be noisy
+# (§1.5: measured-but-bad may warn, but the bar should still be meaningful).
+_TEXT_GLITCH_MIN_TOTAL = 3
+
+
+def _text_glitch_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:
+    glitches = payload.content_quality.text_glitches
+    total = glitches.get("total", 0)
+    if not isinstance(total, int) or total < _TEXT_GLITCH_MIN_TOTAL:
+        return []
+    return [
+        _issue(
+            "content.text_glitches",
+            IssueCategory.CONTENT,
+            IssueSeverity.WARNING,
+            url,
+            _text_glitch_reason(glitches),
+            "Proofread the page copy; repeated words and stray punctuation undermine content quality signals.",
+            "Content quality",
+            _text_glitch_evidence(glitches),
+        )
+    ]
+
+
+def _text_glitch_reason(glitches: dict[str, Any]) -> str:
+    reason = (
+        f"Detected {glitches.get('duplicate_words', 0)} duplicate word(s), "
+        f"{glitches.get('doubled_punctuation', 0)} doubled punctuation mark(s), and "
+        f"{glitches.get('space_before_punct', 0)} space-before-punctuation instance(s)."
+    )
+    samples = glitches.get("samples") or []
+    if samples:
+        reason += f" First sample: {samples[0]}"
+    return reason
+
+
+def _text_glitch_evidence(glitches: dict[str, Any]) -> list[tuple[str, object]]:
+    return [
+        ("Duplicate words", glitches.get("duplicate_words", 0)),
+        ("Doubled punctuation", glitches.get("doubled_punctuation", 0)),
+        ("Space before punctuation", glitches.get("space_before_punct", 0)),
+        ("Total", glitches.get("total", 0)),
+    ]
 
 
 def _image_issues(url: str, rows: Iterable[Sequence[object]]) -> list[AuditIssue]:

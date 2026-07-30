@@ -39,7 +39,11 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > complete. Second queue (2026-07-21): G8 ✅ and G9 ✅ shipped — every
 > must-have is done — and the fake `ai_citations_perplexity` proxy is
 > retired (real coverage: `sov_perplexity`). G11 ✅, G10 ✅ and G7 ✅
-> shipped. G13 ✅ and G14 ✅ shipped 2026-07-30. Remaining: G15 (last).
+> shipped. G13 ✅, G14 ✅ and G15 ✅ shipped 2026-07-30.
+> **The v3 gap catalogue is COMPLETE** — every G-item is shipped, retired,
+> or delivered via another (G12 via G1; V18 revived as G6). Still open by
+> choice: the "Deliberately out" policy list and the unnumbered
+> nice-to-haves (WARC export · crawl segments · sitemap generation).
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -57,7 +61,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G12 ✅ | A | **"Blocked from AI Search" rollup + AI Readiness Score** | Semrush AI widget, Rankscale score | DELIVERED VIA G1: AI-access checks flow into `ai_geo.*` issues, so `build_hints` groups them into "AI crawler blocked — N pages" site-wide. A separate AI-readiness number would duplicate the existing GEO Score — deliberately not added |
 | G13 ✅ | B | **Semantic redirect mapping** (embedding old→new URL matching for migrations) | SF v23 | SHIPPED: `redirect_mapping.py` matches previous-crawl pages gone in the current crawl to indexable candidates (cosine on stored G5 vectors, difflib path+title fallback); "Map redirects" dialog + CSV feeding the existing Redirect checker |
 | G14 ✅ | A | **Uncrawlable link detection** (onclick/span/div pseudo-links) | SF v24 | SHIPPED: always-on parse-time `pseudo_links` payload group (5 kinds, capped samples) + `links.uncrawlable` warning issue; in-page `#fragment` anchors and real `<a href>` with extra JS never flagged |
-| G15 | A | **Spelling/grammar** | SF classic | Low effort with local dictionaries; multilingual caveat |
+| G15 ✅ | A | **Spelling/grammar** | SF classic | SHIPPED (honest zero-dep scope): language-agnostic text-glitch detector (duplicate words, doubled punctuation, space-before-punct; French skipped, ellipsis-safe) + `content.text_glitches` warning at ≥3. True dictionary spellcheck = later-scope (needs a P4 bundled-dictionary decision) |
 
 Also observed in-tree (not competitor-driven): 1M-URL scale is still
 aspirational (100k verified); spider follows raw-HTML links only (no

@@ -849,6 +849,11 @@ class ContentQuality:
     thin_content_risk: str
     heading_structure: str
     verdict: str
+    # v3 G15: {duplicate_words, doubled_punctuation, space_before_punct,
+    # total, samples} from content_quality.detect_text_glitches, or {} when
+    # unmeasured (< 25 words, or French — see that module for why). Add-only:
+    # a default lets pre-G15 blobs load with {} instead of failing.
+    text_glitches: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> ContentQuality:
@@ -867,6 +872,7 @@ class ContentQuality:
             thin_content_risk="",
             heading_structure="",
             verdict="",
+            text_glitches={},
         )
 
     @classmethod
@@ -903,6 +909,9 @@ class ContentQuality:
             thin_content_risk=str(value.get("thin_content_risk", "")),
             heading_structure=str(value.get("heading_structure", "")),
             verdict=str(value.get("verdict", "")),
+            text_glitches=(
+                dict(value.get("text_glitches") or {}) if isinstance(value.get("text_glitches"), Mapping) else {}
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -921,6 +930,7 @@ class ContentQuality:
             "thin_content_risk": self.thin_content_risk,
             "heading_structure": self.heading_structure,
             "verdict": self.verdict,
+            "text_glitches": dict(self.text_glitches),
         }
 
 
