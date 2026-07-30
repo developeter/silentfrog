@@ -196,7 +196,14 @@ Shipped:
   `silentfrog-cli review <url> [--prompt ...]`. Settings-dialog key UI:
   later-scope.
 
-Next: G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
+- **Semantic redirect mapping (G13):** `redirect_mapping.py` (pure) matches
+  previous-crawl pages that are gone in the current crawl (missing/404/410)
+  to current indexable pages — cosine on stored topic vectors when both
+  sides have them, stdlib difflib on path+title otherwise. "Map redirects"
+  button (enabled with a previous report, like Compare) + CSV export whose
+  `old_url,new_url` shape feeds the existing Redirect checker.
+
+Next: G14 → G15. All must-haves (M1–M8) are ✅; the fake
 `ai_citations_perplexity` proxy is retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 from qtpy import QtCore, QtWidgets
@@ -89,6 +90,8 @@ def test_site_crawl_window_defaults(qtbot) -> None:
     assert win.btn_start.toolTip()
     assert win.btn_history_setup.text() == "View past scans"
     assert win.btn_history.text() == "View past scans"
+    assert win.btn_redirect_map.text() == "Map redirects"
+    assert win.btn_redirect_map.isEnabled() is False
     assert win.progress.minimumHeight() >= 32
     assert win.lbl_eta.text() == "ETA: -"
     assert win.recap_widget.health_text().startswith("<b>Ready</b>")
@@ -963,3 +966,139 @@ def test_stream_cluster_inputs_bounds_the_zero_vector_scan(monkeypatch, qtbot) -
 
     assert win._stream_cluster_inputs() == []
     assert repo.consumed == site_crawl_gui._CLUSTER_MAX_SCANNED
+
+
+# --- v3 G13: Semantic redirect mapping dialog wiring ---
+
+
+def _payload_with_vector(url: str, vector: list[float]) -> CrawlPayload:
+    return replace(_payload(url), topic_embeddings={"vector": vector})
+
+
+def test_redirect_map_button_gated_like_diff_button(qtbot) -> None:
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    win._latest_report = SiteCrawlReport.from_results([result], discovered_count=1)
+
+    win._set_running(False)
+    assert win.btn_redirect_map.isEnabled() is False  # no previous report yet
+
+    win._previous_report = win._latest_report
+    win._set_running(False)
+    assert win.btn_redirect_map.isEnabled() is True
+
+    win._set_running(True)
+    assert win.btn_redirect_map.isEnabled() is False  # disabled while running
+
+
+def test_show_redirect_map_assembles_caption_and_suggestion_row(qtbot) -> None:
+    old_vector = [1.0, 0.0, 0.0]
+    new_vector = [0.99, 0.14, 0.0]  # cosine ~0.99 with old_vector
+    old_result = SiteCrawlResult.from_payload(
+        "https://example.com/old-page", _payload_with_vector("https://example.com/old-page", old_vector)
+    )
+    new_result = SiteCrawlResult.from_payload(
+        "https://example.com/new-page", _payload_with_vector("https://example.com/new-page", new_vector)
+    )
+    previous_report = SiteCrawlReport.from_results([old_result], discovered_count=1)
+    current_report = SiteCrawlReport.from_results([new_result], discovered_count=1)
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._previous_report = previous_report
+    win._latest_report = current_report
+
+    win._show_redirect_map()
+
+    assert win._detail_windows
+    dialog = win._detail_windows[-1]
+    buttons = {b.text(): b for b in dialog.findChildren(QtWidgets.QPushButton)}
+    assert "Save CSV…" in buttons
+    assert "Close" in buttons
+    captions = " ".join(lbl.text() for lbl in dialog.findChildren(QtWidgets.QLabel))
+    assert "1 suggestions" in captions
+    assert "0 unmatched" in captions
+    body = dialog.findChild(QtWidgets.QPlainTextEdit).toPlainText()
+    assert "https://example.com/old-page" in body
+    assert "https://example.com/new-page" in body
+    assert "semantic" in body
+
+
+def test_show_redirect_map_reports_reason_when_unmeasured(monkeypatch, qtbot) -> None:
+    # Both sides empty (e.g. nothing migrated away) -> unmeasured, must explain
+    # why instead of opening an empty dialog.
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda parent, title, text, *a, **k: captured.update(title=title, text=text),
+    )
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._previous_report = report  # same URL, same status -> "still alive", no old candidates
+    win._latest_report = report
+
+    win._show_redirect_map()
+
+    assert captured
+    assert captured["title"] == "Redirect map unavailable"
+    assert win._detail_windows == []
+
+
+def test_save_redirect_map_csv_writes_old_url_new_url_rows(monkeypatch, qtbot, tmp_path: Path) -> None:
+    from silentfrog.redirect_mapping import RedirectMap, RedirectSuggestion
+
+    target = tmp_path / "redirects.csv"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), "CSV files (*.csv)"))
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: None)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    redirect_map = RedirectMap(
+        suggestions=(RedirectSuggestion("https://e.com/old", "https://e.com/new", 0.91, "semantic"),),
+        unmatched=(),
+        measured=True,
+    )
+
+    win._save_redirect_map_csv(redirect_map)
+
+    written = target.read_text(encoding="utf-8")
+    assert "old_url,new_url" in written
+    assert "https://e.com/old,https://e.com/new" in written
+
+
+class _EndlessRedirectRepo:
+    """Streams far more results than any sane bound — the redirect-mapping
+    scan must stop at _REDIRECT_MAP_MAX_SCANNED, not at the store's natural
+    end (clone of _EndlessVectorlessRepo for the new stream helper)."""
+
+    def __init__(self, result: SiteCrawlResult) -> None:
+        self._result = result
+        self.consumed = 0
+
+    def __enter__(self) -> _EndlessRedirectRepo:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def stream_results(self):
+        for _ in range(50_000):
+            self.consumed += 1
+            yield self._result
+
+
+def test_stream_redirect_page_refs_bounds_the_scan(monkeypatch, qtbot) -> None:
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    repo = _EndlessRedirectRepo(result)
+    monkeypatch.setattr(site_crawl_gui, "open_report_repository", lambda _report: repo)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    refs = win._stream_redirect_page_refs(report)
+
+    assert len(refs) == site_crawl_gui._REDIRECT_MAP_MAX_SCANNED
+    assert repo.consumed == site_crawl_gui._REDIRECT_MAP_MAX_SCANNED

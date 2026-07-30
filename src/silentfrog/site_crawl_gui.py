@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import threading
 from collections import OrderedDict
@@ -34,6 +35,7 @@ from .exporters import (
     export_site_crawl_report,
     write_llm_export,
 )
+from .redirect_mapping import PageRef, RedirectMap, build_redirect_map, select_migration_candidates
 from .settings_dialog import CrawlSettingsDialog
 from .site_crawl_history_gui import CrawlHistoryDialog
 from .site_crawl_types import (
@@ -94,6 +96,11 @@ _CLUSTER_MAX_VECTORS = 2000
 # measured pages, so scanning a few thousand payloads is enough to prove there
 # are none without decompressing a 100k-row store on the GUI thread.
 _CLUSTER_MAX_SCANNED = 5000
+# v3 G13: cap how many rows the redirect-mapping stream reads from EACH side
+# (previous crawl, current crawl) before it stops. Same bounded-scan lesson as
+# the Topic map above — this must never decompress every payload of a huge
+# store on the GUI thread just to prove there is nothing left to map.
+_REDIRECT_MAP_MAX_SCANNED = 5000
 # v3: how many crawl databases the rolling prune keeps on disk for "View past
 # scans" (newest first, the window's live/previous stores always excluded).
 _STORED_CRAWL_RETENTION = 10
@@ -614,6 +621,13 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             "Diff this crawl against the previous one in this session: new / removed URLs, "
             "status changes, and GEO Score regressions / improvements."
         )
+        self.btn_redirect_map = QtWidgets.QPushButton("Map redirects")
+        self.btn_redirect_map.setToolTip(
+            "Site migration helper: suggest old→new URL redirects by matching pages that vanished "
+            "or went 404/410 since the previous crawl against this crawl's indexable pages (topic-"
+            "embedding similarity when both sides have one, text match otherwise). Feeds the "
+            "Redirect checker via a CSV export."
+        )
         self.btn_graph = QtWidgets.QPushButton("Link graph")
         self.btn_graph.setToolTip(
             "Visualise the crawl tree: nodes coloured by GEO Score, edges from the page that "
@@ -634,6 +648,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row.addWidget(self.btn_export_ai)
         row.addWidget(self.btn_llms_txt)
         row.addWidget(self.btn_diff)
+        row.addWidget(self.btn_redirect_map)
         row.addWidget(self.btn_graph)
         row.addWidget(self.btn_cluster_map)
         row.addWidget(self.btn_history)
@@ -658,6 +673,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.clicked.connect(self._export_ai)
         self.btn_llms_txt.clicked.connect(self._export_llms_txt)
         self.btn_diff.clicked.connect(self._show_diff)
+        self.btn_redirect_map.clicked.connect(self._show_redirect_map)
         self.btn_graph.clicked.connect(self._show_graph)
         self.btn_cluster_map.clicked.connect(self._show_cluster_map)
         self.btn_new_crawl.clicked.connect(self._show_setup)
@@ -682,6 +698,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.setEnabled(False)
         self.btn_llms_txt.setEnabled(False)
         self.btn_diff.setEnabled(False)
+        self.btn_redirect_map.setEnabled(False)
         self.btn_graph.setEnabled(False)
         self.btn_cluster_map.setEnabled(False)
         self.btn_new_crawl.setEnabled(False)
@@ -946,6 +963,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_export_ai.setEnabled(False if running else has_results)
         self.btn_llms_txt.setEnabled(False if running else has_results)
         self.btn_diff.setEnabled(False if running else (has_results and self._previous_report is not None))
+        self.btn_redirect_map.setEnabled(False if running else (has_results and self._previous_report is not None))
         self.btn_graph.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
         self.btn_cluster_map.setEnabled(False if running else (has_results and bool(self._crawl_store_path)))
         self.btn_new_crawl.setEnabled(not running)
@@ -1229,6 +1247,85 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         layout.addWidget(close)
         self._detail_windows.append(dialog)
         dialog.show()
+
+    def _show_redirect_map(self) -> None:
+        """v3 G13: suggest old→new redirects for a site migration by matching
+        pages that vanished or went 404/410 since the previous crawl against
+        this crawl's live, indexable pages."""
+        if self._latest_report is None or self._previous_report is None:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            previous_pages = self._redirect_map_pages_from_report(self._previous_report)
+            current_pages = self._redirect_map_pages_from_report(self._latest_report)
+            old_candidates, new_candidates = select_migration_candidates(previous_pages, current_pages)
+            redirect_map = build_redirect_map(old_candidates, new_candidates)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if not redirect_map.measured:
+            QtWidgets.QMessageBox.information(self, "Redirect map unavailable", redirect_map.reason)
+            return
+        dialog = self._build_redirect_map_dialog(redirect_map)
+        self._detail_windows.append(dialog)
+        dialog.show()
+
+    def _redirect_map_pages_from_report(self, report: SiteCrawlReport | None) -> list[PageRef]:
+        """(url, title, vector, status, indexability) for one crawl report,
+        read through the same run-bound repository the Topic map streams —
+        called once per side (previous crawl, current crawl)."""
+        if report is None:
+            return []
+        try:
+            return self._stream_redirect_page_refs(report)
+        except Exception:
+            return []
+
+    def _stream_redirect_page_refs(self, report: SiteCrawlReport) -> list[PageRef]:
+        collected: list[PageRef] = []
+        with open_report_repository(report) as repo:
+            for result in repo.stream_results():
+                collected.append(_page_ref_from_result(result))
+                if len(collected) >= _REDIRECT_MAP_MAX_SCANNED:
+                    break
+        return collected
+
+    def _build_redirect_map_dialog(self, redirect_map: RedirectMap) -> QtWidgets.QDialog:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Redirect map — migration suggestions")
+        dialog.resize(760, 560)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(_redirect_map_caption(redirect_map))
+        view = QtWidgets.QPlainTextEdit()
+        view.setReadOnly(True)
+        view.setPlainText(_redirect_map_to_text(redirect_map))
+        layout.addWidget(view, 1)
+        layout.addWidget(_redirect_map_legend())
+        layout.addLayout(self._redirect_map_controls(redirect_map, dialog))
+        return dialog
+
+    def _redirect_map_controls(self, redirect_map: RedirectMap, dialog: QtWidgets.QDialog) -> QtWidgets.QHBoxLayout:
+        row = QtWidgets.QHBoxLayout()
+        save = QtWidgets.QPushButton("Save CSV…")
+        save.clicked.connect(lambda: self._save_redirect_map_csv(redirect_map))
+        close = QtWidgets.QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        row.addWidget(save)
+        row.addStretch(1)
+        row.addWidget(close)
+        return row
+
+    def _save_redirect_map_csv(self, redirect_map: RedirectMap) -> None:
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save redirect map",
+            str(Path.home() / "silentfrog_redirect_map.csv"),
+            "CSV files (*.csv)",
+        )
+        if not file_path:
+            return
+        target = Path(file_path if file_path.lower().endswith(".csv") else f"{file_path}.csv")
+        _write_redirect_map_csv(redirect_map, target)
+        QtWidgets.QMessageBox.information(self, "Export completed", f"Redirect map saved to:\n{target}")
 
     def _load_payload_for_detail(self, url: str) -> CrawlPayload | None:
         """Reload a stripped payload on demand for the detail dialog, via the
@@ -1545,6 +1642,50 @@ def _cluster_legend() -> QtWidgets.QLabel:
     legend.setWordWrap(True)
     legend.setStyleSheet("font-size:11px; color:#9aa0a6;")
     return legend
+
+
+def _page_ref_from_result(result: SiteCrawlResult) -> PageRef:
+    return PageRef(
+        url=result.url,
+        title=result.title,
+        vector=_topic_vector(result.payload),
+        status=result.status,
+        indexability=result.indexability,
+    )
+
+
+def _redirect_map_caption(redirect_map: RedirectMap) -> QtWidgets.QLabel:
+    text = f"{len(redirect_map.suggestions)} suggestions · {len(redirect_map.unmatched)} unmatched old URLs"
+    return QtWidgets.QLabel(text)
+
+
+def _redirect_map_legend() -> QtWidgets.QLabel:
+    legend = QtWidgets.QLabel(
+        "Best-guess old→new mapping from topic-embedding similarity (or path + title text match when "
+        'vectors are unavailable). "Save CSV…" writes old_url,new_url rows — open it in Excel with '
+        '"Old URL"/"New URL" headers and run it through the existing Redirect checker to confirm each '
+        "redirect actually resolves before publishing."
+    )
+    legend.setWordWrap(True)
+    legend.setStyleSheet("font-size:11px; color:#9aa0a6;")
+    return legend
+
+
+def _redirect_map_to_text(redirect_map: RedirectMap) -> str:
+    lines = [f"{s.old_url} → {s.new_url}  ({s.score:.2f}, {s.method})" for s in redirect_map.suggestions]
+    if redirect_map.unmatched:
+        lines.append("")
+        lines.append("Unmatched old URLs (no candidate above threshold):")
+        lines.extend(redirect_map.unmatched)
+    return "\n".join(lines)
+
+
+def _write_redirect_map_csv(redirect_map: RedirectMap, target: Path) -> None:
+    with target.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["old_url", "new_url"])
+        for suggestion in redirect_map.suggestions:
+            writer.writerow([suggestion.old_url, suggestion.new_url])
 
 
 def _title_from_meta(rows: object) -> str:

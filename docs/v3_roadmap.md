@@ -39,7 +39,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > complete. Second queue (2026-07-21): G8 ✅ and G9 ✅ shipped — every
 > must-have is done — and the fake `ai_citations_perplexity` proxy is
 > retired (real coverage: `sov_perplexity`). G11 ✅, G10 ✅ and G7 ✅
-> shipped. Remaining: G13 → G14 → G15.
+> shipped. G13 ✅ shipped 2026-07-30. Remaining: G14 → G15.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G10 ✅ | B | **llms.txt generator/validator** | Sitebulb ships one | SHIPPED: validator = `access_llms_txt_conformance` check (present+malformed may warn; absent stays silent per §1.5) on widened discovery parsing; generator = `exporters/llms_txt.py` ("Generate llms.txt" button + `--out-llms-txt`), path-sectioned, sanitized, capped |
 | G11 ✅ | B | **AI-agent log analytics view** — classify 40+ AI crawlers in the existing log module | Peec server-log integration (€169/mo tier) | SHIPPED: taxonomy 20→48 signatures (30 ai_*) with vendor/kind, `classify_bot`, `CrawlBudgetReport.ai_agents` section, three additive AI findings in `log_analysis` (no_activity=info per §1.5), CLI summary. GUI log window stays M6-deferred |
 | G12 ✅ | A | **"Blocked from AI Search" rollup + AI Readiness Score** | Semrush AI widget, Rankscale score | DELIVERED VIA G1: AI-access checks flow into `ai_geo.*` issues, so `build_hints` groups them into "AI crawler blocked — N pages" site-wide. A separate AI-readiness number would duplicate the existing GEO Score — deliberately not added |
-| G13 | B | **Semantic redirect mapping** (embedding old→new URL matching for migrations) | SF v23 | Embeddings extra already in the tree |
+| G13 ✅ | B | **Semantic redirect mapping** (embedding old→new URL matching for migrations) | SF v23 | SHIPPED: `redirect_mapping.py` matches previous-crawl pages gone in the current crawl to indexable candidates (cosine on stored G5 vectors, difflib path+title fallback); "Map redirects" dialog + CSV feeding the existing Redirect checker |
 | G14 | A | **Uncrawlable link detection** (onclick/span/div pseudo-links) | SF v24 | Small crawl-layer check |
 | G15 | A | **Spelling/grammar** | SF classic | Low effort with local dictionaries; multilingual caveat |
 
