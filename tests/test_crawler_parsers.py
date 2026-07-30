@@ -146,6 +146,55 @@ def test_extract_links_labels_follow_and_host(base_url: str, soup: BeautifulSoup
     assert links[0][7] == "Main Heading"
 
 
+def test_extract_pseudo_links_flags_every_kind_and_skips_real_anchors() -> None:
+    html = """
+    <html>
+      <body>
+        <a>No href anchor</a>
+        <a href="#">Hash anchor</a>
+        <a href="javascript:void(0)">JS anchor</a>
+        <a href="https://example.com/real">Real link</a>
+        <div onclick="doThing()">Read more</div>
+        <span role="link" tabindex="0">Span link</span>
+      </body>
+    </html>
+    """
+    result = crawler.extract_pseudo_links(BeautifulSoup(html, "html.parser"))
+
+    assert result["total"] == 5
+    assert result["counts"] == {
+        "anchor_no_href": 1,
+        "anchor_hash": 1,
+        "anchor_javascript": 1,
+        "onclick_element": 1,
+        "role_link": 1,
+    }
+    assert result["samples"]["anchor_no_href"] == ['a no href "No href anchor"']
+    assert result["samples"]["anchor_hash"] == ['a href="#" "Hash anchor"']
+    assert result["samples"]["anchor_javascript"] == ['a href="javascript:void(0)" "JS anchor"']
+    assert result["samples"]["onclick_element"] == ['div onclick "Read more"']
+    assert result["samples"]["role_link"] == ['span role="link" "Span link"']
+    # A real <a href> must never be counted in any kind.
+    all_samples = [s for bucket in result["samples"].values() for s in bucket]
+    assert not any("Real link" in s for s in all_samples)
+
+
+def test_extract_pseudo_links_caps_samples_at_five_but_counts_all() -> None:
+    html = "<html><body>" + "".join(f'<div onclick="f()">Item {i}</div>' for i in range(7)) + "</body></html>"
+    result = crawler.extract_pseudo_links(BeautifulSoup(html, "html.parser"))
+
+    assert result["total"] == 7
+    assert result["counts"]["onclick_element"] == 7
+    assert len(result["samples"]["onclick_element"]) == 5
+
+
+def test_extract_pseudo_links_empty_page_has_zero_total() -> None:
+    html = '<html><body><a href="/ok">OK</a><p>No pseudo-links here.</p></body></html>'
+    result = crawler.extract_pseudo_links(BeautifulSoup(html, "html.parser"))
+
+    assert result == {"counts": {}, "samples": {}, "total": 0}
+
+
 def test_serp_preview_snapshot(soup: BeautifulSoup) -> None:
     preview = crawler._serp_preview("https://example.com/sample", soup)
     assert preview == {

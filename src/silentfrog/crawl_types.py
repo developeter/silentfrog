@@ -1316,6 +1316,9 @@ class CrawlPayload:
     # v3 G4 Stage 1: axe-core accessibility scan {measured, violations, counts}
     # (off by default; needs Playwright + DEEP profile).
     accessibility: dict[str, Any] = field(default_factory=dict)
+    # v3 G14: pseudo-links a crawler cannot follow {counts, samples, total}
+    # (always-on cheap local parse — H4).
+    pseudo_links: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_raw(cls, data: Mapping[str, Any]) -> CrawlPayload:
@@ -1372,6 +1375,7 @@ class CrawlPayload:
             "brand_mentions": _extra_group(data, "brand_mentions"),
             "ai_sov": _extra_group(data, "ai_sov"),
             "accessibility": _extra_group(data, "accessibility"),
+            "pseudo_links": _extra_group(data, "pseudo_links"),
         }
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1419,6 +1423,7 @@ class CrawlPayload:
             "brand_mentions": dict(self.brand_mentions),
             "ai_sov": dict(self.ai_sov),
             "accessibility": dict(self.accessibility),
+            "pseudo_links": dict(self.pseudo_links),
         }
 
     def __getitem__(self, key: str) -> Any:

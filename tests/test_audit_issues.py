@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from silentfrog.audit_issues import (  # type: ignore[reportMissingImports]
@@ -177,6 +178,39 @@ def test_issues_for_payload_extracts_prioritized_evidence() -> None:
     assert by_id["structured_data.eligibility_incomplete"].evidence[-1] == IssueEvidence("Missing fields", "offers")
     assert by_id["performance.image_weight"].recommendation == "Compress the hero image."
     assert by_id["ai_geo.answerability_intro"].confidence == "medium"
+
+
+def test_pseudo_link_issue_reports_counts_per_kind_in_reason() -> None:
+    url = "https://example.com/page"
+    payload = replace(
+        _payload(url),
+        pseudo_links={
+            "counts": {"anchor_hash": 2, "onclick_element": 1},
+            "samples": {"anchor_hash": ['a href="#" "Read more"']},
+            "total": 3,
+        },
+    )
+
+    issues = issues_for_payload(url, payload)
+    by_id = {issue.issue_id: issue for issue in issues}
+
+    assert "links.uncrawlable" in by_id
+    issue = by_id["links.uncrawlable"]
+    assert issue.category == IssueCategory.LINKS
+    assert issue.severity == IssueSeverity.WARNING
+    assert "anchor_hash: 2" in issue.reason
+    assert "onclick_element: 1" in issue.reason
+
+
+def test_pseudo_link_issue_absent_when_group_missing_or_total_zero() -> None:
+    url = "https://example.com/page"
+    # _payload() never sets pseudo_links (mirrors an old blob / absent group).
+    absent_ids = {issue.issue_id for issue in issues_for_payload(url, _payload(url))}
+    assert "links.uncrawlable" not in absent_ids
+
+    zeroed = replace(_payload(url), pseudo_links={"counts": {}, "samples": {}, "total": 0})
+    zero_ids = {issue.issue_id for issue in issues_for_payload(url, zeroed)}
+    assert "links.uncrawlable" not in zero_ids
 
 
 def test_severity_order_and_color_roles_are_conservative() -> None:

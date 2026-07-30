@@ -547,6 +547,91 @@ def _update_link_statuses(rows: list[list[str]], statuses: Any) -> None:
         row[5] = _link_status_note(code)
 
 
+# v3 G14: pseudo-links a crawler cannot follow — invisible to `_extract_links`
+# (which only sees `<a href>`), same blind spot `structure_signals._link_counts`
+# papers over by silently skipping "#"/"javascript:" hrefs. Sample descriptors
+# are capped short; this is a cheap always-on local parse (H4), no heuristics
+# beyond the five kinds below.
+_PSEUDO_LINK_MAX_SAMPLES = 5
+_PSEUDO_LINK_SAMPLE_TEXT_LEN = 40
+
+_ANCHOR_PSEUDO_TRIGGERS: dict[str, Any] = {
+    "anchor_no_href": lambda tag: "no href",
+    "anchor_hash": lambda tag: 'href="#"',
+    "anchor_javascript": lambda tag: f'href="{safe_attr(tag, "href") or ""}"',
+}
+
+
+def _classify_anchor_pseudo_link(tag: Tag) -> str | None:
+    if not tag.has_attr("href"):
+        return "anchor_no_href"
+    href = (safe_attr(tag, "href") or "").strip()
+    if href == "#":
+        return "anchor_hash"
+    if href.lower().startswith("javascript:"):
+        return "anchor_javascript"
+    return None
+
+
+def _pseudo_link_descriptor(tag: Tag, trigger: str) -> str:
+    text = normalize_text(" ".join(tag.stripped_strings))[:_PSEUDO_LINK_SAMPLE_TEXT_LEN]
+    return f'{tag.name} {trigger} "{text}"' if text else f"{tag.name} {trigger}"
+
+
+def _anchor_pseudo_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    for tag in soup.find_all("a"):
+        if not isinstance(tag, Tag):
+            continue
+        kind = _classify_anchor_pseudo_link(tag)
+        if kind is None:
+            continue
+        trigger = _ANCHOR_PSEUDO_TRIGGERS[kind](tag)
+        findings.append((kind, _pseudo_link_descriptor(tag, trigger)))
+    return findings
+
+
+def _onclick_pseudo_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    for tag in soup.find_all(True):
+        if not isinstance(tag, Tag) or tag.name == "a" or not tag.has_attr("onclick"):
+            continue
+        findings.append(("onclick_element", _pseudo_link_descriptor(tag, "onclick")))
+    return findings
+
+
+def _role_link_pseudo_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    for tag in soup.find_all(True):
+        if not isinstance(tag, Tag) or tag.name == "a":
+            continue
+        if (safe_attr(tag, "role") or "").strip().lower() != "link":
+            continue
+        if tag.find_parent("a") is not None:
+            continue
+        findings.append(("role_link", _pseudo_link_descriptor(tag, 'role="link"')))
+    return findings
+
+
+def extract_pseudo_links(soup: BeautifulSoup) -> dict[str, Any]:
+    """Pure parse-time scan for links a crawler cannot follow (SF v24).
+
+    Kinds: ``anchor_no_href``, ``anchor_hash``, ``anchor_javascript`` (all
+    `<a>` variants invisible to href-based link extraction), plus
+    ``onclick_element`` / ``role_link`` (non-`<a>` elements acting as links).
+    Shape: ``{"counts": {kind: int}, "samples": {kind: [str, ...]}, "total": int}``.
+    """
+    findings = [*_anchor_pseudo_links(soup), *_onclick_pseudo_links(soup), *_role_link_pseudo_links(soup)]
+    counts: dict[str, int] = {}
+    samples: dict[str, list[str]] = {}
+    for kind, descriptor in findings:
+        counts[kind] = counts.get(kind, 0) + 1
+        bucket = samples.setdefault(kind, [])
+        if len(bucket) < _PSEUDO_LINK_MAX_SAMPLES:
+            bucket.append(descriptor)
+    return {"counts": counts, "samples": samples, "total": len(findings)}
+
+
 def _meta_robots_value(headers: dict[str, str], soup: BeautifulSoup) -> str:
     header_value = headers.get("X-Robots-Tag", "")
     if header_value:

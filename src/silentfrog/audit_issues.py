@@ -80,6 +80,7 @@ def issues_for_payload(url: str, payload: CrawlPayload) -> list[AuditIssue]:
     issues.extend(_content_issues(url, payload))
     issues.extend(_image_issues(url, payload.images))
     issues.extend(_link_issues(url, payload.links))
+    issues.extend(_pseudo_link_issues(url, payload))
     issues.extend(_structured_data_issues(url, payload))
     issues.extend(_performance_issues(url, payload))
     issues.extend(_ai_visibility_issues(url, payload))
@@ -320,6 +321,34 @@ def _link_issues(url: str, rows: Iterable[Sequence[object]]) -> list[AuditIssue]
             )
         )
     return issues
+
+
+# v3 G14: uncrawlable pseudo-links (anchors without a working href, or
+# non-anchor elements acting as links) never surface as `_link_issues` rows —
+# `_extract_links` never sees them in the first place. One rollup issue per
+# page keeps the recap high-signal instead of one row per pseudo-link.
+def _pseudo_link_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:
+    total = payload.pseudo_links.get("total")
+    if not isinstance(total, int) or total <= 0:
+        return []
+    counts_raw = payload.pseudo_links.get("counts")
+    counts = counts_raw if isinstance(counts_raw, dict) else {}
+    breakdown = ", ".join(f"{kind}: {count}" for kind, count in sorted(counts.items()))
+    reason = f"Page has {total} pseudo-link(s) crawlers cannot follow"
+    reason += f" ({breakdown})." if breakdown else "."
+    evidence = [(kind, count) for kind, count in sorted(counts.items())] or [("Total", total)]
+    return [
+        _issue(
+            "links.uncrawlable",
+            IssueCategory.LINKS,
+            IssueSeverity.WARNING,
+            url,
+            reason,
+            "Use real <a href> links for crawlable navigation; keep JS handlers as an enhancement only.",
+            "Links",
+            evidence,
+        )
+    ]
 
 
 def _structured_data_issues(url: str, payload: CrawlPayload) -> list[AuditIssue]:

@@ -54,6 +54,7 @@ from .parsers_meta import (
     _serp_preview,
     _title_audit,
     _update_link_statuses,
+    extract_pseudo_links,
 )
 from .perf_metrics import _collect_performance_metrics
 from .render_diff import compute_render_diff, render_with_playwright
@@ -396,6 +397,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
 
     eeat = extract_eeat_signals(soup, structured_data, response.url)
     structure = extract_structure_signals(soup, response.url)
+    pseudo_links = extract_pseudo_links(soup)
     quality_payload = section_payload.get("content_quality", {})
     language_hint = str(quality_payload.get("language", "")) if isinstance(quality_payload, dict) else ""
     citation_content = extract_citation_content_signals(soup, language_hint)
@@ -427,6 +429,7 @@ async def _analyse(url: str, timeout: int, crawl_options: CrawlOptions) -> Crawl
         **section_payload,
         "eeat": eeat.to_dict(),
         "structure": structure.to_dict(),
+        "pseudo_links": pseudo_links,
         "citation_content": citation_content.to_dict(),
         "citation_advanced": citation_advanced.to_dict(),
         "seo_basics": seo_basics.to_dict(),

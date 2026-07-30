@@ -203,8 +203,15 @@ Shipped:
   button (enabled with a previous report, like Compare) + CSV export whose
   `old_url,new_url` shape feeds the existing Redirect checker.
 
-Next: G14 → G15. All must-haves (M1–M8) are ✅; the fake
-`ai_citations_perplexity` proxy is retired.
+- **Uncrawlable link detection (G14):** always-on parse-time
+  `pseudo_links` payload group — `<a>` without href, bare `#`,
+  `javascript:` hrefs (case-insensitive), non-anchor onclick elements,
+  `role="link"` outside `<a>` — with capped samples; one
+  `links.uncrawlable` warning issue when any are found. Real links and
+  in-page `#fragment` anchors are never flagged.
+
+Next: G15 spelling/grammar (last roadmap item). All must-haves (M1–M8)
+are ✅; the fake `ai_citations_perplexity` proxy is retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
