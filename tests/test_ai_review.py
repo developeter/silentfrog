@@ -131,6 +131,28 @@ def test_review_input_and_prompt_are_evidence_bound() -> None:
     assert "No concise answer near the top" in prompt
 
 
+def test_build_review_prompt_appends_custom_instructions_after_evidence() -> None:
+    request = build_review_input_from_payload("https://example.com/page", _payload())
+
+    prompt = build_review_prompt(request, "Is this page ready to publish?")
+
+    assert "Use only the evidence provided" in prompt
+    assert "meta.title_missing" in prompt
+    evidence_index = prompt.index("Use only the evidence provided")
+    custom_index = prompt.index("User question:")
+    assert evidence_index < custom_index  # custom block comes AFTER the evidence-bound instructions
+    assert "Is this page ready to publish?" in prompt
+
+
+def test_build_review_prompt_omits_custom_block_when_no_question_given() -> None:
+    request = build_review_input_from_payload("https://example.com/page", _payload())
+
+    prompt = build_review_prompt(request)
+
+    assert "User question:" not in prompt
+    assert prompt == build_review_prompt(request, "   ")  # blank input is treated the same as absent
+
+
 def test_site_report_review_input_uses_site_scope() -> None:
     failed = SiteCrawlResult.failed("https://example.com/fail", "403")
     report = SiteCrawlReport.from_results([failed], discovered_count=1)

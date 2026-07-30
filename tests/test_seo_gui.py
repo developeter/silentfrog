@@ -632,6 +632,17 @@ def test_seo_window_lighthouse_button_disabled_until_audit(qtbot) -> None:
     assert not hasattr(win, "_lighthouse_enabled")
 
 
+def test_seo_window_ai_review_button_disabled_until_audit(qtbot) -> None:
+    # v3 G7: the on-demand AI review button exists and is disabled before any
+    # audit (no payload yet). Clicking is the consent — it is NOT gated on an
+    # env var, so the button enables after any audit and normal scans never
+    # trigger a provider call (it is button-only, never in the crawl path).
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    assert win.btn_ai_review.text() == "AI review"
+    assert win.btn_ai_review.isEnabled() is False
+
+
 def test_seo_window_configures_scrollable_tabs(qtbot) -> None:
     win = WebpageSeoWindow()
     qtbot.addWidget(win)

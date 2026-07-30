@@ -316,6 +316,16 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._register_dimmed_button(self.btn_export_ai)
         self.btn_export_ai.clicked.connect(self._export_ai)
         controls.addWidget(self.btn_export_ai)
+        self.btn_ai_review = QtWidgets.QPushButton("AI review")
+        self.btn_ai_review.setEnabled(False)
+        self.btn_ai_review.setToolTip(
+            "Run a custom AI-assisted review over this page's collected evidence — slow, on-demand.\n"
+            "Nothing runs until you click; normal scans never trigger it. Local Ollama by default; "
+            "OpenAI/Anthropic with your own key (SILENTFROG_AI_* env or secrets.local.json)."
+        )
+        self._register_dimmed_button(self.btn_ai_review)
+        self.btn_ai_review.clicked.connect(self._on_ai_review)
+        controls.addWidget(self.btn_ai_review)
         self.btn_img_dl = QtWidgets.QPushButton("Analyze images")
         self.btn_img_dl.setEnabled(False)
         self._register_dimmed_button(self.btn_img_dl)
@@ -562,6 +572,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.recap_tab.reset()
         self.btn_export.setEnabled(False)
         self.btn_export_ai.setEnabled(False)
+        self.btn_ai_review.setEnabled(False)
         self.btn_img_dl.setEnabled(False)
         self.btn_lighthouse.setEnabled(False)
 
@@ -738,6 +749,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self._set_progress(100)
         self.btn_export.setEnabled(self._latest_payload is not None)
         self.btn_export_ai.setEnabled(self._latest_payload is not None)
+        self.btn_ai_review.setEnabled(self._latest_payload is not None)
         self.btn_img_dl.setEnabled(True)
         self.btn_lighthouse.setEnabled(self._latest_payload is not None)
         self._update_recap_from_payload()
@@ -861,6 +873,106 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             "Export completed",
             f"Wrote {names}. Paste the .md into a Claude chat for a prioritised fix list.",
         )
+
+    def _on_ai_review(self) -> None:
+        """v3 G7 — clicking is the consent (Lighthouse precedent): nothing
+        calls an AI provider until the user opens this dialog and presses
+        Run. Local Ollama is the default (no key needed); OpenAI/Anthropic
+        need a BYO key set via env or secrets.local.json (Settings UI for
+        these keys is later-scope)."""
+        if self._latest_payload is None:
+            return
+        from .ai_review_providers import client_for_config, default_config
+
+        config = default_config()
+        client = client_for_config(config)
+        if client is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "AI review not configured",
+                "No AI provider is available. Start a local Ollama server (the default, no "
+                "key needed), or set SILENTFROG_AI_PROVIDER/SILENTFROG_AI_API_KEY (or "
+                "secrets.local.json) for OpenAI/Anthropic.",
+            )
+            return
+        question = self._prompt_ai_review_question(config)
+        if question is None:
+            return
+        self._run_ai_review(client, question)
+
+    def _prompt_ai_review_question(self, config: Any) -> str | None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("AI review")
+        layout = QtWidgets.QVBoxLayout(dialog)
+        provider_line = QtWidgets.QLineEdit(f"{config.provider} / {config.model or 'default model'}")
+        provider_line.setReadOnly(True)
+        layout.addWidget(provider_line)
+        layout.addWidget(QtWidgets.QLabel("Optional question, answered using only this page's collected evidence:"))
+        question_edit = QtWidgets.QPlainTextEdit()
+        layout.addWidget(question_edit)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).setText("Run")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return question_edit.toPlainText()
+
+    def _run_ai_review(self, client: Any, custom_instructions: str) -> None:
+        """Off-UI-thread call, marshaled back like ``settings_dialog._on_sov_test``:
+        a daemon thread does the (possibly slow) provider call, then hands the
+        formatted text to the result dialog's QPlainTextEdit via a queued
+        ``setPlainText`` invocation — the dialog's own ``exec()`` keeps
+        processing queued events while it waits."""
+        import threading
+
+        from .ai_review import build_review_input_from_payload
+
+        payload = self._latest_payload
+        url = payload.serp.url or self.url_edit.currentText().strip()
+        request = build_review_input_from_payload(url, payload)
+        result_dialog, result_edit = self._build_ai_review_result_dialog()
+
+        def _target() -> None:
+            result = client.review(request, custom_instructions)
+            text = self._format_ai_review_result(result)
+            QtCore.QMetaObject.invokeMethod(
+                result_edit,
+                "setPlainText",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, text),
+            )
+
+        threading.Thread(target=_target, daemon=True).start()
+        result_dialog.exec()
+
+    def _build_ai_review_result_dialog(self) -> tuple[QtWidgets.QDialog, QtWidgets.QPlainTextEdit]:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("AI review result")
+        dialog.resize(560, 420)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        result_edit = QtWidgets.QPlainTextEdit("Running AI review...")
+        result_edit.setReadOnly(True)
+        layout.addWidget(result_edit)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        close_button = buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Close)
+        if close_button is not None:
+            close_button.clicked.connect(dialog.accept)
+        layout.addWidget(buttons)
+        return dialog, result_edit
+
+    @staticmethod
+    def _format_ai_review_result(result: Any) -> str:
+        lines = [result.raw_summary or "(no summary)"]
+        lines.extend(
+            f"{finding.severity.value} — {finding.area}: {finding.reason} → {finding.recommendation}"
+            for finding in result.findings
+        )
+        return "\n".join(lines)
 
 
 if __name__ == "__main__":

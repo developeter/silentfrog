@@ -328,6 +328,142 @@ def test_main_dispatches_to_aggregate(monkeypatch) -> None:
     assert called["args"].sitemap_url == "https://example.com/sitemap.xml"
 
 
+def test_build_parser_accepts_review_subcommand() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page", "--prompt", "Any blockers?"])
+    assert args.command == "review"
+    assert args.url == "https://example.com/page"
+    assert args.prompt == "Any blockers?"
+    assert args.out is None
+
+
+def test_build_parser_review_prompt_defaults_to_empty() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page"])
+    assert args.prompt == ""
+
+
+def _review_crawl_payload(url: str = "https://example.com/page"):
+    from silentfrog.crawl_types import CrawlPayload
+
+    return CrawlPayload.from_raw(
+        {
+            "meta": [["title", "Example", "0"], ["description", "An example page.", "0"]],
+            "headers": [],
+            "images": [],
+            "links": [],
+            "schema": {
+                "summary": {"total": 0, "by_type": {}, "errors": []},
+                "blocks": [],
+                "issues": [],
+                "eligibility": [],
+            },
+            "canonical": {"target": url, "self": True, "multiple": False, "status": "200"},
+            "redirect": {"chain": [url], "hops": 0, "final_status": "200", "loop": False},
+            "robots": {"*": [["Allow", "/"]]},
+            "meta_robots": "index, follow",
+            "hreflang": [],
+            "ai_crawl": [],
+            "serp": {"title": "", "description": "", "url": url, "site_name": "", "breadcrumb": "", "favicon": ""},
+            "serp_audit": {},
+            "keywords": [],
+            "content_quality": {"word_count": 400, "h1_count": 1, "verdict": "Strong"},
+            "ai_visibility": {
+                "summary": {"verdict": "Strong", "good_count": 1, "warning_count": 0, "critical_count": 0},
+                "checks": [],
+            },
+            "performance": {},
+            "social": {},
+        }
+    )
+
+
+class _StubReviewClient:
+    """Records the custom_instructions it was called with; never touches the
+    network — mirrors the injectable-client seam ``_review_cmd`` exposes."""
+
+    def __init__(self) -> None:
+        self.seen_custom_instructions: str | None = None
+
+    def review(self, request, custom_instructions: str = ""):
+        from silentfrog.ai_review import AiReviewFinding, AiReviewResult
+        from silentfrog.audit_issues import IssueSeverity
+
+        self.seen_custom_instructions = custom_instructions
+        return AiReviewResult(
+            provider="stub",
+            model="stub-model",
+            findings=(
+                AiReviewFinding(
+                    finding_id="answer_gap",
+                    severity=IssueSeverity.WARNING,
+                    area="Answerability",
+                    reason="No direct answer.",
+                    recommendation="Add one.",
+                    evidence=(),
+                ),
+            ),
+            raw_summary="One opportunity.",
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_cmd_prints_findings_json_with_injected_client(capsys) -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page", "--prompt", "Any blockers?"])
+
+    async def _stub_analyser(url: str):
+        return _review_crawl_payload(url)
+
+    client = _StubReviewClient()
+    exit_code = await cli._review_cmd(args, analyser=_stub_analyser, client=client)
+
+    assert exit_code == 0
+    assert client.seen_custom_instructions == "Any blockers?"
+    body = json.loads(capsys.readouterr().out)
+    assert body["provider"] == "stub"
+    assert body["summary"] == "One opportunity."
+    assert body["findings"][0]["issue_id"] == "ai_review.answer_gap"
+    assert body["findings"][0]["category"] == "ai_geo"
+
+
+@pytest.mark.asyncio
+async def test_review_cmd_writes_findings_to_out_file(tmp_path) -> None:
+    out = tmp_path / "findings.json"
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page", "--out", str(out)])
+
+    async def _stub_analyser(url: str):
+        return _review_crawl_payload(url)
+
+    exit_code = await cli._review_cmd(args, analyser=_stub_analyser, client=_StubReviewClient())
+
+    assert exit_code == 0
+    body = json.loads(out.read_text(encoding="utf-8"))
+    assert body["findings"][0]["reason"] == "No direct answer."
+
+
+@pytest.mark.asyncio
+async def test_review_cmd_no_client_exits_two_without_auditing(monkeypatch) -> None:
+    # An unrecognised configured provider (api key set, no/garbage provider
+    # name) resolves to no client. That must fail BEFORE auditing the page —
+    # auditing is unrelated cost the user shouldn't pay for a config error.
+    monkeypatch.setenv("SILENTFROG_AI_API_KEY", "some-key")
+    monkeypatch.delenv("SILENTFROG_AI_PROVIDER", raising=False)
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page"])
+    audited = []
+
+    async def _stub_analyser(url: str):
+        audited.append(url)
+        return _review_crawl_payload(url)
+
+    exit_code = await cli._review_cmd(args, analyser=_stub_analyser)
+
+    assert exit_code == 2
+    assert audited == []
+
+
 def test_print_encodable_survives_cp1252_stdout(monkeypatch) -> None:
     # Windows Task Scheduler redirects stdout through the console codepage;
     # a digest carrying non-cp1252 crawl content (non-Latin titles, arrows)

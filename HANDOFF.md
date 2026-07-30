@@ -186,7 +186,17 @@ Shipped:
   llms.txt from indexable crawled pages ("Generate llms.txt" button +
   `--out-llms-txt` on the crawl command).
 
-Next: G7 → G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
+- **Custom AI prompts (G7, completes PLAN.md's M7):**
+  `ai_review_providers.py` gives the AiReviewClient seam real plain-REST
+  clients — local Ollama by default (no key), OpenAI/Anthropic BYO key
+  (`SILENTFROG_AI_*` env or `secrets.local.json`; also
+  `SILENTFROG_ANTHROPIC_API_KEY`/`SILENTFROG_OLLAMA_URL`). Evidence-bound
+  prompt + optional user question; on-demand "AI review" button in the
+  Single Page window (click = consent, Lighthouse doctrine) and
+  `silentfrog-cli review <url> [--prompt ...]`. Settings-dialog key UI:
+  later-scope.
+
+Next: G13 → G14 → G15. All must-haves (M1–M8) are ✅; the fake
 `ai_citations_perplexity` proxy is retired.
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal

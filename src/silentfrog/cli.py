@@ -17,6 +17,7 @@ Subcommands:
     silentfrog-cli crawl <base_url> [--sitemap URL] [--url-list FILE]
                          [--limit N] [--timeout N] [--digest]
                          [--out-report report.html] [--out-llms-txt llms.txt]
+    silentfrog-cli review <url> [--prompt "..."] [--out findings.json]
 """
 
 from __future__ import annotations
@@ -82,6 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_export_parser(subparsers)
     _add_logs_parser(subparsers)
     _add_crawl_parser(subparsers)
+    _add_review_parser(subparsers)
     return parser
 
 
@@ -166,6 +168,25 @@ def _add_crawl_parser(subparsers: Any) -> None:
         type=Path,
         default=None,
         help="Also write a proposed llms.txt (v3 G10) to this path.",
+    )
+
+
+def _add_review_parser(subparsers: Any) -> None:
+    review = subparsers.add_parser(
+        "review",
+        help="Audit a page and run a custom AI-assisted review over the collected evidence (v3 G7).",
+    )
+    review.add_argument("url", help="The page URL to audit and review.")
+    review.add_argument(
+        "--prompt",
+        default="",
+        help="Optional custom question, answered using only the collected evidence.",
+    )
+    review.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Write the findings JSON to this path (default: stdout).",
     )
 
 
@@ -356,12 +377,60 @@ async def _deliver_digest(
         print(f"[crawl] {transport}: {'sent' if ok else 'failed'}", file=sys.stderr)
 
 
+async def _review_cmd(
+    args: argparse.Namespace,
+    analyser: Callable[[str], Any] | None = None,
+    client: Any | None = None,
+) -> int:
+    """Audit ``args.url`` then run a custom AI-assisted review over the
+    evidence (v3 G7). No client (Ollama not running, no BYO key configured)
+    exits 2 before auditing. A configured client that itself fails (bad key,
+    unreachable endpoint, garbage reply) still exits 0 — the AUDIT succeeded;
+    the provider error is reported inside the JSON's "summary" field instead
+    of being treated as a CLI failure."""
+    from .ai_review import build_review_input_from_payload, issues_for_ai_review
+    from .ai_review_providers import client_for_config, default_config
+    from .seo_crawler import analyse as default_analyser
+
+    active_client = client or client_for_config(default_config())
+    if active_client is None:
+        print(
+            "[review] no AI provider configured. Start a local Ollama server, or set "
+            "SILENTFROG_AI_PROVIDER/_API_KEY (or secrets.local.json) for OpenAI/Anthropic.",
+            file=sys.stderr,
+        )
+        return 2
+
+    analyser = analyser or default_analyser
+    payload = await analyser(args.url)
+    request = build_review_input_from_payload(args.url, payload)
+    # review() is sync (drives its own asyncio.run internally, see
+    # ai_review_providers); hop to a worker thread so it doesn't nest inside
+    # this coroutine's already-running event loop.
+    result = await asyncio.to_thread(active_client.review, request, args.prompt)
+    body = {
+        "provider": result.provider,
+        "model": result.model,
+        "summary": result.raw_summary,
+        "findings": [issue.to_dict() for issue in issues_for_ai_review(result)],
+    }
+    text = json.dumps(body, indent=2, ensure_ascii=False)
+    if args.out is None:
+        sys.stdout.write(text + "\n")
+    else:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(text + "\n", encoding="utf-8")
+        print(f"[review] wrote {args.out}")
+    return 0
+
+
 _DISPATCH: dict[str, Callable[..., Any]] = {
     "aggregate": _aggregate_cmd,
     "watch": _watch_cmd,
     "export": _export_cmd,
     "logs": _logs_cmd,
     "crawl": _crawl_cmd,
+    "review": _review_cmd,
 }
 
 

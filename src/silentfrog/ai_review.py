@@ -66,7 +66,7 @@ class AiReviewResult:
 
 
 class AiReviewClient(Protocol):
-    def review(self, request: AiReviewInput) -> AiReviewResult:
+    def review(self, request: AiReviewInput, custom_instructions: str = "") -> AiReviewResult:
         raise NotImplementedError
 
 
@@ -74,7 +74,7 @@ class AiReviewClient(Protocol):
 class StaticAiReviewClient:
     result: AiReviewResult
 
-    def review(self, request: AiReviewInput) -> AiReviewResult:
+    def review(self, request: AiReviewInput, custom_instructions: str = "") -> AiReviewResult:
         return self.result
 
 
@@ -107,21 +107,34 @@ def build_review_input_from_site_report(report: SiteCrawlReport) -> AiReviewInpu
     )
 
 
-def build_review_prompt(request: AiReviewInput) -> str:
+def build_review_prompt(request: AiReviewInput, custom_instructions: str = "") -> str:
     payload = {
         "target": request.target,
         "scope": request.scope,
         "context": [_evidence_payload(item) for item in request.context],
         "issues": [_issue_payload(issue) for issue in request.issues[:_PROMPT_ISSUE_LIMIT]],
     }
-    return "\n".join(
-        [
-            "Use only the evidence provided. Do not infer facts that are not in the payload.",
-            "Return JSON with a findings array. Each finding needs id, severity, area, reason, recommendation, confidence, and evidence.",
-            "Severity must be one of critical, warning, or info. Red/critical is only for blockers or high-confidence damage.",
-            json.dumps(payload, ensure_ascii=True, indent=2),
-        ]
-    )
+    lines = [
+        "Use only the evidence provided. Do not infer facts that are not in the payload.",
+        "Return JSON with a findings array. Each finding needs id, severity, area, reason, recommendation, confidence, and evidence.",
+        "Severity must be one of critical, warning, or info. Red/critical is only for blockers or high-confidence damage.",
+        json.dumps(payload, ensure_ascii=True, indent=2),
+    ]
+    lines.extend(_custom_instructions_block(custom_instructions))
+    return "\n".join(lines)
+
+
+def _custom_instructions_block(custom_instructions: str) -> list[str]:
+    """A clearly-delimited block appended AFTER the evidence-bound
+    instructions, so a user-supplied question can never look like part of
+    the evidence contract above it. Empty/blank input adds nothing."""
+    stripped = custom_instructions.strip()
+    if not stripped:
+        return []
+    return [
+        "User question: answer it using only the evidence above; do not invent facts not present there.",
+        stripped,
+    ]
 
 
 def parse_ai_review_response(
@@ -143,8 +156,8 @@ def parse_ai_review_response(
     )
 
 
-def run_ai_review(request: AiReviewInput, client: AiReviewClient) -> AiReviewResult:
-    return client.review(request)
+def run_ai_review(request: AiReviewInput, client: AiReviewClient, custom_instructions: str = "") -> AiReviewResult:
+    return client.review(request, custom_instructions)
 
 
 def issues_for_ai_review(result: AiReviewResult, *, default_scope: str = "page") -> list[AuditIssue]:

@@ -38,8 +38,8 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 > G4 ✅, G5 ✅ and G6 ✅ shipped 2026-07-21 — the first operator queue is
 > complete. Second queue (2026-07-21): G8 ✅ and G9 ✅ shipped — every
 > must-have is done — and the fake `ai_citations_perplexity` proxy is
-> retired (real coverage: `sov_perplexity`). G11 ✅ and G10 ✅ shipped.
-> Remaining: G7 → G13 → G14 → G15.
+> retired (real coverage: `sov_perplexity`). G11 ✅, G10 ✅ and G7 ✅
+> shipped. Remaining: G13 → G14 → G15.
 
 | # | Theme | Gap | Competitor precedent | Notes |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ recommendations; **B** — local-first AI-visibility measurement (BYO keys);
 | G4 ✅ | A | **Accessibility auditing** (axe-core, WCAG 2.1/2.2) | SF v21 ships Deque AXE (~90 rules) | SHIPPED: vendored axe-core 4.10.3 (MPL-2.0, `_vendor/`) injected via the render pool's new `inject_js`/`evaluate_js` seam; opt-in flag + DEEP profile; issues (impact→severity map) + Accessibility tab (Trust bucket) + Excel sheet |
 | G5 ✅ | C | **Interactive visualisations** — force-directed link graph, content-cluster map | SF force-directed/3D + v22 content clusters | SHIPPED: link graph was already live (V9); G5 added the Topic map — per-page embedding vectors retained in the payload (opt-in flag), `content_clusters.py` KMeans+PCA (rides the locked `[embeddings]` extra, zero new deps), cluster-scatter dialog with bounded store scan |
 | G6 ✅ | C | **MCP server** (`silentfrog-mcp serve`) | SF v24 shipped MCP | SHIPPED: hand-rolled stdlib JSON-RPC/stdio server (`mcp_server.py`, zero new deps — supersedes V18's planned `mcp` extra); tools: `audit_page` (STANDARD default, TLS/SSRF guards inherited), `list_crawls`, `get_crawl_summary` |
-| G7 | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | Local Ollama default keeps the local-first story |
+| G7 ✅ | B | **Custom AI prompts over crawl data** (Ollama/OpenAI/Anthropic BYO key, per-page) | SF v21 AI tab (100 prompts) | SHIPPED: `ai_review_providers.py` (plain REST clients on the M7 foundation, local Ollama default), evidence-bound prompt + optional user question, on-demand "AI review" button (click = consent) + `silentfrog-cli review` |
 | G8 ✅ | A | **Client-ready HTML/PDF report export** | Sitebulb's consultant staple | SHIPPED: `exporters/html_report.py` — one self-contained inline-CSS HTML (SVG charts, @media print, everything escaped), "Export HTML report" button; single-stream via new `issues_for_results` (Excel's double-stream not copied) |
 | G9 ✅ | C | **Scheduled runs + notifications with auto-diff digest** (email/webhook) | SF v24 auto-compare, Sitebulb alerts | SHIPPED: one-shot `silentfrog-cli crawl` (headless, store-backed, saved to history so the GUI reopens it) + history-diff digest; `alert_transport.py` webhook (aiohttp) + email (stdlib SMTP, keyring password); scheduling via OS Task Scheduler/cron — no daemon |
 | G10 ✅ | B | **llms.txt generator/validator** | Sitebulb ships one | SHIPPED: validator = `access_llms_txt_conformance` check (present+malformed may warn; absent stays silent per §1.5) on widened discovery parsing; generator = `exporters/llms_txt.py` ("Generate llms.txt" button + `--out-llms-txt`), path-sectioned, sanitized, capped |
