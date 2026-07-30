@@ -10,7 +10,12 @@ from pathlib import Path
 # `import silentfrog` resolves here — which also lets `--cov=src/silentfrog`
 # attribute real coverage to these files instead of reporting 0%.
 _SRC = Path(__file__).resolve().parent.parent / "src"
-if _SRC.is_dir() and str(_SRC) not in sys.path:
+if _SRC.is_dir():
+    # Force position 0: a stray editable install appends src/ *after*
+    # site-packages via a .pth, so a "not in sys.path" guard would no-op and
+    # silently hand the stale installed copy to the suite (coverage → 0%).
+    while str(_SRC) in sys.path:
+        sys.path.remove(str(_SRC))
     sys.path.insert(0, str(_SRC))
 
 # Let test modules import shared, non-fixture helpers by bare name (e.g.

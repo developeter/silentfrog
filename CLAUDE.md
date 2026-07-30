@@ -125,6 +125,15 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
   open, re-sync with `cp -r src/silentfrog/* .venv/.../silentfrog/` (a plain
   pip reinstall rolls back while `silentfrog.exe` is locked). App closed → a
   normal reinstall works.
+- **A plain `poetry install` breaks the canonical layout**: it reinstalls the
+  root project EDITABLE (a `silentfrog.pth` appears, appending `src` at the
+  TAIL of sys.path) and, combined with a stale copied-in site-packages
+  `silentfrog/` dir, made tests import the stale copy — full doctor failed
+  2/7 gates machine-wide (2026-07-30). Recover with `pip uninstall -y
+  silentfrog`, delete any leftover `site-packages/silentfrog/` dir, then
+  `pip install --no-deps .`. `tests/conftest.py` now forces `src` to
+  `sys.path[0]` so tests survive a stray editable install; prefer
+  `poetry install --no-root` + `pip install --no-deps .` going forward.
 - **Git commits:** a PreToolUse hook denies a bare `git commit`. Supply
   `-m`/`-F`/`--amend`. For multi-line messages on Windows, write the message
   to a scratch file and use `git commit -F` — PowerShell here-strings into
