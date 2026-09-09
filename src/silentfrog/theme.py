@@ -71,6 +71,7 @@ _LIGHT_TOKENS = {
 
 _QSS_TEMPLATE = string.Template("""
 QWidget            { background: $bg0; color: $text; }
+QLabel#hintLabel   { color: $text2; }
 QToolTip           { background: $bg2; color: $text; border: 1px solid $border_strong; padding: 4px 8px; }
 QPushButton        { background: $bg2; color: $text; border: 1px solid $border; padding: 6px 14px; border-radius: 6px; }
 QPushButton:hover  { background: $bg1; border-color: $border_strong; }

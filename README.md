@@ -12,7 +12,7 @@ It lets you quickly:
 
 | Capability | Status |
 | --- | --- |
-| Bulk-check redirects from Excel | ✅ |
+| Bulk-check redirects from Excel or CSV (per-hop chain, loop and wrong-target detection) | ✅ |
 | Single Page SEO Check (meta, headers, images, social, links, canonical, robots, hreflang, structured data, keywords, performance, SERP) | ✅ |
 | Site Crawl mode for sitemap/branch/URL-list audits | ✅ |
 | Single-page AI / GEO support (AI crawl audit + AI Visibility heuristics) | ✅ |
@@ -589,7 +589,7 @@ silentfrog/
 │   ├── schema_extractor.py # Structured data extraction and validators
 │   ├── perf_metrics.py   # Resource/weight/opportunity calculation
 │   ├── keywords.py       # Keyword tokenization and density analysis
-│   ├── redirect.py       # Redirect export / parsing helpers
+│   ├── redirect.py       # Bulk redirect chain walker (hops, loops, verdicts)
 │   ├── redirect_gui.py   # Massive redirect check window
 │   ├── nltk_data/        # Bundled tokenization/stopword resources
 │   ├── resources/        # Bundled stopword lists
