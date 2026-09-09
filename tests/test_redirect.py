@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.server
 import ipaddress
 import pathlib
 import socket
@@ -452,3 +453,60 @@ def test_a_half_recognised_header_is_refused_instead_of_guessed(tmp_path: pathli
 
     with pytest.raises(ValueError, match="no new-URL column"):
         _load_redirect_frame(path)
+
+
+def test_one_connection_serves_many_rows_on_the_same_host(tmp_path: pathlib.Path) -> None:
+    """Regression: skipping the landing-page body with ``stream=True`` and
+    closing the response left urllib3 unable to pool the socket, so every row
+    opened a fresh TCP+TLS connection. On a several-thousand-row single-host
+    migration that reads as an attack and the run gets dropped at the edge.
+
+    Runs against a real loopback server: requests_mock never touches a socket,
+    so only this can see connection reuse.
+    """
+    connections: list[int] = []
+    handled: list[str] = []
+    lock = threading.Lock()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def setup(self) -> None:
+            with lock:
+                connections.append(1)
+            super().setup()
+
+        def do_GET(self) -> None:
+            with lock:
+                handled.append(self.path)
+            body = b"<html>" + b"x" * 500 + b"</html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        rows = 20
+        urls = [f"http://127.0.0.1:{port}/p{index}" for index in range(rows)]
+        path = _sheet(tmp_path, pd.DataFrame({"Old URL": urls, "New URL": urls}))
+        _, result = _run(
+            path,
+            options=RedirectCheckOptions(timeout=5, max_workers=1, respect_robots=False, allow_private_network=True),
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert len(handled) == rows, "every row must still be checked"
+    assert result.summary.correct == rows
+    # One worker thread reusing its pooled connection: a couple of connections
+    # is normal, one per row is the defect.
+    assert len(connections) <= 3, f"expected pooled connections, got {len(connections)} for {rows} rows"

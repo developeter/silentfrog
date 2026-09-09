@@ -333,33 +333,24 @@ def _request(
     options: RedirectCheckOptions,
 ) -> tuple[requests.Response | None, str]:
     try:
+        # The body is read (no ``stream=True``) purely to keep the connection
+        # reusable: urllib3 can only return a socket to the pool once the
+        # response is fully consumed, and closing an unread streamed response
+        # discards it. Streaming here to skip the landing page cost one fresh
+        # TCP+TLS handshake PER ROW, which on a several-thousand-row
+        # single-host migration reads as an attack and gets the run dropped at
+        # the edge (ConnectTimeout). Bandwidth is the cheaper thing to spend.
         response = session.get(
             url,
             allow_redirects=False,
             timeout=options.timeout,
             verify=options.verify_ssl,
-            stream=True,
         )
     except requests.exceptions.SSLError:
         return None, ISSUE_SSL
     except requests.RequestException as exc:
         return None, f"{ISSUE_ERROR}: {exc.__class__.__name__}"
-    _release(response)
     return response, ISSUE_NONE
-
-
-def _release(response: requests.Response) -> None:
-    """Free the connection without paying for the landing page.
-
-    A redirect audit needs status lines and ``Location`` headers, not HTML. A
-    3xx body is a stub, so draining it returns the connection to the pool and
-    the whole chain rides one keep-alive connection; the final response is the
-    only large one, and there is nothing after it to reuse the connection for.
-    """
-    if response.is_redirect:
-        _ = response.content
-        return
-    response.close()
 
 
 def _follow_chain(
