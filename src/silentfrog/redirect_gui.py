@@ -5,7 +5,14 @@ from pathlib import Path
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from .redirect import RedirectCheckOptions, RedirectRunResult, RedirectSummary, check_redirects
+from .redirect import (
+    MAX_PARALLEL,
+    RedirectCheckOptions,
+    RedirectRunResult,
+    RedirectSummary,
+    RedirectThrottle,
+    check_redirects,
+)
 from .theme import window_icon
 
 # A migration sheet can hold tens of thousands of rows; the live log is a tail,
@@ -22,10 +29,11 @@ class RedirectWorker(QtCore.QThread):
     # and shadowing it hides the thread's own lifecycle notification.
     completed = QtCore.Signal(object)
 
-    def __init__(self, excel_path: str, options: RedirectCheckOptions) -> None:
+    def __init__(self, excel_path: str, options: RedirectCheckOptions, throttle: RedirectThrottle) -> None:
         super().__init__()
         self.excel_path = excel_path
         self.options = options
+        self.throttle = throttle
         self._pause = threading.Event()
         self._cancel = threading.Event()
 
@@ -50,6 +58,7 @@ class RedirectWorker(QtCore.QThread):
             result = check_redirects(
                 self.excel_path,
                 options=self.options,
+                throttle=self.throttle,
                 progress_callback=self._on_row,
                 pause_flag=self._pause,
                 cancel_flag=self._cancel,
@@ -114,10 +123,26 @@ class RedirectWindow(QtWidgets.QWidget):
         form.addRow("Timeout (s):", self.spin_timeout)
 
         self.spin_threads = QtWidgets.QSpinBox()
-        self.spin_threads.setRange(1, 20)
+        self.spin_threads.setRange(1, MAX_PARALLEL)
         self.spin_threads.setValue(5)
-        self.spin_threads.setToolTip("Rows checked in parallel. Lower it if the server rate-limits you.")
+        self.spin_threads.setToolTip(
+            "Rows checked in parallel. Adjustable DURING a run — lower it the\n"
+            "moment the log starts showing ConnectTimeout, without restarting."
+        )
+        self.spin_threads.valueChanged.connect(self._on_speed_changed)
         form.addRow("Threads:", self.spin_threads)
+
+        self.spin_delay = QtWidgets.QSpinBox()
+        self.spin_delay.setRange(0, 5000)
+        self.spin_delay.setSingleStep(50)
+        self.spin_delay.setValue(0)
+        self.spin_delay.setToolTip(
+            "Wait before each request, per worker. Also adjustable during a run.\n"
+            "0 is full speed; 200-500 ms is a polite pace for a large migration\n"
+            "on a single host that rate-limits."
+        )
+        self.spin_delay.valueChanged.connect(self._on_speed_changed)
+        form.addRow("Delay (ms):", self.spin_delay)
 
         self.chk_robots = QtWidgets.QCheckBox("Respect robots.txt")
         self.chk_robots.setChecked(True)
@@ -172,16 +197,26 @@ class RedirectWindow(QtWidgets.QWidget):
         self.btn_start.setEnabled(True)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
+        """Lock only what cannot change once a run has started. Threads and
+        Delay stay live: a bulk check discovers it is too fast only when the
+        target starts refusing it, and restarting a several-thousand-row audit
+        to change a number is the worst possible answer."""
         for widget in (
             self.btn_file,
             self.spin_timeout,
-            self.spin_threads,
             self.chk_robots,
             self.chk_ssl,
             self.chk_private,
         ):
             widget.setEnabled(enabled)
         self.btn_start.setEnabled(enabled and bool(self.excel_path))
+
+    def _on_speed_changed(self) -> None:
+        """Push Threads/Delay into a run already in flight."""
+        if self.worker is None or not self.worker.isRunning():
+            return
+        self.worker.throttle.set_parallel(self.spin_threads.value())
+        self.worker.throttle.set_delay_ms(self.spin_delay.value())
 
     def _current_options(self) -> RedirectCheckOptions:
         return RedirectCheckOptions(
@@ -200,7 +235,8 @@ class RedirectWindow(QtWidgets.QWidget):
         self.bar.setValue(0)
         self.txt_log.clear()
 
-        self.worker = RedirectWorker(self.excel_path, self._current_options())
+        throttle = RedirectThrottle(self.spin_threads.value(), self.spin_delay.value())
+        self.worker = RedirectWorker(self.excel_path, self._current_options(), throttle)
         self.worker.progress.connect(self.bar.setValue)
         self.worker.log.connect(self.txt_log.appendPlainText)
         self.worker.failed.connect(self._on_failure)

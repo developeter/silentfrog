@@ -5,6 +5,7 @@ import ipaddress
 import pathlib
 import socket
 import threading
+import time
 
 import pandas as pd
 import pytest
@@ -19,6 +20,7 @@ from silentfrog.redirect import (  # type: ignore[reportMissingImports]
     ISSUE_ROBOTS,
     ISSUE_WRONG_TARGET,
     RedirectCheckOptions,
+    RedirectThrottle,
     _comparable_url,
     _load_redirect_frame,
     check_redirects,
@@ -510,3 +512,52 @@ def test_one_connection_serves_many_rows_on_the_same_host(tmp_path: pathlib.Path
     # One worker thread reusing its pooled connection: a couple of connections
     # is normal, one per row is the defect.
     assert len(connections) <= 3, f"expected pooled connections, got {len(connections)} for {rows} rows"
+
+
+def test_throttle_limits_concurrency_and_can_be_raised_mid_run() -> None:
+    """The Threads box must retune a run already in flight, not just the next
+    one: a bulk check finds out it is too fast only once the target starts
+    refusing it."""
+    throttle = RedirectThrottle(parallel=2, max_parallel=8)
+    peak = 0
+    active = 0
+    lock = threading.Lock()
+    released = threading.Event()
+
+    def hold() -> None:
+        nonlocal peak, active
+        with throttle.slot():
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            released.wait(2.0)
+            with lock:
+                active -= 1
+
+    workers = [threading.Thread(target=hold, daemon=True) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    time.sleep(0.3)
+    assert peak <= 2, f"limit of 2 not enforced, saw {peak} concurrent"
+
+    throttle.set_parallel(6)
+    time.sleep(0.4)
+    raised = peak
+    released.set()
+    for worker in workers:
+        worker.join(3.0)
+
+    assert raised > 2, "raising the limit mid-run must wake threads already queued"
+    assert raised <= 6
+
+
+def test_throttle_delay_is_applied_before_each_request() -> None:
+    throttle = RedirectThrottle(parallel=1, delay_ms=120)
+    started = time.monotonic()
+    throttle.pause_before_request()
+    assert time.monotonic() - started >= 0.1
+
+    throttle.set_delay_ms(0)
+    started = time.monotonic()
+    throttle.pause_before_request()
+    assert time.monotonic() - started < 0.05

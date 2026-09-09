@@ -126,6 +126,10 @@ QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid $border_stro
                        border-radius: 4px; background: $bg1; }
 QCheckBox::indicator:checked { background: $accent; border-color: $accent; }
 QCheckBox::indicator:disabled { background: $bg0; border-color: $border; }
+/* Must follow :disabled — equal specificity, so the later rule wins. Without
+   it a checked box that is merely disabled paints exactly like an unchecked
+   one, and a running job looks like it dropped the settings it was given. */
+QCheckBox::indicator:checked:disabled { background: $accent; border-color: $accent; }
 QRadioButton                       { spacing: 8px; padding: 4px; }
 QRadioButton::indicator            { width: 16px; height: 16px; border-radius: 8px; }
 QRadioButton::indicator:unchecked  { background: $bg1; border: 1px solid $border_strong; }

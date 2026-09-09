@@ -15,8 +15,9 @@ import re
 import socket
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
@@ -35,6 +36,7 @@ __all__ = [
     "RedirectOutcome",
     "RedirectRunResult",
     "RedirectSummary",
+    "RedirectThrottle",
     "check_redirects",
 ]
 
@@ -83,6 +85,10 @@ _RESERVED_ESCAPE = re.compile(r"(%2[Ff]|%3[Ff]|%23|%25|%26|%3[Dd])")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _MAX_LOG_URL = 120
 _MAX_OUTPUT_ATTEMPTS = 20
+# Worker-pool ceiling. The pool is built once at this size and real
+# concurrency is gated by RedirectThrottle, so Threads stays adjustable
+# mid-run; it matches the GUI spinbox maximum.
+MAX_PARALLEL = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +153,65 @@ class RedirectRunResult:
     output_path: Path
     summary: RedirectSummary
     cancelled: bool
+
+
+class RedirectThrottle:
+    """Live speed control: how many rows run at once, and how long to wait
+    before each request.
+
+    Both are adjustable WHILE the run is in flight. A bulk redirect check only
+    finds out it is too fast once the target starts refusing it, and by then
+    restarting a several-thousand-row audit to change a number is the worst
+    possible answer — so the knobs stay live instead of being frozen at Start.
+    The worker pool is sized once to ``max_parallel``; concurrency below that
+    is enforced here rather than by resizing the pool, which is not something
+    ThreadPoolExecutor supports.
+    """
+
+    def __init__(self, parallel: int, delay_ms: int = 0, max_parallel: int = MAX_PARALLEL) -> None:
+        self._max_parallel = max(1, max_parallel)
+        self._parallel = self._clamped(parallel)
+        self._delay = max(0, delay_ms) / 1000
+        self._active = 0
+        self._condition = threading.Condition()
+
+    def _clamped(self, value: int) -> int:
+        return max(1, min(int(value), self._max_parallel))
+
+    @property
+    def max_parallel(self) -> int:
+        return self._max_parallel
+
+    def set_parallel(self, value: int) -> None:
+        with self._condition:
+            self._parallel = self._clamped(value)
+            # Raising the limit must wake threads already queued, or the new
+            # value would only take effect as running rows happen to finish.
+            self._condition.notify_all()
+
+    def set_delay_ms(self, value: int) -> None:
+        with self._condition:
+            self._delay = max(0, int(value)) / 1000
+
+    def pause_before_request(self) -> None:
+        with self._condition:
+            delay = self._delay
+        if delay:
+            time.sleep(delay)
+
+    @contextmanager
+    def slot(self) -> Iterator[None]:
+        """Hold one of the live concurrency slots for the duration of a row."""
+        with self._condition:
+            while self._active >= self._parallel:
+                self._condition.wait(0.2)
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify()
 
 
 # --------------------------------------------------------------------------- #
@@ -358,6 +423,7 @@ def _follow_chain(
     start_url: str,
     options: RedirectCheckOptions,
     robots: _RobotsCache,
+    throttle: RedirectThrottle | None = None,
 ) -> RedirectOutcome:
     hops: list[RedirectHop] = []
     seen: set[str] = set()
@@ -366,6 +432,8 @@ def _follow_chain(
         blocked = _blocked_reason(session, url, options, robots)
         if blocked:
             return _outcome(hops, url, blocked)
+        if throttle is not None:
+            throttle.pause_before_request()
         response, failure = _request(session, url, options)
         if response is None:
             return _outcome(hops, url, failure)
@@ -631,6 +699,7 @@ class _RunContext:
     options: RedirectCheckOptions
     pool: _SessionPool
     robots: _RobotsCache
+    throttle: RedirectThrottle
     pause_flag: threading.Event | None = None
     cancel_flag: threading.Event | None = None
 
@@ -649,8 +718,9 @@ def _wait_while_paused(context: _RunContext) -> None:
 
 def _run_redirect_job(job: _RedirectJob, context: _RunContext) -> _RedirectRowResult:
     _wait_while_paused(context)
-    session = context.pool.session()
-    outcome = _follow_chain(session, job.old_url, context.options, context.robots)
+    with context.throttle.slot():
+        session = context.pool.session()
+        outcome = _follow_chain(session, job.old_url, context.options, context.robots, context.throttle)
     return _row_result(job, outcome, _verdict(outcome, job.new_url))
 
 
@@ -696,7 +766,7 @@ def _execute(
     context: _RunContext,
     progress_callback: ProgressCallback | None,
 ) -> list[_RedirectRowResult]:
-    with ThreadPoolExecutor(max_workers=context.options.max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=context.throttle.max_parallel) as executor:
         futures = {executor.submit(_safe_run, job, context): job for job in jobs}
         results = _drain(futures, df, context, progress_callback)
         for future in futures:
@@ -708,6 +778,7 @@ def check_redirects(
     excel_path: str | Path,
     *,
     options: RedirectCheckOptions | None = None,
+    throttle: RedirectThrottle | None = None,
     progress_callback: ProgressCallback | None = None,
     pause_flag: threading.Event | None = None,
     cancel_flag: threading.Event | None = None,
@@ -726,6 +797,7 @@ def check_redirects(
         options=run_options,
         pool=_SessionPool(run_options.verify_ssl),
         robots=_RobotsCache(run_options.timeout, run_options.verify_ssl),
+        throttle=throttle or RedirectThrottle(run_options.max_workers, max_parallel=run_options.max_workers),
         pause_flag=pause_flag,
         cancel_flag=cancel_flag,
     )

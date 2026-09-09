@@ -8,6 +8,7 @@ import pytest
 from silentfrog.redirect import (  # type: ignore[reportMissingImports]
     RedirectRunResult,
     RedirectSummary,
+    RedirectThrottle,
 )
 from silentfrog.redirect_gui import RedirectWindow, _summary_text  # type: ignore[reportMissingImports]
 
@@ -93,3 +94,56 @@ def test_log_is_capped_so_a_huge_sheet_cannot_grow_it_without_bound(qtbot) -> No
 )
 def test_summary_text_says_what_happened(summary: RedirectSummary, cancelled: bool, expected: str) -> None:
     assert expected in _summary_text(summary, cancelled)
+
+
+def test_threads_and_delay_stay_editable_during_a_run(qtbot) -> None:
+    """Regression: every option was locked at Start, so the only way to slow a
+    run that was being rate-limited was to kill it and lose the progress."""
+    window = _window(qtbot)
+    window._set_controls_enabled(False)
+
+    assert window.spin_threads.isEnabled(), "Threads must stay adjustable mid-run"
+    assert window.spin_delay.isEnabled(), "Delay must stay adjustable mid-run"
+    assert window.spin_timeout.isEnabled() is False
+    assert window.chk_robots.isEnabled() is False
+
+
+def test_speed_changes_reach_a_running_worker(qtbot, tmp_path: pathlib.Path) -> None:
+    window = _window(qtbot)
+    throttle = RedirectThrottle(parallel=5, delay_ms=0)
+
+    class _RunningWorker:
+        throttle = None
+
+        def isRunning(self) -> bool:
+            return True
+
+    worker = _RunningWorker()
+    worker.throttle = throttle
+    window.worker = worker
+
+    window.spin_threads.setValue(2)
+    window.spin_delay.setValue(300)
+
+    assert throttle._parallel == 2
+    assert throttle._delay == 0.3
+
+
+def test_speed_changes_are_harmless_with_no_run_in_flight(qtbot) -> None:
+    window = _window(qtbot)
+    window.spin_threads.setValue(3)
+    window.spin_delay.setValue(100)
+    assert window.worker is None
+
+
+def test_checked_but_disabled_checkbox_still_paints_as_checked() -> None:
+    """Regression: the theme's :disabled rule followed :checked with equal
+    specificity, so disabling the controls at Start made every ticked option
+    render as unticked — the run looked like it had dropped its settings."""
+    from silentfrog.theme import DARK_STYLESHEET, LIGHT_STYLESHEET  # type: ignore[reportMissingImports]
+
+    for sheet in (DARK_STYLESHEET, LIGHT_STYLESHEET):
+        checked = sheet.index("QCheckBox::indicator:checked {")
+        disabled = sheet.index("QCheckBox::indicator:disabled {")
+        both = sheet.index("QCheckBox::indicator:checked:disabled {")
+        assert both > disabled > checked, "the checked+disabled rule must come last to win"
