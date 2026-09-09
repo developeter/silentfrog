@@ -63,6 +63,9 @@ _BOT_SIGNATURES: tuple[BotSignature, ...] = (
     BotSignature("google-extended", "Google-Extended", "Google", _KIND_AI_TRAINING),
     BotSignature("googleother", "GoogleOther", "Google", _KIND_SEARCH),
     BotSignature("storebot-google", "Storebot-Google", "Google", _KIND_SEARCH),
+    BotSignature("adsbot-google", "AdsBot-Google", "Google", _KIND_OTHER),
+    BotSignature("mediapartners-google", "Mediapartners-Google", "Google", _KIND_OTHER),
+    BotSignature("apis-google", "APIs-Google", "Google", _KIND_OTHER),
     BotSignature("bingbot", "Bingbot", "Microsoft", _KIND_SEARCH),
     BotSignature("gptbot", "GPTBot", "OpenAI", _KIND_AI_TRAINING),
     BotSignature("oai-searchbot", "OAI-SearchBot", "OpenAI", _KIND_AI_SEARCH),
@@ -133,4 +136,38 @@ def classify_bot(user_agent: str) -> BotClassification | None:
     return BotClassification(label=match.label, vendor=match.vendor, kind=match.kind)
 
 
-__all__ = ["AI_KINDS", "BotClassification", "BotSignature", "classify_bot", "identify_bot"]
+# Googlebot proper + its named variants, plus the three quality/ads/API
+# crawlers Google also operates — the "is this Google" taxonomy that
+# log_analysis's crawl-budget findings key off (M6; formerly a private
+# substring token list duplicated in log_analysis.py). Deliberately narrower
+# than "every Google-vendor signature": Google-Extended, GoogleOther,
+# Storebot-Google, and Google-CloudVertexBot are separate Google products, not
+# Googlebot variants, and were never part of this taxonomy.
+_GOOGLE_CRAWLER_LABELS: frozenset[str] = frozenset(
+    {
+        "Googlebot",
+        "Googlebot-Image",
+        "Googlebot-News",
+        "AdsBot-Google",
+        "Mediapartners-Google",
+        "APIs-Google",
+    }
+)
+
+
+def is_google_crawler(user_agent: str) -> bool:
+    """True if the UA is Googlebot or one of its named variants (image/news/
+    ads/mediapartners/APIs) — the shared replacement for the old per-module
+    ``is_googlebot`` substring check."""
+    classification = classify_bot(user_agent)
+    return classification is not None and classification.label in _GOOGLE_CRAWLER_LABELS
+
+
+__all__ = [
+    "AI_KINDS",
+    "BotClassification",
+    "BotSignature",
+    "classify_bot",
+    "identify_bot",
+    "is_google_crawler",
+]

@@ -10,6 +10,7 @@ from silentfrog.log_analysis import (  # type: ignore[reportMissingImports]
     issues_for_log_report,
     parse_log_line,
 )
+from silentfrog.logs import is_google_crawler
 
 _GOOGLEBOT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 _USER = "Mozilla/5.0"
@@ -24,12 +25,13 @@ def test_parse_log_line_reads_common_combined_log_fields() -> None:
     entry = parse_log_line(_line("/design/table/?color=blue", 200))
 
     assert entry is not None
-    assert entry.remote_addr == "66.249.66.1"
+    assert entry.ip == "66.249.66.1"
     assert entry.method == "GET"
-    assert entry.path == "/design/table/?color=blue"
+    assert entry.path == "/design/table/"  # query dropped (M6: shared logs.LogEntry)
+    assert entry.target == "/design/table/?color=blue"  # query preserved here
     assert entry.status == 200
-    assert entry.bytes_sent == 123
-    assert entry.is_googlebot is True
+    assert entry.bytes == 123
+    assert is_google_crawler(entry.user_agent) is True
 
 
 def test_analyse_log_entries_reports_seo_bot_findings() -> None:

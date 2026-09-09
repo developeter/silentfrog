@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -8,14 +7,10 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 from .audit_issues import AuditIssue, IssueCategory, IssueEvidence, IssueSeverity, dedupe_issues
-from .logs import AI_KINDS, classify_bot
+from .logs import AI_KINDS, LogEntry, classify_bot, is_google_crawler
+from .logs import parse_log_line as _parse_log_line
+from .logs import parse_log_text as _parse_log_text
 
-_COMBINED_LOG_RE = re.compile(
-    r"^(?P<remote>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "
-    r'"(?P<request>[^"]*)" (?P<status>\d{3}|-) (?P<size>\S+)'
-    r'(?: "(?P<referer>[^"]*)" "(?P<agent>[^"]*)")?'
-)
-_BOT_TOKENS = ("googlebot", "adsbot-google", "mediapartners-google", "apis-google")
 _WASTE_EXTENSIONS = (
     ".css",
     ".js",
@@ -32,24 +27,6 @@ _WASTE_EXTENSIONS = (
     ".map",
 )
 _WASTE_PATH_PARTS = ("/wp-admin/", "/cart", "/checkout", "/search")
-
-
-@dataclass(frozen=True, slots=True)
-class LogEntry:
-    remote_addr: str
-    timestamp: str
-    method: str
-    target: str
-    path: str
-    status: int
-    bytes_sent: int
-    referer: str
-    user_agent: str
-
-    @property
-    def is_googlebot(self) -> bool:
-        agent = self.user_agent.lower()
-        return any(token in agent for token in _BOT_TOKENS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,30 +58,14 @@ class LogAnalysisReport:
 
 
 def parse_log_line(line: str) -> LogEntry | None:
-    match = _COMBINED_LOG_RE.match(line.strip())
-    if not match:
-        return None
-    method, target = _request_parts(match.group("request"))
-    return LogEntry(
-        remote_addr=match.group("remote"),
-        timestamp=match.group("time"),
-        method=method,
-        target=target,
-        path=_target_path(target),
-        status=_to_int(match.group("status")),
-        bytes_sent=_to_int(match.group("size")),
-        referer=_clean_missing(match.group("referer")),
-        user_agent=_clean_missing(match.group("agent")),
-    )
+    """Delegate to the shared logs.parsers regex (CLF/Combined/JSON) — this
+    module no longer keeps its own line format (M6)."""
+    return _parse_log_line(line)
 
 
 def parse_log_file(path: Path) -> list[LogEntry]:
-    rows: list[LogEntry] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        entry = parse_log_line(line)
-        if entry:
-            rows.append(entry)
-    return rows
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return _parse_log_text(text)
 
 
 def analyse_log_entries(
@@ -117,7 +78,7 @@ def analyse_log_entries(
     return LogAnalysisReport(
         entries=rows,
         findings=tuple(findings),
-        googlebot_hits=sum(1 for entry in rows if entry.is_googlebot),
+        googlebot_hits=sum(1 for entry in rows if is_google_crawler(entry.user_agent)),
         total_requests=len(rows),
     )
 
@@ -131,7 +92,7 @@ def issues_for_log_report(report: LogAnalysisReport) -> list[AuditIssue]:
 
 
 def _build_findings(entries: tuple[LogEntry, ...], config: LogAnalysisConfig) -> list[LogFinding]:
-    bot_entries = tuple(entry for entry in entries if entry.is_googlebot)
+    bot_entries = tuple(entry for entry in entries if is_google_crawler(entry.user_agent))
     ai_entries = _ai_agent_entries(entries)
     findings: list[LogFinding] = []
     findings.extend(_googlebot_presence_findings(bot_entries))
@@ -366,13 +327,6 @@ def _finding(
     )
 
 
-def _request_parts(request: str) -> tuple[str, str]:
-    parts = request.split()
-    if len(parts) < 2:
-        return "", ""
-    return parts[0].upper(), parts[1]
-
-
 def _target_path(target: str) -> str:
     if not target or target == "-":
         return ""
@@ -395,8 +349,10 @@ def _is_page_candidate(entry: LogEntry) -> bool:
 
 
 def _is_crawl_waste(entry: LogEntry) -> bool:
-    path = entry.path.lower()
-    return "?" in path or _has_waste_extension(path) or any(part in path for part in _WASTE_PATH_PARTS)
+    # Uses the query-carrying ``target`` (not the query-stripped ``path``): a
+    # bare "?" with no other waste signal is itself the waste signal here.
+    target = entry.target.lower()
+    return "?" in target or _has_waste_extension(target) or any(part in target for part in _WASTE_PATH_PARTS)
 
 
 def _has_waste_extension(path: str) -> bool:
@@ -418,7 +374,10 @@ def _status_evidence(entries: Iterable[LogEntry]) -> tuple[tuple[str, object], .
 
 
 def _top_path(entries: Iterable[LogEntry]) -> str:
-    counts = Counter(entry.path for entry in entries if entry.path)
+    # ``target`` (query included) so a reported/linked URL keeps its query
+    # string, matching pre-M6 behaviour where this module's own path field
+    # carried the query too.
+    counts = Counter(entry.target for entry in entries if entry.target)
     return counts.most_common(1)[0][0] if counts else ""
 
 
@@ -433,17 +392,6 @@ def _absolute_url(path: str, config: LogAnalysisConfig) -> str:
 
 def _join_sample(values: Iterable[str], limit: int = 3) -> str:
     return ", ".join(list(values)[:limit]) or "-"
-
-
-def _clean_missing(value: str | None) -> str:
-    return "" if value in {None, "-"} else str(value)
-
-
-def _to_int(value: object) -> int:
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 __all__ = [

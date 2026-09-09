@@ -30,6 +30,13 @@ class LogEntry:
     status: int
     user_agent: str = ""
     bytes: int = 0
+    # Add-only (M6): the raw request target INCLUDING its query string (unlike
+    # ``path``, which is deliberately query-stripped) and the referer header —
+    # both needed by log_analysis's finding logic once it stopped keeping its
+    # own parallel LogEntry. Appended after the original fields so positional
+    # construction in pre-existing callers keeps working.
+    target: str = ""
+    referer: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -40,6 +47,8 @@ class LogEntry:
             "status": self.status,
             "user_agent": self.user_agent,
             "bytes": self.bytes,
+            "target": self.target,
+            "referer": self.referer,
         }
 
 
@@ -70,6 +79,8 @@ def _parse_clf(line: str) -> LogEntry | None:
         status=_to_int(data["status"]),
         user_agent=data.get("ua") or "",
         bytes=_to_int(data["bytes"]) if data["bytes"] != "-" else 0,
+        target=data["path"],
+        referer=data.get("ref") or "",
     )
 
 
@@ -77,6 +88,7 @@ _JSON_REQUEST_KEYS = ("request", "request_line")
 _JSON_UA_KEYS = ("http_user_agent", "user_agent", "agent")
 _JSON_IP_KEYS = ("remote_addr", "ip", "client_ip")
 _JSON_BYTE_KEYS = ("body_bytes_sent", "bytes", "bytes_sent")
+_JSON_REFERER_KEYS = ("http_referer", "referer", "referrer")
 
 
 def _first(data: dict[str, object], keys: tuple[str, ...]) -> str:
@@ -95,19 +107,21 @@ def _parse_json(line: str) -> LogEntry | None:
         return None
     request = _first(data, _JSON_REQUEST_KEYS)
     method = ""
-    path = _first(data, ("uri", "path", "request_uri"))
+    target = _first(data, ("uri", "path", "request_uri"))
     if request:
         parts = request.split()
         method = parts[0] if parts else ""
-        path = parts[1] if len(parts) > 1 else path
+        target = parts[1] if len(parts) > 1 else target
     return LogEntry(
         ip=_first(data, _JSON_IP_KEYS),
         timestamp=_first(data, ("time", "time_local", "timestamp", "@timestamp")),
         method=method or _first(data, ("method", "request_method")),
-        path=_path_only(path) if path else "",
+        path=_path_only(target) if target else "",
         status=_to_int(data.get("status") or data.get("response_status")),
         user_agent=_first(data, _JSON_UA_KEYS),
         bytes=_to_int(_first(data, _JSON_BYTE_KEYS) or 0),
+        target=target,
+        referer=_first(data, _JSON_REFERER_KEYS),
     )
 
 

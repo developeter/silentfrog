@@ -26,9 +26,12 @@ import argparse
 import asyncio
 import json
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .logs import LogEntry
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -255,12 +258,14 @@ async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | N
     from .logs import analyse_entries, parse_log_text
 
     text = args.path.read_text(encoding="utf-8", errors="ignore")
-    report = analyse_entries(parse_log_text(text))
+    entries = parse_log_text(text)
+    report = analyse_entries(entries)
     output = report.to_dict()
-    # M6: also feed the shared issue model — the crawl-budget report above stays,
-    # and the prioritized log findings (Googlebot blocked/redirected, crawl waste,
-    # orphans, important-not-hit) are added as AuditIssues under "issues".
-    issues = _log_issues(args)
+    # M6: also feed the shared issue model over the SAME parsed entries — the
+    # crawl-budget report above stays, and the prioritized log findings
+    # (Googlebot blocked/redirected, crawl waste, orphans, important-not-hit)
+    # are added as AuditIssues under "issues".
+    issues = _log_issues(args, entries)
     output["issues"] = issues
     body = json.dumps(output, indent=2, ensure_ascii=False)
     if args.out is None:
@@ -280,18 +285,17 @@ async def _logs_cmd(args: argparse.Namespace, analyser: Callable[[str], Any] | N
     return 0
 
 
-def _log_issues(args: argparse.Namespace) -> list[dict[str, object]]:
-    """Run the issue-model log mapper over the same file and serialize findings.
-
-    A second parse (via log_analysis, not the logs/ crawl-budget path) — cheap
-    for a one-shot CLI, and it keeps the two log surfaces independent."""
-    from .log_analysis import LogAnalysisConfig, analyse_log_file, issues_for_log_report
+def _log_issues(args: argparse.Namespace, entries: Sequence[LogEntry]) -> list[dict[str, object]]:
+    """Map the already-parsed entries to AuditIssues via the shared log-finding
+    model (log_analysis) — the file is read and parsed exactly once by the
+    caller and shared with the logs/ crawl-budget path above."""
+    from .log_analysis import LogAnalysisConfig, analyse_log_entries, issues_for_log_report
 
     config = LogAnalysisConfig(
         site_base_url=getattr(args, "base_url", "") or "",
         important_urls=_read_known_urls(getattr(args, "known_urls", None)),
     )
-    report = analyse_log_file(args.path, config)
+    report = analyse_log_entries(entries, config)
     return [issue.to_dict() for issue in issues_for_log_report(report)]
 
 
