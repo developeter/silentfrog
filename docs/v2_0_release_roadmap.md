@@ -396,6 +396,6 @@ Manual checks no test can cover:
 |---|---|---|---|
 | R1 | V1 stealth checkbox + V16 robots dialog | small | ☑ |
 | R2 | Google connect — pure layer | medium | ☑ |
-| R3 | Google connect — dialog | large | ☐ |
-| R4 | Server-log analysis window (M6) | medium | ☐ |
+| R3 | Google connect — dialog | large | ☑ |
+| R4 | Server-log analysis window (M6) | medium | ☑ |
 | R5 | Version, changelog, README, bootstrap, tag | small | ☐ |

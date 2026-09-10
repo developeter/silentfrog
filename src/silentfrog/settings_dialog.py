@@ -45,6 +45,15 @@ def _scrapling_available() -> bool:
     return importlib.util.find_spec("scrapling") is not None
 
 
+def _google_available() -> bool:
+    """Return True when the optional silentfrog[google] extra is importable.
+
+    ``google_auth_oauthlib`` is the one ``oauth.run_loopback_flow`` actually
+    imports (oauth.py) — a sufficient proxy for the whole extra, mirroring
+    how ``_scrapling_available`` stands in for silentfrog[stealth]."""
+    return importlib.util.find_spec("google_auth_oauthlib") is not None
+
+
 async def _summarize_sov_test(keys: dict[str, str]) -> str:
     """Test each keyed AI-engine and join 'engine: message' results with
     ' · ' — 'no key' for empty fields, never awaiting a network call for
@@ -85,6 +94,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         body_layout.addWidget(self._build_semrush_group(theme))
         body_layout.addWidget(self._build_ai_engines_group(theme))
         body_layout.addWidget(self._build_advanced_group(theme))
+        body_layout.addWidget(self._build_google_group())
         body_layout.addStretch(1)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -383,6 +393,37 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.btn_robots_sim = QtWidgets.QPushButton("Test a URL against robots.txt…")
         self.btn_robots_sim.clicked.connect(self._on_open_robots_sim)
         adv_layout.addWidget(self.btn_robots_sim)
+
+    def _build_google_group(self) -> QtWidgets.QWidget:
+        """Google connect launcher row (v2.0 R3) — a label + button, not an
+        inline fields group. The fields (client_secret.json picker,
+        connect/disconnect, GSC/GA4 property, the 'Use Google data' opt-in)
+        live in GoogleConnectDialog so this stays a two-widget row instead
+        of an 8-row group in the already five-deep scroll area."""
+        row = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(QtWidgets.QLabel("Google (Search Console / Analytics 4)"))
+        self.btn_google_connect = QtWidgets.QPushButton("Connect Google…")
+        self.btn_google_connect.setToolTip(
+            "Connect a Google account to pull real Search Console impressions/clicks and GA4 "
+            "engagement into the audit. Off by default; bring your own client_secret.json."
+        )
+        if not _google_available():
+            self.btn_google_connect.setEnabled(False)
+            self.btn_google_connect.setToolTip(
+                self.btn_google_connect.toolTip() + "\n\nGoogle libraries are not installed: enable "
+                "by running `pip install silentfrog[google]`."
+            )
+        self.btn_google_connect.clicked.connect(self._on_open_google_connect)
+        layout.addWidget(self.btn_google_connect)
+        layout.addStretch(1)
+        return row
+
+    def _on_open_google_connect(self) -> None:
+        from .google_connect_dialog import GoogleConnectDialog
+
+        GoogleConnectDialog(self).exec()
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
