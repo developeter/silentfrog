@@ -423,8 +423,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     # v2.0 V7 — Google Search Console + GA4 (optional `silentfrog[google]`).
     "gsc_impressions_present": (
         "Real Search Console impressions + clicks for this URL over the last 28 days.\n\n"
-        "Connect via Settings -> Connect Google Search Console (or set SILENTFROG_GOOGLE_ENABLE=1 + "
-        "SILENTFROG_GSC_SITE_URL). Not connected => info; never penalises the score."
+        "Connect by setting SILENTFROG_GOOGLE_ENABLE=1 + SILENTFROG_GSC_SITE_URL. "
+        "Not connected => info; never penalises the score."
     ),
     "gsc_ctr_above_average": (
         "Click-through rate from Search Console.\n\n"
@@ -441,8 +441,8 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     ),
     "ga4_engagement_above_median": (
         "Average GA4 engagement time for this URL.\n\n"
-        "Higher engagement time indicates the content holds visitors. Connect via Settings -> "
-        "Connect Google Analytics 4 (or SILENTFROG_GA4_PROPERTY_ID). Not connected => info."
+        "Higher engagement time indicates the content holds visitors. Connect by setting "
+        "SILENTFROG_GOOGLE_ENABLE=1 + SILENTFROG_GA4_PROPERTY_ID. Not connected => info."
     ),
     "ga4_bounce_below_threshold": (
         "GA4 bounce rate for this URL.\n\n"

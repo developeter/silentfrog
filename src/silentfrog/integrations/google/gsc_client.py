@@ -79,5 +79,21 @@ class GscClient:
             return {}
         return response if isinstance(response, dict) else {}
 
+    def list_sites(self) -> list[dict[str, str]]:
+        """Search Console properties the connected account can access, for
+        R3's property picker. ``[]`` when unavailable. Never raises."""
+        if self._service is None:
+            return []
+        try:
+            response = self._service.sites().list().execute()
+        except Exception:  # noqa: BLE001 — API failure degrades, never raises
+            return []
+        entries = response.get("siteEntry", []) if isinstance(response, dict) else []
+        return [
+            {"site_url": str(entry.get("siteUrl", "")), "permission_level": str(entry.get("permissionLevel", ""))}
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("siteUrl")
+        ]
+
 
 __all__ = ["GscClient"]

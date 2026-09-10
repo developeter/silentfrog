@@ -46,7 +46,7 @@ def _gsc_checks(gsc: GscMetrics) -> list[AiVisibilityCheck]:
                 "Search Console data",
                 "info",
                 "Not connected.",
-                "Settings -> Connect Google Search Console.",
+                "Set SILENTFROG_GOOGLE_ENABLE=1 and SILENTFROG_GSC_SITE_URL to connect Search Console.",
                 "gsc_impressions_present",
             )
         ]
@@ -96,7 +96,7 @@ def _ga4_checks(ga4: Ga4Metrics) -> list[AiVisibilityCheck]:
                 "Analytics data",
                 "info",
                 "Not connected.",
-                "Settings -> Connect Google Analytics 4.",
+                "Set SILENTFROG_GOOGLE_ENABLE=1 and SILENTFROG_GA4_PROPERTY_ID to connect Analytics 4.",
                 "ga4_engagement_above_median",
             )
         ]

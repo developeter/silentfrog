@@ -395,7 +395,7 @@ Manual checks no test can cover:
 | PR | Scope | Effort | Done |
 |---|---|---|---|
 | R1 | V1 stealth checkbox + V16 robots dialog | small | ☑ |
-| R2 | Google connect — pure layer | medium | ☐ |
+| R2 | Google connect — pure layer | medium | ☑ |
 | R3 | Google connect — dialog | large | ☐ |
 | R4 | Server-log analysis window (M6) | medium | ☐ |
 | R5 | Version, changelog, README, bootstrap, tag | small | ☐ |

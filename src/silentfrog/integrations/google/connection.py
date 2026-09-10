@@ -4,7 +4,8 @@ Holds the two clients + the property identifiers and returns the payload
 fragment (``{"gsc": ..., "ga4": ...}``) that enriches a CrawlPayload.
 The clients are injectable so the orchestration is unit-tested with
 fakes; ``from_env`` builds the real, token-backed connection lazily and
-is gated on env so a stock audit never touches Google.
+is gated on env-or-config (v2.0 R2) so a stock audit never touches
+Google.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .config import load_config
 from .ga4_client import Ga4Client
 from .gsc_client import GscClient
 from .types import GscMetrics
@@ -49,16 +51,22 @@ class GoogleConnection:
 
 
 def _enabled() -> bool:
-    return os.environ.get("SILENTFROG_GOOGLE_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}
+    if os.environ.get("SILENTFROG_GOOGLE_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    return load_config().enabled
 
 
 def from_env() -> GoogleConnection | None:
     """Build a token-backed connection from env + keyring, or None when
-    the integration isn't enabled/configured. Never raises."""
+    the integration isn't enabled/configured. The GSC site URL / GA4
+    property id come from env when set, else fall back to the stored
+    config (``env always wins over config`` so headless/CI behaviour is
+    unchanged). Never raises."""
     if not _enabled():
         return None
-    site_url = os.environ.get("SILENTFROG_GSC_SITE_URL", "").strip()
-    property_id = os.environ.get("SILENTFROG_GA4_PROPERTY_ID", "").strip()
+    config = load_config()
+    site_url = os.environ.get("SILENTFROG_GSC_SITE_URL", "").strip() or config.gsc_site_url
+    property_id = os.environ.get("SILENTFROG_GA4_PROPERTY_ID", "").strip() or config.ga4_property_id
     try:
         from . import oauth
 
