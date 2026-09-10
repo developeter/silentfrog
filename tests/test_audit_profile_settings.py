@@ -58,6 +58,21 @@ def test_settings_dialog_private_network_opt_in_roundtrips(qtbot) -> None:
     assert dialog.options().allow_private_network is True
 
 
+def test_settings_dialog_stealth_opt_in_roundtrips(qtbot, monkeypatch) -> None:
+    # v2.0 R1 (V1): use_stealth is off by default and only flows out of the
+    # dialog when checked. chk_stealth is gated on the optional
+    # silentfrog[stealth] extra (same idiom as chk_ssr_parity), so the extra
+    # must be faked available here to exercise the roundtrip on a dev venv
+    # that doesn't have scrapling installed.
+    monkeypatch.setattr("silentfrog.settings_dialog._scrapling_available", lambda: True)
+    dialog = CrawlSettingsDialog(CrawlOptions.default(), show_profile=False)
+    qtbot.addWidget(dialog)
+    assert dialog.chk_stealth.isChecked() is False
+    assert dialog.options().use_stealth is False
+    dialog.chk_stealth.setChecked(True)
+    assert dialog.options().use_stealth is True
+
+
 def test_settings_dialog_hidden_selector_preserves_deep(qtbot) -> None:
     # Single-page dialog: no selector shown, the DEEP profile is preserved so a
     # single-page audit can never silently downgrade its coverage.

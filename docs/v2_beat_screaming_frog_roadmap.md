@@ -102,8 +102,10 @@ Replace the single `aiohttp` call site
 fallback (`Fetcher` curl_cffi → `StealthyFetcher` browser → `aiohttp`
 when `scrapling` absent). New `src/silentfrog/fetchers/` package with
 frozen `FetchRequest`/`FetchResult`/`FetchOptions`. Optional extra
-`stealth`. Settings checkbox off by default. New `access_fetch_backend`
-info check.
+`stealth`. Settings checkbox off by default (done — v2.0 R1: reachable
+in Settings → Advanced, gated on the extra like the other opt-in
+checks). The promised `access_fetch_backend` info check was dropped in
+v2.0 R1: purely diagnostic, and not worth a permanent AI Visibility row.
 
 ### V2 — Streaming SQLite crawl store (~1M) · Tier S
 
@@ -162,7 +164,9 @@ See the milestone table above and the per-task plans under
 - **V15** Tech stack detection (`tech_stack.py`, vendored
   wappalyzer.json, new tab, 3 checks).
 - **V16** Robots simulator + hreflang depth (`robots_simulator.py`,
-  `hreflang_validator.py`, 3 checks).
+  `hreflang_validator.py`, 3 checks). Robots-simulator surface done —
+  v2.0 R1: `robots_sim_dialog.py`, launched from Settings → Advanced;
+  hreflang depth unchanged.
 - **V17** Semrush integration (`integrations/semrush/`, keyring, per-user
   rate cap, 6 checks). Extra `semrush`.
 - **V18** MCP server (`mcp_server.py`, `silentfrog-mcp serve`). Extra

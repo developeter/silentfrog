@@ -115,6 +115,24 @@ def test_settings_dialog_accessibility_audit_toggle_disabled_without_playwright(
     assert dialog.options().accessibility_audit is False
 
 
+def test_settings_dialog_stealth_toggle_disabled_without_scrapling(qtbot) -> None:
+    # v2.0 R1 (V1) — chk_stealth is gated on the optional silentfrog[stealth]
+    # extra, same idiom as chk_ssr_parity/chk_accessibility_audit. The dev
+    # venv has no scrapling, so it must be disabled and options() must stay
+    # False even after a forced setChecked(True) — mirrors the
+    # `isEnabled() and isChecked()` guard in CrawlSettingsDialog.options().
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    assert hasattr(dialog, "chk_stealth")
+    assert dialog.chk_stealth.isEnabled() is False
+    assert dialog.chk_stealth.isChecked() is False
+    dialog.chk_stealth.setChecked(True)
+    assert dialog.options().use_stealth is False
+
+
 def test_settings_dialog_semrush_defaults(qtbot, monkeypatch, tmp_path) -> None:
     # V17 — the API-key field is empty + masked by default and the
     # max-calls spinbox defaults to 100. Stub the keychain lookup and point

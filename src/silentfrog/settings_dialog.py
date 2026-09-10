@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from typing import cast
 
 from qtpy import QtCore, QtWidgets
@@ -37,6 +38,11 @@ def _embeddings_available() -> bool:
     except Exception:
         return False
     return True
+
+
+def _scrapling_available() -> bool:
+    """Return True when the optional silentfrog[stealth] extra is importable."""
+    return importlib.util.find_spec("scrapling") is not None
 
 
 async def _summarize_sov_test(keys: dict[str, str]) -> str:
@@ -355,7 +361,28 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "internal network — enable only for hosts you control and trust."
         )
         adv_layout.addWidget(self.chk_allow_private_network)
+        self._build_stealth_controls(theme, adv_layout)
         return self.adv_group
+
+    def _build_stealth_controls(self, theme: str, adv_layout: QtWidgets.QVBoxLayout) -> None:
+        """Stealth checkbox + robots-simulator launcher, split out of
+        ``_build_advanced_group`` to stay under the code-shape line cap."""
+        self.chk_stealth = QtWidgets.QCheckBox("Stealth fetching (evade bot/WAF detection)")
+        self.chk_stealth.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_stealth.setToolTip(
+            "Optional. Routes this crawl's fetches through a stealth engine that mimics "
+            "real-browser fingerprints to reduce blocking by anti-bot/WAF systems. Off by default."
+        )
+        if not _scrapling_available():
+            self.chk_stealth.setEnabled(False)
+            self.chk_stealth.setToolTip(
+                self.chk_stealth.toolTip() + "\n\nscrapling is not installed: enable by running "
+                "`pip install silentfrog[stealth]`."
+            )
+        adv_layout.addWidget(self.chk_stealth)
+        self.btn_robots_sim = QtWidgets.QPushButton("Test a URL against robots.txt…")
+        self.btn_robots_sim.clicked.connect(self._on_open_robots_sim)
+        adv_layout.addWidget(self.btn_robots_sim)
 
     def _build_button_box(self) -> QtWidgets.QDialogButtonBox:
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
@@ -364,6 +391,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         return buttons
+
+    def _on_open_robots_sim(self) -> None:
+        from .robots_sim_dialog import RobotsSimDialog
+
+        RobotsSimDialog(self).exec()
 
     def _connect_signals(self) -> None:
         self.chk_gentle.toggled.connect(self._on_gentle_toggled)
@@ -391,6 +423,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.chk_topic_embeddings.setChecked(self.chk_topic_embeddings.isEnabled() and options.topic_embeddings)
         self.chk_allow_insecure_tls.setChecked(options.allow_insecure_tls)
         self.chk_allow_private_network.setChecked(options.allow_private_network)
+        self.chk_stealth.setChecked(self.chk_stealth.isEnabled() and options.use_stealth)
         profile_index = self.profile_combo.findData(options.profile.value)
         self.profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
         self._initialize_semrush()
@@ -538,6 +571,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             profile=self.profile_combo.currentData(),
             allow_insecure_tls=self.chk_allow_insecure_tls.isChecked(),
             allow_private_network=self.chk_allow_private_network.isChecked(),
+            use_stealth=bool(self.chk_stealth.isEnabled() and self.chk_stealth.isChecked()),
         )
 
     def accept(self) -> None:
