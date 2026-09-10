@@ -30,13 +30,15 @@ class HomeWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog")
-        # Final shape: a compact landing card locked to 420x500 (back to
-        # the pre-N5b height: v3 retired the Multi-URL Dashboard — Site
-        # Crawl's URL-list mode covers it — so the fourth 48px button is
-        # gone). Fixed size still means no resize handle, no green-pill
-        # fullscreen on macOS, no edge-cases for Qt to drift the layout.
-        # Child windows (Site Crawl, SEO, Redirect) stay resizable.
-        self.setFixedSize(420, 500)
+        # Final shape: a compact landing card locked to 420x564 — tall
+        # enough for four 48px action buttons (Massive Redirect Check,
+        # Single Page SEO Check, Site Crawl, Server Log Analysis; R4/M6
+        # restored the height v3's Multi-URL Dashboard retirement had
+        # shrunk to 420x500). Fixed size still means no resize handle, no
+        # green-pill fullscreen on macOS, no edge-cases for Qt to drift
+        # the layout. Child windows (Site Crawl, SEO, Redirect, Log
+        # Analysis) stay resizable.
+        self.setFixedSize(420, 564)
 
         # Each click on a primary action opens a new top-level QWidget.
         # We must hold a Python reference to every one of them or
@@ -84,6 +86,7 @@ class HomeWindow(QMainWindow):
             ("Massive Redirect Check", self.open_redirect),
             ("Single Page SEO Check", self.open_seo),
             ("Site Crawl", self.open_site_crawl),
+            ("Server Log Analysis", self.open_logs),
         )
         for label, callback in actions:
             btn = QPushButton(label)
@@ -129,6 +132,11 @@ class HomeWindow(QMainWindow):
         from .site_crawl_gui import SiteCrawlWindow
 
         self._spawn_child(SiteCrawlWindow())
+
+    def open_logs(self) -> None:
+        from .log_gui import LogWindow
+
+        self._spawn_child(LogWindow())
 
     def _spawn_child(self, window: QtWidgets.QWidget) -> None:
         """Show ``window`` and retain a strong reference to it.

@@ -14,6 +14,7 @@ def test_home_window_exposes_three_primary_actions(qtbot) -> None:
     assert "Massive Redirect Check" in labels
     assert "Single Page SEO Check" in labels
     assert "Site Crawl" in labels
+    assert "Server Log Analysis" in labels
 
 
 def test_home_window_can_open_multiple_seo_windows_without_dropping_refs(
