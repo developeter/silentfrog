@@ -4,9 +4,10 @@
 # Detects whether python3.12 / 3.13 / 3.14 is on PATH. If not, downloads
 # the official universal2 .pkg from python.org and installs it via
 # `sudo installer` (one password prompt). Then downloads the latest
-# Silentfrog source from GitHub, places it under ~/Silentfrog/app, and
-# runs install_silentfrog.py so the user ends up with a working .venv
-# plus a Silentfrog launcher on the Desktop.
+# published v* Silentfrog release from GitHub (falling back to the dev
+# branch's head commit while no release has been published yet), places
+# it under ~/Silentfrog/app, and runs install_silentfrog.py so the user
+# ends up with a working .venv plus a Silentfrog launcher on the Desktop.
 #
 # All actions are logged to ~/Library/Logs/Silentfrog-bootstrap.log.
 
@@ -61,6 +62,21 @@ install_python() {
     log "Python installed"
 }
 
+get_latest_release_tag() {
+    # Tracks published (non-draft) releases: /releases/latest never
+    # returns a draft, so this prints nothing until a release is actually
+    # published -- matching what the in-app updater itself polls
+    # (src/silentfrog/updater.py::fetch_remote_revision).
+    local python_cmd="$1"
+    local url="https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+    log "Querying $url"
+    local response
+    if ! response="$(curl -fsSL -H "Accept: application/vnd.github+json" "$url")"; then
+        return 1
+    fi
+    printf '%s' "$response" | "$python_cmd" -c "import sys, json; print(json.load(sys.stdin).get('tag_name') or '')"
+}
+
 get_latest_sha() {
     local python_cmd="$1"
     local url="https://api.github.com/repos/$OWNER/$REPO/commits/$BRANCH"
@@ -69,10 +85,26 @@ get_latest_sha() {
         | "$python_cmd" -c "import sys, json; print(json.load(sys.stdin)['sha'])"
 }
 
+get_target_revision() {
+    # Prefer the latest published v* release; fall back to the dev
+    # branch's head commit only while no release exists yet. Without this
+    # fallback, a fresh install has nothing to download until the first
+    # release is published.
+    local python_cmd="$1"
+    local tag
+    if tag="$(get_latest_release_tag "$python_cmd")" && [ -n "$tag" ]; then
+        log "Tracking latest published release: $tag"
+        printf '%s' "$tag"
+        return 0
+    fi
+    log "No published release yet; falling back to the '$BRANCH' branch"
+    get_latest_sha "$python_cmd"
+}
+
 download_archive() {
-    local sha="$1"
+    local revision="$1"
     local archive="$STAGING/source.zip"
-    local url="https://github.com/$OWNER/$REPO/archive/$sha.zip"
+    local url="https://github.com/$OWNER/$REPO/archive/$revision.zip"
     log "Downloading source archive from $url"
     curl -fsSL -o "$archive" "$url"
     printf '%s' "$archive"
@@ -103,11 +135,11 @@ sync_app_directory() {
 
 invoke_installer() {
     local python_cmd="$1"
-    local sha="$2"
-    log "Running install_silentfrog.py with --revision $sha"
+    local revision="$2"
+    log "Running install_silentfrog.py with --revision $revision"
     (
         cd "$APP_DIR"
-        "$python_cmd" install_silentfrog.py --revision "$sha"
+        "$python_cmd" install_silentfrog.py --revision "$revision"
     )
     log "Installer finished"
 }
@@ -124,16 +156,16 @@ main() {
     fi
     log "Using $python_cmd"
 
-    local sha
-    sha="$(get_latest_sha "$python_cmd")"
-    log "Target revision: $sha"
+    local revision
+    revision="$(get_target_revision "$python_cmd")"
+    log "Target revision: $revision"
 
     local archive
-    archive="$(download_archive "$sha")"
+    archive="$(download_archive "$revision")"
     local source_dir
     source_dir="$(extract_archive "$archive")"
     sync_app_directory "$source_dir"
-    invoke_installer "$python_cmd" "$sha"
+    invoke_installer "$python_cmd" "$revision"
 
     log "Silentfrog bootstrap complete"
     printf '\nSilentfrog installed. Look for the Silentfrog launcher on your Desktop.\n'

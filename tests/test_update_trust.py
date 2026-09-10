@@ -164,11 +164,17 @@ def test_shipped_pinned_key_is_a_wellformed_minisign_key() -> None:
     assert len(pinned.key) == 32
 
 
-# A real signature produced by the maintainer's actual `minisign` tool over the
-# probe string "silentfrog-pr18-keycheck" (prehashed/"ED" mode). Signatures are
-# public, so this is safe to commit. It is the one fixture made by the genuine
-# tool (not our test signer): it proves the pinned key matches a controlled
-# private key AND that the vendored verifier interoperates with real minisign.
+# A real signature produced by the genuine `minisign` tool over the probe string
+# "silentfrog-pr18-keycheck" (prehashed/"ED" mode). Public keys and signatures
+# are public data, so both are safe to commit. This pair is the only fixture
+# made by the real tool rather than our own test signer, so it is what proves
+# the vendored verifier interoperates with actual minisign output.
+#
+# The key below was the repo's trust anchor until 2.0.0 unpinned it (no private
+# counterpart was ever held). It is kept here purely as a TEST VECTOR — it is
+# deliberately NOT read from PINNED_PUBLIC_KEY, so the interop check keeps
+# running whether or not a key is pinned.
+_REAL_MINISIGN_PUBLIC_KEY = "RWTwmgvci/k/s0YtnM0nBg/MOCf7aMn9aHe3y1MprEeMnghlphnMCvUn"
 _REAL_MINISIGN_KEY_ID = "f09a0bdc8bf93fb3"
 _REAL_MINISIGN_PROBE = b"silentfrog-pr18-keycheck"
 _REAL_MINISIGN_SIG = (
@@ -179,10 +185,9 @@ _REAL_MINISIGN_SIG = (
 )
 
 
-def test_real_minisign_signature_verifies_against_pinned_key() -> None:
-    pinned = pinned_public_key()
-    if pinned is None or pinned.key_id.hex() != _REAL_MINISIGN_KEY_ID:
-        pytest.skip("pinned key rotated; regenerate this real-minisign fixture for the new key")
+def test_vendored_verifier_interoperates_with_real_minisign_output() -> None:
+    key = parse_public_key(_REAL_MINISIGN_PUBLIC_KEY)
+    assert key.key_id.hex() == _REAL_MINISIGN_KEY_ID
     # Authentic minisign output must verify; a tampered byte must not.
-    assert verify_detached(_REAL_MINISIGN_PROBE, _REAL_MINISIGN_SIG, pinned) is True
-    assert verify_detached(_REAL_MINISIGN_PROBE + b"!", _REAL_MINISIGN_SIG, pinned) is False
+    assert verify_detached(_REAL_MINISIGN_PROBE, _REAL_MINISIGN_SIG, key) is True
+    assert verify_detached(_REAL_MINISIGN_PROBE + b"!", _REAL_MINISIGN_SIG, key) is False

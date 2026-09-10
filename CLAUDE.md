@@ -16,19 +16,45 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 
 **Reply in English.** (AGENTS.md rule; the user has corrected this repeatedly.)
 
-## Status (2026-07-06)
+## Status (2026-09-10)
 
-- **v2.0 roadmap V1..V20: complete.** Full milestone history in
-  `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in `HANDOFF.md`.
+- **v2.0 roadmap V1..V20: shipped, with two corrections.** Full milestone
+  history in `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in
+  `HANDOFF.md`. V12 (Common Crawl backlinks) was dropped in favour of
+  V17's Semrush integration and never built; V18 (MCP server) was
+  superseded by G6's hand-rolled `mcp_server.py` instead of a separate
+  build.
 - **v3 gap analysis: `docs/v3_roadmap.md` — COMPLETE (2026-07-30).** Every
   G-item (G1–G15) is shipped, retired, or delivered via another (G12 via
   G1; V18 revived as G6); the fake `ai_citations_perplexity` proxy is
   retired. Full shipped list + dates in `HANDOFF.md`.
+- **v2.0 release roadmap (`docs/v2_0_release_roadmap.md`), R1–R5: closed
+  the reachability gap the milestone counts above hid.** V1..V20/G1..G15
+  being "shipped" only ever meant the code and tests existed; three
+  milestones had no GUI path a user could reach. R1 exposed V1 stealth +
+  V16 robots simulator in Settings → Advanced; R2+R3 made the V7 Google
+  OAuth connect flow reachable via a real "Connect Google…" dialog
+  (BYO `client_secret.json`); R4 gave M6 server-log analysis a GUI window
+  (`log_gui.py`) — CLI-only before. **R5 (release 2.0.0)**: version bumped
+  to `2.0.0`; the orphaned update-signing key was unpinned
+  (`PINNED_PUBLIC_KEY = ""` — no private half was ever held for it, so it
+  could never sign a real release); CHANGELOG/README brought current;
+  bootstrap installers now track published `v*` releases with a `dev`
+  fallback; `docs/RELEASING.md` documents the signed-release procedure for
+  when a real key exists. **The `v2.0.0` tag and its draft GitHub Release
+  are the orchestrator/user's own step, not part of any PR.**
+- **In-app auto-update does not work yet** — no key is pinned, so
+  `Help → Check for Updates…` refuses closed by design until a maintainer
+  generates a minisign keypair and signs a published release (see
+  `docs/RELEASING.md`).
 - **Remaining pools if work resumes:** unnumbered nice-to-haves (WARC
   export · crawl segments · sitemap generation), PLAN.md foundations
-  (M5 GSC full deliverable · M6 GUI log window + parser unification ·
-  M8 remote-sync OAuth/UI · M9 future integrations), V19 Stage B (QML),
-  ~1M-URL scale (100k verified), Settings UI for the G7 provider keys.
+  (M5 GSC full deliverable · M8 remote-sync OAuth/UI, still unwired ·
+  M9 future integrations), V19 Stage B (QML), ~1M-URL scale (100k
+  verified), Settings UI for the G7 provider keys, the pre-existing
+  `_on_semrush_test` use-after-free risk and dead `semrush/max_calls`
+  spinbox (known, deliberately not fixed in R1–R5 — see
+  `docs/v2_0_release_roadmap.md` §8).
 
 ## Where the rules live
 

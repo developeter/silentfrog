@@ -1,6 +1,6 @@
 # Silentfrog — Handoff
 
-Last updated: 2026-07-20
+Last updated: 2026-09-10
 
 **Start here.** This is the entry point for a new session: what shipped, where
 we are, what's next. Read this first, then the linked sources for depth — the
@@ -10,20 +10,37 @@ durable detail lives there, not here.
 - **Roadmaps (three, related — see "How the roadmaps fit" below):** [`PLAN.md`](PLAN.md) (product direction, M0–M9) · [`docs/v2_beat_screaming_frog_roadmap.md`](docs/v2_beat_screaming_frog_roadmap.md) (the V1–V20 build, complete) · [`docs/v3_roadmap.md`](docs/v3_roadmap.md) (post-v2 gap analysis — the ACTIVE track). Per-task scratch plans (if any) under `.claude/plans/`.
 - **Install / security:** [`docs/INSTALL.md`](docs/INSTALL.md) · [`bootstrap/README.md`](bootstrap/README.md) · [`SECURITY.md`](SECURITY.md) · [`README.md`](README.md)
 
-## Where we are (2026-07-20)
+## Where we are (2026-09-10)
 
-- **v2.0 roadmap V1..V20: complete.** **H0–H7 hardening gate: landed.** v3 first
-  wave shipped (see "v3" below), plus the M6-debt payoff (CLI log analysis wired
-  into the shared issue model). All work is committed AND **pushed** —
-  `origin/feature/v2.0` is in sync with local `HEAD`; the tree is clean.
-- **Operator queue 1 (2026-07-20) COMPLETE:** G2 ✅, G3 ✅ (2026-07-20);
-  G4 ✅, G5 ✅, G6 ✅ (2026-07-21) — each via `ship-roadmap-pr` with the
-  matching `docs/PLAYBOOKS.md` recipe.
-- **Operator queue 2 (2026-07-21, run to the end of the roadmap):** G8 ✅ →
-  G9 → proxy retirement (`ai_citations_perplexity`) → G11 → G10 → G7 →
-  G13 → G14 → G15.
-  **Policy decision (2026-07-20):** the v2.0 "no new AI-engine APIs" lockout is
-  reopened for G3 — strictly BYO-key, opt-in, OFF by default.
+- **v2.0 roadmap V1..V20 and the v3 gap catalogue G1..G15: both shipped**
+  (see "v2.0 status" / "v3" below). **H0–H7 hardening gate: landed.**
+- **v2.0 release roadmap (`docs/v2_0_release_roadmap.md`) — R1–R5.** A
+  four-scope audit found that "shipped" for V1, V16, and V7 meant working,
+  tested code with **no GUI path to reach it** (V7's own check text pointed
+  users at a "Connect Google Search Console" menu that didn't exist). R1–R4
+  closed those gaps; R5 shipped the 2.0.0 release itself:
+  - **R1** ✅ — V1 stealth toggle + V16 robots simulator exposed in
+    Settings → Advanced.
+  - **R2** ✅ — the V7 Google OAuth connect flow made reachable (pure layer:
+    `integrations/google/config.py` + `connect.py`).
+  - **R3** ✅ — the "Connect Google…" Settings dialog (BYO
+    `client_secret.json`) built on top of R2.
+  - **R4** ✅ — server-log analysis (M6) got a GUI window (`log_gui.py`);
+    was CLI-only before.
+  - **R5** ✅ — version bumped to `2.0.0`; the orphaned update-signing key
+    unpinned (`PINNED_PUBLIC_KEY = ""`, no private half was ever held for
+    it); CHANGELOG/README brought current with everything above plus the
+    previously-undocumented Topic map / redirect mapping / accessibility
+    audit / log analytics / llms.txt / AI citation SoV features; bootstrap
+    installers now track published `v*` releases with a `dev` fallback;
+    `docs/RELEASING.md` added for when a real signing key exists.
+    **Tagging and pushing `v2.0.0` is a separate, deliberate step — not
+    done as part of any PR.**
+- All R1–R5 work is committed on `feature/v2.0`; confirm
+  `origin/feature/v2.0` is in sync before treating it as pushed.
+- **In-app auto-update does not work yet even after 2.0.0**: no key is
+  pinned, so `Help → Check for Updates…` fails closed by design until a
+  maintainer signs a published release (`docs/RELEASING.md`).
 
 ## How the roadmaps fit (avoid confusion)
 
@@ -90,7 +107,9 @@ prioritized issues + evidence, local-first.
   **`[embeddings]`**, opt-in checkbox) + brand-mention time-series (Brave +
   Common Crawl reuse, local per-host JSON series, `SILENTFROG_BRAND_MENTIONS_ENABLE`).
   Three checks, emitted only when measured. **Roadmap V1..V20 complete.**
-  **Dropped:** V18 (MCP server); V12 (folded into V17).
+  **Dropped:** V12 (Common Crawl backlinks — dropped in favour of the V17
+  Semrush integration; never built); V18 (MCP server — superseded by G6's
+  hand-rolled `mcp_server.py` instead of a separate `mcp` extra).
 
 ## v3 — post-v2.0 (gap analysis: `docs/v3_roadmap.md`)
 
@@ -114,8 +133,11 @@ Shipped:
 - **GUI design-token pass:** one QSS template + per-theme tokens (light mode was
   visibly broken); zebra/gridless tables, underline tabs, styled inputs.
 - **M6 debt paid (PLAN.md numbering):** CLI log analysis now feeds the shared
-  issue model. Still deferred: a GUI log-import window, and unifying the two
-  log parsers (`logs/` crawl-budget path vs `log_analysis.py`).
+  issue model, the two log parsers (`logs/` crawl-budget path vs
+  `log_analysis.py`) are unified on `logs.parsers`, and — as of the v2.0
+  release roadmap's R4 — a GUI window (`log_gui.py`, a 4th home-screen
+  button) opens the same engine `silentfrog-cli logs` uses. M6 is fully
+  closed; only M8 remote sync (a different milestone) stays unwired.
 - **Health score + issue trends (G2):** `crawl_trends.py` derives, per site,
   the health-score series and per-issue count chains across stored history
   runs (window 12, top 8 issues, signed deltas); the past-scans dialog grows
@@ -176,7 +198,8 @@ Shipped:
   `ai_agents` section (per-bot requests/blocked, AI share of bot traffic);
   `log_analysis` emits additive AI findings (`logs.ai_agent_blocked`/
   `_redirected` warnings, `_no_activity` info per §1.5); the CLI logs
-  summary reports AI-agent traffic. GUI log window remains M6-deferred.
+  summary reports AI-agent traffic. The GUI log window (R4, `log_gui.py`)
+  surfaces the same findings interactively — see "M6 debt paid" above.
 
 - **llms.txt generator/validator (G10):** validator = new
   `access_llms_txt_conformance` check on widened (add-only) discovery
@@ -221,9 +244,9 @@ Shipped:
 or delivered via another. Remaining pools if work resumes: the unnumbered
 nice-to-haves (WARC export · crawl segments · sitemap generation), the
 "Deliberately out" policy list (unchanged), PLAN.md's remaining foundations
-(M5 GSC full deliverable · M6 GUI log window + parser unification · M8
-remote-sync OAuth/UI · M9 future integrations), V19 Stage B (QML), and the
-~1M-URL scale goal (100k verified).
+(M5 GSC full deliverable · M8 remote-sync OAuth/UI, still unwired — see
+`remote_sync.py` · M9 future integrations — M6 closed, see "M6 debt paid"
+above), V19 Stage B (QML), and the ~1M-URL scale goal (100k verified).
 
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
@@ -248,12 +271,16 @@ grows.
 ## Install / update (summary — full detail in docs/INSTALL.md, bootstrap/README.md, README §2/§6)
 
 Three layers: **bootstrap** one-click installers (`bootstrap/Get-Silentfrog.*`,
-attached to GitHub Releases) → **in-app updater** (Help → Check for Updates…;
-installs only a **minisign-signed** Release, verified against the pinned key in
+tracking the latest published `v*` GitHub Release with a `dev`-branch fallback
+while none exists) → **in-app updater** (Help → Check for Updates…; installs
+only a **minisign-signed** Release, verified against the pinned key in
 `src/silentfrog/update_trust.py`, **fail-closed**; dev clones are routed to
-`git pull`) → **source installer** (`install_silentfrog.py`). **Known gap:** the
-first-install bootstrap fetches source over HTTPS but is **not yet
-signature-verified** (only the in-app updater is) — tracked in `SECURITY.md`.
+`git pull`) → **source installer** (`install_silentfrog.py`). **Known gap:**
+`PINNED_PUBLIC_KEY` is `""` as of 2.0.0 (R5 unpinned an orphaned key with no
+known private half), so the in-app updater refuses every update until a
+maintainer signs a published release — see `docs/RELEASING.md`. The
+first-install bootstrap also fetches source over HTTPS but is **not yet
+signature-verified** — tracked in `SECURITY.md`.
 
 ## Integrations & secrets (all OFF by default; keys in OS keychain / env, never in the repo)
 
@@ -266,9 +293,13 @@ No integration runs on a stock audit.
   is the consent, no enable gate. Optional `SILENTFROG_PSI_API_KEY` lifts the PSI
   rate limit. (The separate background CrUX collection still uses
   `SILENTFROG_PSI_ENABLE`, intentionally.)
-- **GSC + GA4 (V7):** `SILENTFROG_GOOGLE_ENABLE=1` + system-browser OAuth (tokens
-  in keyring `silentfrog-google`). Rich Results is schema-derived for free; it
-  upgrades to Google's verdict only when GSC is connected.
+- **GSC + GA4 (V7):** Settings → "Connect Google…" (R3 dialog, BYO
+  `client_secret.json`, `silentfrog[google]` extra) is the discoverable path;
+  headless/CI use sets `SILENTFROG_GOOGLE_ENABLE=1` +
+  `SILENTFROG_GSC_SITE_URL`/`SILENTFROG_GA4_PROPERTY_ID` instead. Either way
+  tokens land in keyring `silentfrog-google` via the R2 OAuth loopback flow.
+  Rich Results is schema-derived for free; it upgrades to Google's verdict
+  only when GSC is connected.
 - **AI share of voice (v3 G3):** BYO keys via Settings → AI share of voice
   (BYO keys) → keyring `silentfrog-ai-engines` (or env
   `SILENTFROG_OPENAI_API_KEY` / `SILENTFROG_PERPLEXITY_API_KEY` /

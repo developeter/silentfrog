@@ -76,7 +76,9 @@ against the signed manifest, and only then offers **Apply and restart**.
 Verification **fails closed** — a missing, unsigned, or tampered release
 is refused and nothing is swapped. Updates target signed release tags,
 never an unsigned `dev` commit. If a signed release cannot be retrieved,
-no update is offered.
+no update is offered. **No key is pinned in 2.0.0**, so today this
+always refuses — see *Releasing* below for how a maintainer signs a
+release and pins the key that makes this active.
 
 Developer clones (machines with a `.git` directory) see a "Use
 `git pull` instead" message — the in-app updater never touches a working
@@ -306,7 +308,7 @@ The project metadata allows **Python 3.12 / 3.13 / 3.14** (`<3.15`) because the 
 - Use [GitHub issues](https://github.com/developeter/silentfrog/issues) for bugs and feature requests (tracked publicly).
 - **Security issues go through private reporting, not public issues** — see [`SECURITY.md`](SECURITY.md).
 - Code is written from scratch for this project; if you suspect unintentional reuse, open an issue and it will be addressed.
-- `feature/v2.0` carries the in-progress v2.0 hardening; `dev` holds the shipped v1.1 line. No tagged releases are published yet.
+- This is the **2.0.0** source tree, on `feature/v2.0`; `dev` holds the shipped v1.1 line. Tagging `v*` creates a **draft** GitHub Release carrying the bootstrap installers, so no published release exists yet — see *Releasing* below and `docs/RELEASING.md` for how a fully signed one is produced.
 - The runtime migration targets **QtPy + PySide6**. `PyQt5` remains available only as an optional fallback backend while the transition stabilizes.
 
 ## Security & privacy
@@ -315,10 +317,55 @@ Silentfrog runs locally and crawls URLs you provide. The v2.0 hardening work set
 
 - **TLS verification is on by default** (certifi CA bundle, OpenSSL security level ≥ 2). Skipping certificate checks is an explicit, off-by-default per-crawl opt-in for trusted self-signed / intranet hosts.
 - **SSRF protection is on by default**: crawled addresses that resolve to loopback, private, link-local, or reserved ranges are refused, the connection is pinned to the vetted IP, and redirects are re-validated. Reaching private/intranet hosts is an explicit, off-by-default opt-in.
-- **Signed updates** — the in-app updater verifies a minisign-signed release manifest against a pinned key (see *Updating*).
+- **Signed-update verification** — the in-app updater checks a minisign-signed release manifest against a public key pinned in `src/silentfrog/update_trust.py` (see *Updating*).
+- **Known limitation:** no key is pinned in 2.0.0 (`PINNED_PUBLIC_KEY = ""`) — the previously pinned key had no known private counterpart, so it was removed rather than trusted. The updater therefore fails closed and refuses every update until a real keypair is generated and a release is signed; see `docs/RELEASING.md`.
 - **Known limitation:** the first-time bootstrap installers download source over HTTPS but are **not yet signature-verified**; signature verification currently covers in-app updates only (see `bootstrap/README.md`).
 
-Integrations (Google, Semrush, AI providers) are off by default and never run on a stock audit. Full policy: [`SECURITY.md`](SECURITY.md).
+Integrations (Google, Semrush, AI providers) are off by default and never run on a stock audit. Full policy: [`SECURITY.md`](SECURITY.md). See *Settings & optional features* below for how to turn each one on.
+
+## Settings & optional features
+
+Everything here is **off by default**. Open **Settings** from the gear icon on any window to enable it.
+
+### Advanced tools
+
+- **Stealth fetching** (Settings → *Advanced headers* group → "Stealth fetching (evade bot/WAF detection)") — routes requests through `curl_cffi` TLS impersonation and, if that still fails, a stealth headless browser that can solve a Cloudflare Turnstile challenge. Needs the `silentfrog[stealth]` extra; the checkbox is disabled with a tooltip explaining that when the extra isn't installed. Use it only against sites you're authorized to crawl.
+- **Robots.txt simulator** (Settings → *Advanced headers* group → "Test a URL against robots.txt…") — opens a dialog that checks whether a given URL is allowed for a chosen user-agent, either against the live `robots.txt` (fetched through the same guarded, TLS/SSRF-checked path as a crawl) or against pasted robots.txt text.
+
+### AI citation tracking
+
+The AI Visibility check for cross-engine AI citations (`ai_citations.py`) is gated on environment variables rather than a Settings checkbox:
+
+```bash
+export SILENTFROG_AI_CITATIONS_ENABLE=1     # turns the check on at all
+export SILENTFROG_BRAVE_API_KEY=<your key>  # optional: adds the Brave Search fresh-signal probe
+```
+
+Without `SILENTFROG_AI_CITATIONS_ENABLE=1` the check is skipped entirely (`info`, never a false warning). This is separate from the Settings → *"AI share of voice (BYO keys)"* group, which samples ChatGPT/Perplexity/Gemini directly with your own API keys.
+
+### Google Search Console & Analytics 4 (bring your own credentials)
+
+Silentfrog never ships or requests a shared Google client — you connect your own Google Cloud OAuth client, and only the *path* to your `client_secret.json` is stored (never its contents). To connect:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create (or reuse) a project, enable the **Search Console API** and **Google Analytics Data API**, and create an **OAuth client ID** of type **Desktop app**.
+2. Download that client's `client_secret.json`.
+3. In Silentfrog, open **Settings** and click **Connect Google…** (enabled once the `silentfrog[google]` extra is installed).
+4. Browse to your `client_secret.json`, then click **Connect…** next to Search Console and/or Analytics 4 — each opens your system browser for a normal Google sign-in (RFC 8252 loopback flow; no embedded webview). Tokens are stored in the OS keychain via `keyring`.
+5. Pick your property: the Search Console combo is editable (Search Console property strings must match exactly, e.g. `sc-domain:example.com` vs `https://example.com/`) and can be filled from **Refresh** (lists your verified sites), or typed by hand. Enter the GA4 property ID as free text.
+6. Tick **"Use Google data in audits"** to actually pull real GSC impressions/clicks and GA4 engagement into audits — it starts unchecked, matching the app's default-off policy.
+7. Click **Test connection** to confirm before running a real audit, then **Disconnect** any time to revoke local tokens (this does not revoke Google's own grant — do that at [myaccount.google.com/permissions](https://myaccount.google.com/permissions)).
+
+If your Google Cloud OAuth consent screen is still in **Testing**, refresh tokens expire after **7 days** and the connection silently stops returning data — the dialog warns about this; set the consent screen to **In production** in Google Cloud Console to keep it working. For headless/CI use instead of the dialog, set `SILENTFROG_GOOGLE_ENABLE=1` plus `SILENTFROG_GSC_SITE_URL` / `SILENTFROG_GA4_PROPERTY_ID`.
+
+## Server log analysis
+
+The **Server Log Analysis** home-screen button opens a window over the same engine `silentfrog-cli logs` uses (`log_analysis.py`) — nothing is parsed twice, and GUI and CLI report identical counts for the same file.
+
+1. **Load log file…** — accepts Common Log Format, Combined Log Format (with referer/user-agent), or JSON access logs (Apache/Nginx).
+2. **Load known URLs (optional)…** — one URL per line; unlocks orphan-crawl and important-URL-not-hit findings. Skip it to get bot/status/crawl-budget findings only.
+3. **Analyse** — runs the shared `log_analysis` findings model and lists issues in a results table (bot vs. human traffic, wasted 4xx/3xx, and 40+ classified AI-agent crawlers with vendor/kind).
+
+Equivalent from the command line: `poetry run silentfrog-cli logs <access.log> [--base-url URL] [--known-urls FILE] [--out report.json]`. There is no remote/log-shipping integration — see *Known limitations* in `CHANGELOG.md` for the unwired `remote_sync.py` module.
 
 ## Exporting reports
 
@@ -356,11 +403,20 @@ still present — now nested under the bucket that matches its purpose:
 - **Indexability** — `Indexability`, `Robots`, `Canonical`, `Redirect`, `Hreflang`, `Link`
 - **Content** — `Meta tag`, `Header H1-H6`, `Images`, `Content quality`, `Keywords`
 - **Speed** — `Performance`
-- **Trust** — `Structured data`, `Social`, `SERP`
+- **Trust** — `Structured data`, `Social`, `SERP`, `Accessibility`
 - **AI/GEO** — `Bot Matrix`, `AI Visibility`
 
 The Site Crawl per-page detail view (double-click a result row) uses the same
 bucketed layout.
+
+The `Accessibility` tab (axe-core, WCAG 2.1/2.2) is opt-in: enable
+"Accessibility audit (axe-core, WCAG)" under Settings → *GEO checks*
+group. It
+renders the page with headless Chromium and reports keyboard, contrast,
+ARIA, and labeling violations, so it needs the `silentfrog[geo-render]`
+extra (`playwright install chromium`) and a **Deep** audit profile —
+disabled with an explanatory tooltip when Playwright isn't installed.
+Results also feed the recap and the site-wide Excel export.
 
 ### Site Crawl mode
 
@@ -395,6 +451,9 @@ Recent v2.0 work hardened large-site crawling:
 - **Results table:** sorting, filtering, and paging run in SQL against the store, so the GUI stays responsive on large runs.
 - **Overview charts (optional):** with the optional `silentfrog[charts]` extra (PyQtGraph) installed, the results screen shows small HTTP-status, indexability, and GEO-score distribution charts once a crawl completes; without the extra the same figures render as a compact text summary. Chart data comes from read-only store aggregates, so it never re-materialises the crawl in RAM.
 - **Link graph:** the **Link graph** button visualises the crawl tree (nodes coloured by GEO Score, edges from the page that first linked to each URL, orphan pages flagged). Large graphs are sampled to the most-central nodes; scroll to zoom, drag to pan, and use **Fit all** / **Reset zoom**.
+- **Topic map:** the **Topic map** button (`content_clusters.py`) plots crawled pages as a content-cluster scatter — one dot per page, colour by topic cluster, position from stored topic-embedding vectors. Needs the opt-in "Topic embeddings (local model)" crawl setting, which requires the `silentfrog[embeddings]` extra (downloads a small sentence-transformers model locally on first use; no network calls for page content).
+- **Map redirects:** the **Map redirects** button (`redirect_mapping.py`) is a site-migration helper — it suggests old→new URL redirects by matching pages that vanished or went 404/410 since the previous crawl against this crawl's indexable pages (topic-embedding similarity when both crawls have one, text/path matching otherwise), and exports the suggestions as a CSV you can feed straight into the Massive Redirect Check.
+- **Generate llms.txt:** the **Generate llms.txt** button (`exporters/llms_txt.py`) drafts an [llms.txt](https://llmstxt.org) file from the crawl — a title, a summary, and H2 sections of links to the pages that were actually crawled and indexable. Review it before publishing; it's a starting draft, not a validated policy file. The same module also backs the `access_llms_txt_conformance` check, which flags a present-but-malformed `llms.txt` (an absent one stays silent).
 - **Scale:** memory is measured against a synthetic gate up to **100k URLs**. **~1M-URL crawling is a future, post-gate goal — it is not a verified or supported production scale yet.**
 
 The setup form and results table are separate screens. After **Start crawl**, the setup form is hidden and the results screen shows the discovered URL count, filters, table, export action, and crawl progress.
@@ -623,12 +682,12 @@ silentfrog/
 
 ## 6. Releasing
 
-The in-app updater only trusts a **signed** GitHub Release. The signing key is held offline by the maintainer and never enters CI or the repo; only the matching **public** key is pinned (`src/silentfrog/update_trust.py`).
+The in-app updater only trusts a **signed** GitHub Release. The signing key is held offline by the maintainer and never enters CI or the repo; only the matching **public** key is pinned (`src/silentfrog/update_trust.py`). **No key is pinned as of 2.0.0** — see [`docs/RELEASING.md`](docs/RELEASING.md) for the exact keygen/manifest/signing procedure this table summarizes.
 
 | Step | Command / action |
 | --- | --- |
 | Tag the release | `git tag v<version> && git push --tags` |
-| CI attaches bootstrap files | `.github/workflows/release-bootstrap.yml` runs on the tag and attaches `Get-Silentfrog.{ps1,bat,command}` to a **draft** Release. |
+| CI attaches bootstrap files | `.github/workflows/release-bootstrap.yml` runs on the tag (or manually via **Actions → Run workflow**) and attaches `Get-Silentfrog.{ps1,bat,command}` to a Release — **draft** by default, overridable per-run from the manual `workflow_dispatch` input. |
 | Sign the manifest (offline) | Build `manifest.json` (release tag + source/installer SHA-256) and sign it with the minisign private key, producing `manifest.json.minisig`. The private key never touches CI. |
 | Attach signed assets | Add the source archive, `manifest.json`, and `manifest.json.minisig` to the draft Release. |
 | Publish | Publish the Release. The in-app updater verifies it against the pinned key and offers the update. |

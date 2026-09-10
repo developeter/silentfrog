@@ -22,6 +22,19 @@ name: Release Bootstrap
 
 on:
   workflow_dispatch:
+    inputs:
+      draft:
+        description: >-
+          Publish as a draft release (default) instead of published
+          immediately. Keep this true until a signed manifest.json +
+          manifest.json.minisig exist to attach — see the note above,
+          docs/RELEASING.md, and docs/v2_0_release_roadmap.md §2
+          ("keep releases as drafts"): a published release with no
+          signed manifest 404s for every user's updater and returns
+          EXIT_UNVERIFIED.
+        required: false
+        type: boolean
+        default: true
   push:
     tags:
       - "v*"
@@ -43,4 +56,7 @@ jobs:
             bootstrap/Get-Silentfrog.ps1
             bootstrap/Get-Silentfrog.command
           fail_on_unmatched_files: true
-          draft: true
+          # Draft by default (tag-push runs always draft; a manual
+          # workflow_dispatch run can opt into publishing immediately via
+          # the `draft` input above). See docs/v2_0_release_roadmap.md §2.
+          draft: ${{ github.event_name != 'workflow_dispatch' || inputs.draft }}

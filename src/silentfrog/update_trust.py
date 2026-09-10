@@ -30,12 +30,12 @@ from pathlib import Path
 
 from ._vendor.ed25519 import verify as _ed25519_verify
 
-# The maintainer's minisign public key, pinned in-repo (key id f09a0bdc8bf93fb3).
-# This is the *second* line of ``silentfrog.pub`` (the base64 blob, not the
-# comment). Empty = no key pinned = every update refused (fail closed).
-# Rotation: ship a release signed by the current key that updates this constant,
-# then switch.
-PINNED_PUBLIC_KEY = "RWTwmgvci/k/s0YtnM0nBg/MOCf7aMn9aHe3y1MprEeMnghlphnMCvUn"
+# The maintainer's minisign public key, pinned in-repo. Empty = no key pinned =
+# every update refused (fail closed). Unpinned as of 2.0.0: the key formerly
+# here (id f09a0bdc8bf93fb3) had no known private counterpart, so no release
+# could ever be signed against it — see docs/RELEASING.md to generate a real
+# keypair and pin its public half here.
+PINNED_PUBLIC_KEY = ""
 
 _MINISIGN_LEGACY = b"Ed"  # signs the raw file
 _MINISIGN_PREHASHED = b"ED"  # signs BLAKE2b-512 of the file (minisign default)

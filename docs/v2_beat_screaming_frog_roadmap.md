@@ -146,7 +146,9 @@ See the milestone table above and the per-task plans under
 `.claude/plans/` for full detail. Summary:
 
 - **V6** Custom extraction (`custom_extraction.py`, sandboxed
-  CSS/XPath/regex, ≤10 rules, new Site Crawl tab).
+  CSS/XPath/regex, ≤10 rules). Rules are configured in Settings and the
+  results reach the LLM export; the promised dedicated Site Crawl tab
+  was NOT built (nice-to-have, see v2_0_release_roadmap.md §8).
 - **V7** GSC+GA4 (`integrations/google/`, RFC 8252 OAuth, `keyring`,
   8 checks, "Top GEO opportunities" widget). Extra `google`.
 - **V8** Crawl diff (`crawl_diff.py`, new Diff tab, feeds LLM export).
@@ -156,7 +158,9 @@ See the milestone table above and the per-task plans under
   off by default).
 - **V11** Per-agent ai.json + llms.txt parsing (per-bot llms.txt
   column, 2 checks).
-- **V12** Common Crawl backlinks (`backlinks/`, new tab, 3 checks).
+- **V12** Common Crawl backlinks — **NOT BUILT.** Dropped in favour of
+  the V17 Semrush integration; there is no `backlinks/` package, no tab
+  and no checks (see v2_0_release_roadmap.md §8).
 - **V13** Server log parser + crawl budget (`logs/`, new window, 5
   checks).
 - **V14** Lighthouse + Rich Results API (`integrations/google/`, 6

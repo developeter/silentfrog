@@ -6,10 +6,11 @@
   Detects whether Python 3.12 / 3.13 / 3.14 is available via the `py`
   launcher. If not, downloads the official python.org installer and
   runs it silently for the current user. Then downloads the latest
-  Silentfrog source from GitHub, places it under
-  %LOCALAPPDATA%\Silentfrog\app, and runs install_silentfrog.py so the
-  user ends up with a working .venv and a Silentfrog shortcut on the
-  Desktop.
+  published `v*` Silentfrog release from GitHub (falling back to the
+  `dev` branch's head commit while no release has been published yet),
+  places it under %LOCALAPPDATA%\Silentfrog\app, and runs
+  install_silentfrog.py so the user ends up with a working .venv and a
+  Silentfrog shortcut on the Desktop.
 
 .NOTES
   Re-run safely: an existing install is overwritten in place except for
@@ -84,7 +85,27 @@ function Install-Python {
     Write-Log "Python installed"
 }
 
-function Get-LatestSha {
+function Get-LatestReleaseTag {
+    # Tracks published (non-draft) releases: GET /releases/latest never
+    # returns a draft, so this is $null until a release is actually
+    # published — matching what the in-app updater itself polls
+    # (src/silentfrog/updater.py::fetch_remote_revision).
+    $url = "https://api.github.com/repos/$Owner/$Repo/releases/latest"
+    Write-Log "Querying $url"
+    $headers = @{ "Accept" = "application/vnd.github+json" }
+    try {
+        $response = Invoke-RestMethod -Uri $url -Headers $headers
+    } catch {
+        Write-Log "No published release found ($($_.Exception.Message))"
+        return $null
+    }
+    if ([string]::IsNullOrEmpty($response.tag_name)) {
+        return $null
+    }
+    return $response.tag_name
+}
+
+function Get-LatestBranchSha {
     $url = "https://api.github.com/repos/$Owner/$Repo/commits/$Branch"
     Write-Log "Querying $url"
     $headers = @{ "Accept" = "application/vnd.github+json" }
@@ -92,9 +113,23 @@ function Get-LatestSha {
     return $response.sha
 }
 
+function Get-TargetRevision {
+    # Prefer the latest published `v*` release; fall back to the `dev`
+    # branch's head commit only while no release exists yet. Without this
+    # fallback, a fresh install has nothing to download until the first
+    # release is published.
+    $tag = Get-LatestReleaseTag
+    if ($null -ne $tag) {
+        Write-Log "Tracking latest published release: $tag"
+        return $tag
+    }
+    Write-Log "No published release yet; falling back to the '$Branch' branch"
+    return Get-LatestBranchSha
+}
+
 function Save-SourceArchive {
-    param([string]$Sha)
-    $url = "https://github.com/$Owner/$Repo/archive/$Sha.zip"
+    param([string]$Revision)
+    $url = "https://github.com/$Owner/$Repo/archive/$Revision.zip"
     $archive = Join-Path $StagingDir "source.zip"
     Write-Log "Downloading source archive from $url"
     Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
@@ -127,11 +162,11 @@ function Sync-AppDirectory {
 }
 
 function Invoke-Installer {
-    param([string]$PythonVersion, [string]$Sha)
-    Write-Log "Running install_silentfrog.py with --revision $Sha"
+    param([string]$PythonVersion, [string]$Revision)
+    Write-Log "Running install_silentfrog.py with --revision $Revision"
     Push-Location $AppDir
     try {
-        & py "-$PythonVersion" "install_silentfrog.py" "--revision" $Sha
+        & py "-$PythonVersion" "install_silentfrog.py" "--revision" $Revision
         if ($LASTEXITCODE -ne 0) {
             throw "install_silentfrog.py exited with code $LASTEXITCODE"
         }
@@ -157,12 +192,12 @@ function Main {
     }
     Write-Log "Using Python $pyVersion"
 
-    $sha = Get-LatestSha
-    Write-Log "Target revision: $sha"
-    $archive = Save-SourceArchive -Sha $sha
+    $revision = Get-TargetRevision
+    Write-Log "Target revision: $revision"
+    $archive = Save-SourceArchive -Revision $revision
     $sourceDir = Expand-SourceArchive -ArchivePath $archive
     Sync-AppDirectory -SourceDir $sourceDir
-    Invoke-Installer -PythonVersion $pyVersion -Sha $sha
+    Invoke-Installer -PythonVersion $pyVersion -Revision $revision
 
     Remove-Item $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Log "Silentfrog bootstrap complete"

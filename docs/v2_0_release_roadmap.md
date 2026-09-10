@@ -398,4 +398,4 @@ Manual checks no test can cover:
 | R2 | Google connect — pure layer | medium | ☑ |
 | R3 | Google connect — dialog | large | ☑ |
 | R4 | Server-log analysis window (M6) | medium | ☑ |
-| R5 | Version, changelog, README, bootstrap, tag | small | ☐ |
+| R5 | Version, changelog, README, bootstrap, tag | small | ☑ |
