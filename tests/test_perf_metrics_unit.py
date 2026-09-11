@@ -5,15 +5,19 @@ from bs4 import BeautifulSoup
 
 from silentfrog.http_client import HttpResponse  # type: ignore[reportMissingImports]
 from silentfrog.perf_metrics import (  # type: ignore[reportMissingImports]
+    _build_heaviest_resources,
     _build_performance_issues,
+    _build_third_party_hosts,
     _collect_performance_metrics,
     _data_uri_size,
     _format_bytes,
     _measure_remote_resources,
     _normalize_resource_type,
+    performance_heaviest_resources_tooltip,
     performance_issue_tooltip,
     performance_resource_tooltip,
     performance_summary_tooltip,
+    performance_third_party_hosts_tooltip,
 )
 
 
@@ -31,6 +35,100 @@ def test_data_uri_size_and_format_bytes() -> None:
     assert "Blocking JavaScript" in performance_issue_tooltip("blocking_js")
     assert "Third-party" in performance_summary_tooltip()
     assert "Blocking JS" in performance_resource_tooltip()
+    assert "registrable" in performance_heaviest_resources_tooltip().lower()
+    assert "registrable" in performance_third_party_hosts_tooltip().lower()
+
+
+def test_build_heaviest_resources_orders_caps_and_flags_third_party() -> None:
+    resource_entries = {
+        "js": [
+            {"type": "JS", "url": "https://example.com/app.js", "bytes": 50_000, "blocking": True},
+            {"type": "JS", "url": "https://cdn.other.com/tag.js", "bytes": 120_000, "blocking": False},
+        ],
+        "img": [
+            {"type": "IMG", "url": "https://example.com/hero.jpg", "bytes": 300_000, "blocking": False},
+        ],
+    }
+
+    heaviest = _build_heaviest_resources("https://example.com/page", resource_entries, limit=2)
+
+    assert [item["url"] for item in heaviest] == [
+        "https://example.com/hero.jpg",
+        "https://cdn.other.com/tag.js",
+    ]
+    assert heaviest[0]["third_party"] is False
+    assert heaviest[1]["third_party"] is True
+    assert heaviest[1]["bytes"] == 120_000
+    assert heaviest[1]["type"] == "JS"
+
+
+def test_build_heaviest_resources_empty_case() -> None:
+    assert _build_heaviest_resources("https://example.com", {}) == []
+    assert _build_heaviest_resources("https://example.com", {"js": []}) == []
+
+
+def test_build_third_party_hosts_groups_by_host_and_sorts_by_bytes() -> None:
+    resource_entries = {
+        "js": [
+            {"type": "JS", "url": "https://cdn.other.com/a.js", "bytes": 40_000, "blocking": False},
+            {"type": "JS", "url": "https://cdn.other.com/b.js", "bytes": 10_000, "blocking": False},
+        ],
+        "img": [
+            {"type": "IMG", "url": "https://images.thirdparty.com/x.jpg", "bytes": 200_000, "blocking": False},
+            {"type": "IMG", "url": "https://example.com/local.jpg", "bytes": 999_999, "blocking": False},
+        ],
+    }
+
+    hosts = _build_third_party_hosts("https://example.com/page", resource_entries)
+
+    assert [item["host"] for item in hosts] == ["images.thirdparty.com", "cdn.other.com"]
+    other_host = hosts[1]
+    assert other_host["bytes"] == 50_000
+    assert other_host["count"] == 2
+    assert other_host["types"] == ["JS"]
+
+
+def test_build_third_party_hosts_caps_at_limit_and_handles_empty() -> None:
+    assert _build_third_party_hosts("https://example.com", {}) == []
+    resource_entries = {
+        "js": [
+            {"type": "JS", "url": f"https://host{i}.example-cdn.com/a.js", "bytes": 1000 - i, "blocking": False}
+            for i in range(5)
+        ]
+    }
+    hosts = _build_third_party_hosts("https://example.com", resource_entries, limit=3)
+    assert len(hosts) == 3
+    assert hosts[0]["host"] == "host0.example-cdn.com"
+
+
+def test_third_party_issue_evidence_names_top_hosts() -> None:
+    resources = {
+        "css": {"count": 0, "bytes": 0},
+        "js": {"count": 0, "bytes": 0},
+        "img": {"count": 0, "bytes": 0},
+        "font": {"count": 0, "bytes": 0},
+        "other": {"count": 0, "bytes": 0},
+    }
+    script_stats = {"blocking": {"count": 0, "bytes": 0}, "async": {"count": 0, "bytes": 0}}
+    summary = {
+        "total_page_bytes": 0,
+        "total_resource_count": 0,
+        "third_party_bytes": 700_000,
+        "third_party_count": 6,
+    }
+    third_party_hosts = [
+        {"host": "a.example.com", "bytes": 400_000, "count": 3, "types": ["JS"]},
+        {"host": "b.example.com", "bytes": 200_000, "count": 2, "types": ["IMG"]},
+        {"host": "c.example.com", "bytes": 100_000, "count": 1, "types": ["CSS"]},
+    ]
+
+    issues = _build_performance_issues(resources, script_stats, summary, third_party_hosts)
+
+    assert len(issues) == 1
+    evidence = issues[0]["evidence"]
+    assert "a.example.com" in evidence
+    assert "b.example.com" in evidence
+    assert "c.example.com" in evidence
 
 
 def test_build_performance_issues_keeps_thresholds_and_order() -> None:
@@ -108,6 +206,10 @@ async def test_collect_performance_metrics_inline_resources() -> None:
     assert breakdown["html"]["bytes"] == metrics["transfer_size"]
     assert breakdown["js"]["bytes"] == summary["js"]["bytes"]
     assert breakdown["img"]["bytes"] == summary["img"]["bytes"]
+    # Inline script and data-URI image are same-page content: nothing here is third-party.
+    assert metrics["heaviest_resources"]
+    assert all(not item["third_party"] for item in metrics["heaviest_resources"])
+    assert metrics["third_party_hosts"] == []
 
 
 @pytest.mark.asyncio
@@ -155,6 +257,20 @@ async def test_collect_performance_metrics_builds_verdict_and_third_party_issues
     assert metrics["summary"]["verdict"] == "High performance risk"
     issue_keys = {issue["key"] for issue in metrics["issues"]}
     assert {"page_weight", "blocking_js", "js_weight", "image_weight", "third_party_weight"} <= issue_keys
+
+    heaviest = metrics["heaviest_resources"]
+    assert heaviest, "heaviest_resources must be populated"
+    assert [item["bytes"] for item in heaviest] == sorted((item["bytes"] for item in heaviest), reverse=True)
+    assert all(item["third_party"] for item in heaviest)
+
+    hosts = metrics["third_party_hosts"]
+    assert [host["host"] for host in hosts] == ["cdn.third-party.com"]
+    assert hosts[0]["count"] == 3
+    assert hosts[0]["bytes"] == 180_000 + 820_000 + 1_700_000
+    assert hosts[0]["types"] == sorted(hosts[0]["types"])
+
+    third_party_issue = next(issue for issue in metrics["issues"] if issue["key"] == "third_party_weight")
+    assert "cdn.third-party.com" in third_party_issue["evidence"]
 
 
 @pytest.mark.asyncio

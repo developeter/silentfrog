@@ -134,26 +134,23 @@ def test_settings_dialog_stealth_toggle_disabled_without_scrapling(qtbot) -> Non
 
 
 def test_settings_dialog_semrush_defaults(qtbot, monkeypatch, tmp_path) -> None:
-    # V17 — the API-key field is empty + masked by default and the
-    # max-calls spinbox defaults to 100. Stub the keychain lookup and point
-    # the settings seam at a temp ini so the defaults are deterministic
-    # regardless of the developer's keychain or registry.
+    # gap-fix — the API-key field is empty + masked by default, the
+    # enabled checkbox starts unchecked, and the max-calls spinbox
+    # defaults to 100. Stub the keychain lookup and point SemrushConfig's
+    # data dir at a temp path so the defaults are deterministic regardless
+    # of the developer's keychain, registry, or a leftover config file.
     monkeypatch.delenv("SILENTFROG_SEMRUSH_API_KEY", raising=False)
-    from qtpy import QtCore, QtWidgets
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    from qtpy import QtWidgets
 
     from silentfrog.crawl_options import CrawlOptions
     from silentfrog.settings_dialog import CrawlSettingsDialog
 
-    ini = str(tmp_path / "settings.ini")
-    monkeypatch.setattr(
-        CrawlSettingsDialog,
-        "_app_settings",
-        staticmethod(lambda: QtCore.QSettings(ini, QtCore.QSettings.IniFormat)),
-    )
     monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
 
     dialog = CrawlSettingsDialog(CrawlOptions.default())
     qtbot.addWidget(dialog)
+    assert dialog.chk_semrush_enabled.isChecked() is False
     assert dialog.edit_semrush_key.text() == ""
     assert dialog.edit_semrush_key.echoMode() == QtWidgets.QLineEdit.EchoMode.Password
     assert dialog.spin_semrush_max_calls.value() == 100
@@ -178,6 +175,7 @@ def test_settings_dialog_sov_defaults(qtbot, monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("SILENTFROG_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("SILENTFROG_PERPLEXITY_API_KEY", raising=False)
     monkeypatch.delenv("SILENTFROG_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     from qtpy import QtCore, QtWidgets
 
     from silentfrog.crawl_options import CrawlOptions
@@ -205,6 +203,7 @@ def test_settings_dialog_sov_persist_calls_keyring_set_password(qtbot, monkeypat
     # `silentfrog-ai-engines` keychain service under the engine's own name.
     import sys
 
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     from qtpy import QtCore
 
     from silentfrog.crawl_options import CrawlOptions
@@ -237,6 +236,7 @@ def test_settings_dialog_sov_persist_swallows_missing_keyring(qtbot, monkeypatch
     # keyring is an optional extra; accept() must not raise when it's absent.
     import sys
 
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     from qtpy import QtCore
 
     from silentfrog.crawl_options import CrawlOptions

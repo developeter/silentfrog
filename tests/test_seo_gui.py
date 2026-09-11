@@ -1403,6 +1403,64 @@ def test_performance_tab_renders_summary_and_opportunities(qtbot):
     assert offender_model.data(offender_model.index(1, 3)) == "80.0 KB"
 
 
+def test_performance_tab_renders_heaviest_resources_and_third_party_hosts(qtbot) -> None:
+    tab = PerformanceTab()
+    qtbot.addWidget(tab)
+
+    payload = {
+        "status": 200,
+        "heaviest_resources": [
+            {"url": "https://cdn.other.com/tag.js", "bytes": 120_000, "type": "JS", "third_party": True},
+            {"url": "https://example.com/hero.jpg", "bytes": 80_000, "type": "IMG", "third_party": False},
+        ],
+        "third_party_hosts": [
+            {"host": "cdn.other.com", "bytes": 120_000, "count": 1, "types": ["JS"]},
+        ],
+    }
+
+    tab.update(payload)
+
+    heaviest_model = tab._heaviest_view.model()
+    assert heaviest_model is not None
+    assert heaviest_model.rowCount() == 2
+    assert heaviest_model.data(heaviest_model.index(0, 0)) == "https://cdn.other.com/tag.js"
+    assert heaviest_model.data(heaviest_model.index(0, 1)) == "JS"
+    assert heaviest_model.data(heaviest_model.index(0, 2)) == "117.2 KB"
+    assert heaviest_model.data(heaviest_model.index(0, 3)) == "Third-party"
+    assert heaviest_model.data(heaviest_model.index(1, 3)) == "First-party"
+
+    hosts_model = tab._third_party_hosts_view.model()
+    assert hosts_model is not None
+    assert hosts_model.rowCount() == 1
+    assert hosts_model.data(hosts_model.index(0, 0)) == "cdn.other.com"
+    assert hosts_model.data(hosts_model.index(0, 1)) == "1"
+    assert hosts_model.data(hosts_model.index(0, 2)) == "117.2 KB"
+    assert hosts_model.data(hosts_model.index(0, 3)) == "JS"
+
+    assert "registrable" in tab._heaviest_label.toolTip().lower()
+    assert "registrable" in tab._third_party_label.toolTip().lower()
+
+
+def test_performance_tab_handles_null_types_in_third_party_host(qtbot) -> None:
+    tab = PerformanceTab()
+    qtbot.addWidget(tab)
+
+    payload = {
+        "status": 200,
+        "third_party_hosts": [
+            {"host": "x.com", "bytes": 1, "count": 1, "types": None},
+        ],
+    }
+
+    tab.update(payload)
+
+    hosts_model = tab._third_party_hosts_view.model()
+    assert hosts_model is not None
+    assert hosts_model.rowCount() == 1
+    assert hosts_model.data(hosts_model.index(0, 0)) == "x.com"
+    assert hosts_model.data(hosts_model.index(0, 3)) == "-"
+
+
 def test_performance_tab_empty_state_is_stable(qtbot) -> None:
     tab = PerformanceTab()
     qtbot.addWidget(tab)
@@ -1421,6 +1479,14 @@ def test_performance_tab_empty_state_is_stable(qtbot) -> None:
     assert offender_model.rowCount() == 1
     assert offender_model.data(offender_model.index(0, 0)) == "-"
     assert offender_model.data(offender_model.index(0, 1)) == "-"
+    heaviest_model = tab._heaviest_view.model()
+    assert heaviest_model is not None
+    assert heaviest_model.rowCount() == 1
+    assert heaviest_model.data(heaviest_model.index(0, 0)) == "-"
+    hosts_model = tab._third_party_hosts_view.model()
+    assert hosts_model is not None
+    assert hosts_model.rowCount() == 1
+    assert hosts_model.data(hosts_model.index(0, 0)) == "-"
 
 
 def test_accessibility_tab_renders_violations(qtbot) -> None:

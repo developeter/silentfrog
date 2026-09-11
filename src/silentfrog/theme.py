@@ -20,6 +20,27 @@ def window_icon() -> QtGui.QIcon:
     return QtGui.QIcon(str(path))
 
 
+def _asset_url(name: str) -> str:
+    """Resolve ``assets/<name>`` to a QSS-safe ``url()`` path.
+
+    Qt's stylesheet ``url()`` parser wants forward slashes even on Windows,
+    and needs a real filesystem path (a data: URI is not understood, and a
+    plain CSS border-triangle is not honoured by QComboBox::down-arrow under
+    the native Windows styles this app runs under — both were tried and
+    silently render as a solid block, not a chevron).
+    """
+    path = importlib.resources.files("silentfrog").joinpath(f"assets/{name}")
+    return str(path).replace("\\", "/")
+
+
+# Neutral chrome, not a themed brand colour (P6 governs token colours in the
+# QSS below; this glyph, like window-icon.png, is a fixed-colour asset) —
+# `fill-opacity` on the disabled variant fades it toward whatever background
+# shows through, so one pair of files reads correctly in both themes.
+_ARROW_DOWN_URL = _asset_url("down-arrow.svg")
+_ARROW_DOWN_DISABLED_URL = _asset_url("down-arrow-disabled.svg")
+
+
 # `QTabWidget::tab-bar { left: 0px }` anchors the QTabBar to the left
 # edge of the QTabWidget's top area, neutralising macOS's default of
 # centring the bar within the available width. Combined with
@@ -53,6 +74,8 @@ _DARK_TOKENS = {
     "accent_text": "#12331f",
     "accent_hover": "#45e08a",
     "selection": "rgba(46, 204, 113, 0.22)",
+    "arrow_down": _ARROW_DOWN_URL,
+    "arrow_down_disabled": _ARROW_DOWN_DISABLED_URL,
 }
 
 _LIGHT_TOKENS = {
@@ -67,6 +90,8 @@ _LIGHT_TOKENS = {
     "accent_text": "#ffffff",
     "accent_hover": "#18b367",
     "selection": "rgba(15, 157, 88, 0.18)",
+    "arrow_down": _ARROW_DOWN_URL,
+    "arrow_down_disabled": _ARROW_DOWN_DISABLED_URL,
 }
 
 _QSS_TEMPLATE = string.Template("""
@@ -107,6 +132,8 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBo
     border: 1px solid $accent;
 }
 QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::down-arrow { image: url($arrow_down); width: 10px; height: 6px; margin-right: 8px; }
+QComboBox::down-arrow:disabled { image: url($arrow_down_disabled); }
 QComboBox QAbstractItemView { background: $bg1; color: $text; border: 1px solid $border;
                               selection-background-color: $selection; }
 QGroupBox          { border: 1px solid $border; border-radius: 8px; margin-top: 12px; padding-top: 6px; }

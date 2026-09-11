@@ -44,7 +44,12 @@ from .models import (
     SocialIssuesModel,
     build_bot_rows,
 )
-from .perf_metrics import performance_resource_tooltip, performance_summary_tooltip
+from .perf_metrics import (
+    performance_heaviest_resources_tooltip,
+    performance_resource_tooltip,
+    performance_summary_tooltip,
+    performance_third_party_hosts_tooltip,
+)
 from .theme import current_theme
 
 _AI_CRAWL_HEADERS = [
@@ -909,20 +914,54 @@ class PerformanceTab(TableTab):
         self._offender_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self._offender_view.setSortingEnabled(True)
         self._offender_view.setAlternatingRowColors(True)
+        self._heaviest_label = _rich_label(performance_heaviest_resources_tooltip())
+        self._heaviest_label.setText("<b>Heaviest resources</b>")
+        self._heaviest_view = self._new_detail_table_view()
+        self._third_party_label = _rich_label(performance_third_party_hosts_tooltip())
+        self._third_party_label.setText("<b>Third-party by host</b>")
+        self._third_party_hosts_view = self._new_detail_table_view()
+        self._heaviest_resources: list[dict[str, Any]] = []
+        self._third_party_hosts: list[dict[str, Any]] = []
         self._current_metrics = PerformanceMetrics.empty()
         self._is_rendering = False
         self._layout.insertWidget(0, self._summary)
         self._layout.insertWidget(1, self._scripts)
         self._layout.addWidget(self._opportunities)
         self._layout.addWidget(self._offender_view)
+        self._layout.addWidget(self._heaviest_label)
+        self._layout.addWidget(self._heaviest_view)
+        self._layout.addWidget(self._third_party_label)
+        self._layout.addWidget(self._third_party_hosts_view)
+
+    @staticmethod
+    def _new_detail_table_view() -> QtWidgets.QTableView:
+        view = QtWidgets.QTableView()
+        _configure_table_view_geometry(view)
+        view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        view.setSortingEnabled(True)
+        view.setAlternatingRowColors(True)
+        return view
+
+    @staticmethod
+    def _dict_list(raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, Mapping)]
 
     def update(self, data: object) -> None:
         metrics = PerformanceMetrics.empty()
+        heaviest_resources: list[dict[str, Any]] = []
+        third_party_hosts: list[dict[str, Any]] = []
         if isinstance(data, PerformanceMetrics):
             metrics = data
         elif isinstance(data, dict):
             metrics = PerformanceMetrics.from_raw(data)
+            heaviest_resources = self._dict_list(data.get("heaviest_resources"))
+            third_party_hosts = self._dict_list(data.get("third_party_hosts"))
         self._current_metrics = metrics
+        self._heaviest_resources = heaviest_resources
+        self._third_party_hosts = third_party_hosts
         self._render(metrics)
 
     def _render(self, metrics: PerformanceMetrics) -> None:
@@ -955,8 +994,49 @@ class PerformanceTab(TableTab):
                 (2, QtWidgets.QHeaderView.ResizeToContents),
                 (3, QtWidgets.QHeaderView.ResizeToContents),
             )
+            self._heaviest_view.setModel(
+                GenericModel(
+                    ["URL", "Type", "Size", "Party"],
+                    self._heaviest_resource_rows(),
+                    header_tooltips=[
+                        "Resource address, or a short label for inline/data content.",
+                        "Detected resource type: CSS, JS, IMG, FONT, or OTHER.",
+                        "Measured or inferred size in bytes.",
+                        "First-party matches the page's own registrable domain; "
+                        "third-party is served from a different one.",
+                    ],
+                )
+            )
+            _set_header_modes(
+                _header(self._heaviest_view),
+                (0, QtWidgets.QHeaderView.Stretch),
+                (1, QtWidgets.QHeaderView.ResizeToContents),
+                (2, QtWidgets.QHeaderView.ResizeToContents),
+                (3, QtWidgets.QHeaderView.ResizeToContents),
+            )
+            self._third_party_hosts_view.setModel(
+                GenericModel(
+                    ["Host", "Requests", "Size", "Types"],
+                    self._third_party_host_rows(),
+                    header_tooltips=[
+                        "External hostname serving these resources.",
+                        "Number of resources fetched from this host.",
+                        "Total measured bytes served by this host.",
+                        "Resource types served by this host (CSS, JS, IMG, FONT, OTHER).",
+                    ],
+                )
+            )
+            _set_header_modes(
+                _header(self._third_party_hosts_view),
+                (0, QtWidgets.QHeaderView.Stretch),
+                (1, QtWidgets.QHeaderView.ResizeToContents),
+                (2, QtWidgets.QHeaderView.ResizeToContents),
+                (3, QtWidgets.QHeaderView.ResizeToContents),
+            )
             self._apply_table_palette(self.view)
             self._apply_table_palette(self._offender_view)
+            self._apply_table_palette(self._heaviest_view)
+            self._apply_table_palette(self._third_party_hosts_view)
         finally:
             self._is_rendering = False
 
@@ -1120,6 +1200,30 @@ class PerformanceTab(TableTab):
         ]
         return rows or [["-", "-", "-", "-"]]
 
+    def _heaviest_resource_rows(self) -> list[list[str]]:
+        rows = [
+            [
+                str(item.get("url") or "-"),
+                str(item.get("type") or "-").upper(),
+                self._format_bytes(item.get("bytes", 0)),
+                "Third-party" if item.get("third_party") else "First-party",
+            ]
+            for item in self._heaviest_resources
+        ]
+        return rows or [["-", "-", "-", "-"]]
+
+    def _third_party_host_rows(self) -> list[list[str]]:
+        rows = [
+            [
+                str(item.get("host") or "-"),
+                str(item.get("count", 0)),
+                self._format_bytes(item.get("bytes", 0)),
+                ", ".join(str(kind) for kind in (item.get("types") or []) if kind) or "-",
+            ]
+            for item in self._third_party_hosts
+        ]
+        return rows or [["-", "-", "-", "-"]]
+
     def clear(self) -> None:
         self.update({})
 
@@ -1130,12 +1234,13 @@ class PerformanceTab(TableTab):
             QtCore.QEvent.Type.ApplicationPaletteChange,
         ):
             self._render(self._current_metrics)
-            offender_vp = self._offender_view.viewport() if self._offender_view else None
             main_vp = self.view.viewport()
-            if offender_vp:
-                offender_vp.update()
             if main_vp:
                 main_vp.update()
+            for extra_view in (self._offender_view, self._heaviest_view, self._third_party_hosts_view):
+                extra_vp = extra_view.viewport() if extra_view else None
+                if extra_vp:
+                    extra_vp.update()
         super().changeEvent(event)
 
     def _apply_table_palette(self, view: QtWidgets.QTableView) -> None:

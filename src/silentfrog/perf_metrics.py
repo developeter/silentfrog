@@ -39,6 +39,9 @@ _WARNING_THIRD_PARTY_BYTES = 250_000
 _CRITICAL_THIRD_PARTY_BYTES = 600_000
 _WARNING_THIRD_PARTY_COUNT = 5
 _CRITICAL_THIRD_PARTY_COUNT = 12
+_HEAVIEST_RESOURCE_LIMIT = 15
+_THIRD_PARTY_HOST_LIMIT = 15
+_THIRD_PARTY_ISSUE_HOST_SAMPLE = 3
 _RESOURCE_WEIGHT_RULES = {
     "js": {
         "issue_key": "js_weight",
@@ -89,6 +92,20 @@ _PERFORMANCE_RESOURCE_TOOLTIP = (
     "<b>Async/Deferred JS</b>: scripts that are explicitly non-blocking in source.<br/>"
     "<b>CSS / JS / Images / Fonts</b>: measured or inferred bytes by resource type from the HTML source and follow-up fetches.<br/>"
     "Best practice: minimize render-blocking JavaScript, keep CSS lean, compress images, and avoid unnecessary font cost."
+)
+_PERFORMANCE_HEAVIEST_RESOURCES_TOOLTIP = (
+    "<b>Heaviest resources</b><br/>"
+    "The individual resources contributing the most measured bytes to this page, across all types.<br/>"
+    "<b>1st/3rd party</b>: a resource is third-party when it is served from a host whose registrable "
+    "domain (the last two labels, e.g. example.com) differs from the audited page's own domain.<br/>"
+    "Best practice: fix the resources at the top of this list first — they move the total page weight the most."
+)
+_PERFORMANCE_THIRD_PARTY_HOSTS_TOOLTIP = (
+    "<b>Third-party by host</b><br/>"
+    "Third-party resources grouped by the external host that served them, sorted by total bytes.<br/>"
+    "<b>Third-party</b>: a host whose registrable domain (the last two labels, e.g. example.com) differs "
+    "from the audited page's own domain.<br/>"
+    "Best practice: keep only third-party hosts with clear business value and drop or lazy-load the rest."
 )
 _PERFORMANCE_ISSUE_TOOLTIPS = {
     "page_weight": (
@@ -159,6 +176,17 @@ def _is_third_party_resource(base_url: str, resource_url: str) -> bool:
     return bool(resource_url) and _host_root(base_url) != _host_root(resource_url)
 
 
+def _resource_is_third_party(base_url: str, resource_url: str) -> bool:
+    """Like ``_is_third_party_resource`` but safe on non-fetchable URLs.
+
+    Placeholders such as ``(inline script)`` or a truncated data: URI label
+    have no real host, so ``_host_root`` would read them as always
+    different from the page's host. Restricting the check to http(s) URLs
+    avoids flagging those as false third-party hits.
+    """
+    return resource_url.startswith(("http://", "https://")) and _is_third_party_resource(base_url, resource_url)
+
+
 def _build_resource_breakdown(transfer_size: int, resources: dict[str, dict[str, int]]) -> list[dict[str, int | str]]:
     html_entry = {"type": "html", "count": 1, "bytes": max(transfer_size, 0)}
     buckets = {
@@ -207,13 +235,14 @@ def _build_performance_issues(
     resources: dict[str, dict[str, int]],
     script_stats: dict[str, dict[str, int]],
     summary: dict[str, int],
+    third_party_hosts: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     issue_builders = (
         _page_weight_issue(summary),
         _blocking_js_issue(script_stats),
         *(_resource_weight_issue(resource_key, resources) for resource_key in ("js", "css", "img")),
         _request_count_issue(summary),
-        _third_party_issue(summary),
+        _third_party_issue(summary, third_party_hosts or []),
     )
     return [issue for issue in issue_builders if issue is not None]
 
@@ -316,16 +345,26 @@ def _request_count_issue(summary: dict[str, int]) -> dict[str, str] | None:
     )
 
 
-def _third_party_issue(summary: dict[str, int]) -> dict[str, str] | None:
+def _third_party_evidence(count: int, total_bytes: int, hosts: list[dict[str, Any]]) -> str:
+    base = f"{count} third-party resource(s), {_format_bytes(total_bytes)} total."
+    top_hosts = hosts[:_THIRD_PARTY_ISSUE_HOST_SAMPLE]
+    if not top_hosts:
+        return base
+    named = ", ".join(f"{host['host']} ({_format_bytes(host['bytes'])})" for host in top_hosts)
+    return f"{base} Heaviest hosts: {named}."
+
+
+def _third_party_issue(summary: dict[str, int], third_party_hosts: list[dict[str, Any]]) -> dict[str, str] | None:
     third_party_bytes = summary["third_party_bytes"]
     third_party_count = summary["third_party_count"]
+    evidence = _third_party_evidence(third_party_count, third_party_bytes, third_party_hosts)
     critical = third_party_bytes >= _CRITICAL_THIRD_PARTY_BYTES or third_party_count >= _CRITICAL_THIRD_PARTY_COUNT
     if critical:
         return _issue(
             "third_party_weight",
             "critical",
             "Third-party resources contribute significant weight.",
-            f"{third_party_count} third-party resource(s), {_format_bytes(third_party_bytes)} total.",
+            evidence,
             "Audit off-domain dependencies and remove low-value third-party assets.",
         )
     warning = third_party_bytes >= _WARNING_THIRD_PARTY_BYTES or third_party_count >= _WARNING_THIRD_PARTY_COUNT
@@ -334,7 +373,7 @@ def _third_party_issue(summary: dict[str, int]) -> dict[str, str] | None:
             "third_party_weight",
             "warning",
             "Third-party resources are adding noticeable overhead.",
-            f"{third_party_count} third-party resource(s), {_format_bytes(third_party_bytes)} total.",
+            evidence,
             "Reduce third-party dependencies and lazy-load what is not critical.",
         )
     return None
@@ -366,6 +405,14 @@ def performance_summary_tooltip() -> str:
 
 def performance_resource_tooltip() -> str:
     return _PERFORMANCE_RESOURCE_TOOLTIP
+
+
+def performance_heaviest_resources_tooltip() -> str:
+    return _PERFORMANCE_HEAVIEST_RESOURCES_TOOLTIP
+
+
+def performance_third_party_hosts_tooltip() -> str:
+    return _PERFORMANCE_THIRD_PARTY_HOSTS_TOOLTIP
 
 
 def performance_issue_tooltip(issue_key: str) -> str:
@@ -527,6 +574,67 @@ def _top_offenders(resource_entries: dict[str, list[dict[str, Any]]]) -> list[di
         offenders.extend(entries)
     offenders.sort(key=lambda item: item.get("bytes", 0), reverse=True)
     return offenders[:10]
+
+
+def _build_heaviest_resources(
+    base_url: str,
+    resource_entries: dict[str, list[dict[str, Any]]],
+    limit: int = _HEAVIEST_RESOURCE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Top ``limit`` individual resources by measured bytes, across all types.
+
+    JSON-native only (no tuples): a plain list of small dicts so it can be
+    stored and reloaded losslessly alongside the rest of the performance
+    payload.
+    """
+    all_entries = [entry for entries in resource_entries.values() for entry in entries]
+    ranked = sorted(all_entries, key=lambda item: int(item.get("bytes", 0) or 0), reverse=True)
+    heaviest: list[dict[str, Any]] = []
+    for entry in ranked[:limit]:
+        url = str(entry.get("url", "")).strip()
+        heaviest.append(
+            {
+                "url": url,
+                "bytes": max(int(entry.get("bytes", 0) or 0), 0),
+                "type": str(entry.get("type", "")).strip(),
+                "third_party": _resource_is_third_party(base_url, url),
+            }
+        )
+    return heaviest
+
+
+def _build_third_party_hosts(
+    base_url: str,
+    resource_entries: dict[str, list[dict[str, Any]]],
+    limit: int = _THIRD_PARTY_HOST_LIMIT,
+) -> list[dict[str, Any]]:
+    """Third-party resources grouped by serving host, sorted by bytes desc.
+
+    JSON-native only (no tuples): each row is a plain dict with a sorted
+    ``list`` for ``types`` (never a ``set``, which is not JSON-native).
+    """
+    hosts: dict[str, dict[str, Any]] = {}
+    for entries in resource_entries.values():
+        for entry in entries:
+            url = str(entry.get("url", "")).strip()
+            if not _resource_is_third_party(base_url, url):
+                continue
+            host = urlparse(url).hostname or url
+            bucket = hosts.setdefault(host, {"host": host, "bytes": 0, "count": 0, "types": set()})
+            bucket["bytes"] += max(int(entry.get("bytes", 0) or 0), 0)
+            bucket["count"] += 1
+            bucket["types"].add(str(entry.get("type", "")).strip())
+
+    ranked = sorted(hosts.values(), key=lambda item: item["bytes"], reverse=True)
+    return [
+        {
+            "host": item["host"],
+            "bytes": item["bytes"],
+            "count": item["count"],
+            "types": sorted(t for t in item["types"] if t),
+        }
+        for item in ranked[:limit]
+    ]
 
 
 def _add_opportunity(opportunities: list[str], details: list[dict[str, str]], message: str, severity: str) -> None:
@@ -759,7 +867,9 @@ async def _collect_performance_metrics(response: Any, soup: Any, *, probe_resour
     )
     resource_breakdown = _build_resource_breakdown(transfer_size, state.resources)
     summary = _build_performance_summary(response.url, transfer_size, state.resources, state.resource_entries)
-    issues = _build_performance_issues(state.resources, state.script_stats, summary)
+    heaviest_resources = _build_heaviest_resources(response.url, state.resource_entries)
+    third_party_hosts = _build_third_party_hosts(response.url, state.resource_entries)
+    issues = _build_performance_issues(state.resources, state.script_stats, summary, third_party_hosts)
     summary_with_meta = _build_performance_summary_metadata(summary, issues)
 
     return {
@@ -773,6 +883,8 @@ async def _collect_performance_metrics(response: Any, soup: Any, *, probe_resour
         "issues": issues,
         "opportunities": opportunities,
         "top_offenders": _top_offenders(state.resource_entries),
+        "heaviest_resources": heaviest_resources,
+        "third_party_hosts": third_party_hosts,
         "scripts": {"blocking": state.script_stats["blocking"], "async": state.script_stats["async"]},
         "opportunity_details": opportunity_details,
     }

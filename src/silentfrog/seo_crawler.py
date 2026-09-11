@@ -546,14 +546,33 @@ async def _collect_google_metrics(url: str) -> dict[str, Any]:
 
 
 def _semrush_enabled() -> bool:
-    return os.environ.get("SILENTFROG_SEMRUSH_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}
+    """Env var OR the persisted Settings opt-in (v2.0 gap fix — a Settings
+    checkbox alone used to have no effect on a crawl). A truthy env var
+    always wins over the config (matching integrations/google/connection.py's
+    established shape); an unset or non-truthy env var falls through to the
+    config, so headless/CI behaviour is unchanged only when the switch is
+    set to a truthy value."""
+    if os.environ.get("SILENTFROG_SEMRUSH_ENABLE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    from .integrations.semrush.config import load_config
+
+    return load_config().enabled
 
 
 def _semrush_max_calls() -> int:
-    try:
-        return int(os.environ.get("SILENTFROG_SEMRUSH_MAX_CALLS", "100").strip() or "100")
-    except ValueError:
-        return 100
+    """Env var when set (even if invalid, matching the pre-existing
+    fail-open-to-default behaviour), else the persisted Settings cap — the
+    daily-cap spinbox previously wrote to QSettings while this read only
+    the env var, so it had no effect."""
+    raw = os.environ.get("SILENTFROG_SEMRUSH_MAX_CALLS", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return 100
+    from .integrations.semrush.config import load_config
+
+    return load_config().max_calls
 
 
 def _registrable_domain(url: str) -> str:
@@ -566,8 +585,8 @@ def _registrable_domain(url: str) -> str:
 
 
 async def _collect_semrush(url: str) -> dict[str, Any]:
-    """v2.0 V17 — Semrush authority metrics, gated on
-    SILENTFROG_SEMRUSH_ENABLE + an API key (keyring or env). Returns {}
+    """v2.0 V17 — Semrush authority metrics, gated on the Settings checkbox (SemrushConfig.enabled) or
+    SILENTFROG_SEMRUSH_ENABLE, plus an API key (keyring or env). Returns {}
     (unmeasured) on a stock audit. Cached per registrable domain so the
     daily call budget covers ~1-2 calls per domain. Never raises."""
     if not _semrush_enabled():

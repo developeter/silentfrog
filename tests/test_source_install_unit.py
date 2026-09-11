@@ -217,6 +217,23 @@ def test_macos_launcher_renderers_are_plain_sh_compatible() -> None:
     assert render_reinstall_sh().startswith("#!/bin/sh")
 
 
+def test_run_bat_launches_venv_exe_detached_without_holding_console() -> None:
+    """Regression: run_silentfrog.bat used to `call` the windowed .exe and
+    then `pause`, so a console stayed open for the whole app session
+    (looked like "a cheap app" on Windows). It must now `start` the exe
+    detached and return immediately on that path, with no pause; only the
+    developer `poetry run` fallback keeps a console open.
+    """
+    run_bat = render_run_bat()
+    venv_branch, _, fallback_branch = run_bat.partition("poetry run silentfrog")
+
+    assert 'start "" "%LAUNCHER%" %*' in venv_branch
+    assert "exit /b 0" in venv_branch
+    assert 'call "%LAUNCHER%"' not in run_bat
+    assert "pause" not in venv_branch
+    assert "pause" in fallback_branch
+
+
 def test_render_desktop_command_launcher_runs_repo_launcher(tmp_path: Path) -> None:
     rendered = render_desktop_command_launcher(tmp_path)
 

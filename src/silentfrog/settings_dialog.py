@@ -54,6 +54,16 @@ def _google_available() -> bool:
     return importlib.util.find_spec("google_auth_oauthlib") is not None
 
 
+def _keyring_available() -> bool:
+    """Return True when ``keyring`` (the OS-keychain backend shipped by the
+    optional silentfrog[semrush]/[google]/[ai-engines] extras) is
+    importable. A stock ``pip install .`` build never has it, so the
+    Semrush API-key field must degrade visibly instead of silently
+    swallowing whatever the user types (see settings_dialog.py's Semrush
+    group)."""
+    return importlib.util.find_spec("keyring") is not None
+
+
 async def _summarize_sov_test(keys: dict[str, str]) -> str:
     """Test each keyed AI-engine and join 'engine: message' results with
     ' · ' — 'no key' for empty fields, never awaiting a network call for
@@ -188,10 +198,24 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         return geo_box
 
     def _build_semrush_group(self, theme: str) -> QtWidgets.QGroupBox:
-        """Authority (Semrush) controls. Optional + off/empty by default —
-        the key is persisted to the OS keychain, the daily cap to QSettings."""
+        """Authority (Semrush) controls. Optional + off by default — the
+        'Use Semrush in audits' checkbox (mirrors GoogleConnectDialog's
+        'Use Google data in audits') is the one thing that actually gates a
+        crawl (seo_crawler._semrush_enabled), the key is persisted to the
+        OS keychain, and the daily cap is persisted to the same
+        SemrushConfig as the checkbox — not QSettings, which the crawler
+        never read."""
         box = QtWidgets.QGroupBox("Authority (Semrush)")
         form = QtWidgets.QFormLayout(box)
+        self.chk_semrush_enabled = QtWidgets.QCheckBox("Use Semrush in audits")
+        self.chk_semrush_enabled.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_semrush_enabled.setToolTip(
+            "Off by default. When checked, a crawl fetches domain Authority Score, organic "
+            "footprint, and backlink signals from the Semrush Analytics API — provided an API "
+            "key is available below (or via SILENTFROG_SEMRUSH_API_KEY). Per §1.5 these off-page "
+            "signals never penalise the GEO Score either way."
+        )
+        form.addRow(self.chk_semrush_enabled)
         self.edit_semrush_key = QtWidgets.QLineEdit()
         self.edit_semrush_key.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         self.edit_semrush_key.setPlaceholderText("Semrush API key (stored in the OS keychain)")
@@ -201,6 +225,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             "Semrush Analytics API. Off/empty by default; per §1.5 these off-page signals never penalise "
             "the GEO Score. Calls are metered — see the daily cap below."
         )
+        if not _keyring_available():
+            self.edit_semrush_key.setEnabled(False)
+            self.edit_semrush_key.setToolTip(
+                self.edit_semrush_key.toolTip() + "\n\nkeyring is not installed: enable by running "
+                "`pip install silentfrog[semrush]`."
+            )
         form.addRow("API key", self.edit_semrush_key)
         self.spin_semrush_max_calls = QtWidgets.QSpinBox()
         self.spin_semrush_max_calls.setRange(1, 10000)
@@ -209,6 +239,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.btn_semrush_test = QtWidgets.QPushButton("Test connection")
         self.btn_semrush_test.clicked.connect(self._on_semrush_test)
         self.lbl_semrush_test = QtWidgets.QLabel("")
+        self.lbl_semrush_test.setWordWrap(True)
         test_widget = QtWidgets.QWidget()
         test_row = QtWidgets.QHBoxLayout(test_widget)
         test_row.setContentsMargins(0, 0, 0, 0)
@@ -485,11 +516,17 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.resize(target)
 
     def _initialize_semrush(self) -> None:
-        """Prefill the masked key from the keychain and the cap from
-        QSettings. Both degrade to empty/default when unavailable."""
-        self.edit_semrush_key.setText(self._load_semrush_key())
-        settings = self._app_settings()
-        self.spin_semrush_max_calls.setValue(int(settings.value("semrush/max_calls", 100) or 100))
+        """Prefill the masked key from the keychain/env and the enabled
+        flag + daily cap from SemrushConfig (the same pure config
+        seo_crawler.py reads). All degrade to empty/default when
+        unavailable, mirroring GoogleConnectDialog._initialize_status."""
+        from .integrations.semrush.config import load_config
+
+        self._loaded_semrush_key = self._load_semrush_key()
+        self.edit_semrush_key.setText(self._loaded_semrush_key)
+        config = load_config()
+        self.chk_semrush_enabled.setChecked(config.enabled)
+        self.spin_semrush_max_calls.setValue(config.max_calls)
 
     @staticmethod
     def _app_settings() -> QtCore.QSettings:
@@ -617,23 +654,63 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def accept(self) -> None:
         """Persist the Semrush key + AI-engine BYO keys to the keychain and
-        the Semrush daily cap to QSettings, then close. Persistence
-        failures never block accept."""
+        the enabled flag + daily cap to SemrushConfig, then close.
+        Persistence failures never block accept, but a typed key that
+        could not be stored blocks on a modal warning first (see
+        ``_persist_semrush``) so the user actually sees it before the
+        dialog closes."""
         self._persist_semrush()
         self._persist_ai_engine_keys()
         super().accept()
 
     def _persist_semrush(self) -> None:
+        """Persist the enabled flag + daily cap to SemrushConfig (the pure
+        layer seo_crawler.py reads — a QSettings-only cap used to have no
+        effect on a crawl) and the key to the OS keychain. The key is
+        always written, including an empty one — clearing the field and
+        pressing OK must clear the stored credential too (mirrors the
+        pre-existing unconditional ``keyring.set_password`` call, and the
+        Google dialog's convention of propagating a cleared field). A
+        key the user typed that fails to store is never dropped silently: a
+        modal warning blocks here, before ``accept()`` calls
+        ``super().accept()`` and closes the dialog, so the status is never
+        an invisible label on an already-closed window (root cause (a)).
+        Only a key that differs from the prefilled one warns: a keyring-less
+        user whose key comes from SILENTFROG_SEMRUSH_API_KEY gets it
+        prefilled into a DISABLED field, so nothing was lost (the env key
+        still resolves for every crawl) and there is nothing to act on --
+        warning on every OK would be a false alarm."""
+        from .integrations.semrush.config import SemrushConfig, save_config
+
         key = self.edit_semrush_key.text().strip()
-        settings = self._app_settings()
-        settings.setValue("semrush/max_calls", self.spin_semrush_max_calls.value())
+        stored = self._store_semrush_key(key)
+        if key and not stored and key != self._loaded_semrush_key:
+            warning = (
+                "The Semrush API key could not be stored in the OS keychain. If the keyring backend is missing, "
+                "run `pip install silentfrog[semrush]`; otherwise set SILENTFROG_SEMRUSH_API_KEY instead."
+            )
+            self.lbl_semrush_test.setText("✗ " + warning)
+            QtWidgets.QMessageBox.warning(self, "Semrush key not saved", warning)
+        save_config(
+            SemrushConfig(
+                enabled=self.chk_semrush_enabled.isChecked(),
+                max_calls=self.spin_semrush_max_calls.value(),
+            )
+        )
+
+    @staticmethod
+    def _store_semrush_key(key: str) -> bool:
+        """Persist ``key`` to the OS keychain; return whether it worked so
+        callers can surface a status instead of swallowing the failure.
+        Bare @staticmethod (mirrors ``_load_semrush_key``) so tests can
+        stub it without touching a real keychain."""
         try:
             import keyring
 
             keyring.set_password("silentfrog-semrush", "api_key", key)
+            return True
         except Exception:
-            # keyring is optional; without it the key falls back to env only.
-            return
+            return False
 
     def _persist_ai_engine_keys(self) -> None:
         """Persist each non-empty BYO key to the OS keychain only — never to
@@ -654,8 +731,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 continue
 
     def _on_semrush_test(self) -> None:
-        """Run test_connection off the UI thread and show ✓/✗. Tiny by
-        design — mirrors the app's daemon-thread pattern (see workers.py)."""
+        """Run test_connection off the UI thread and report whether the
+        crawl will actually see the key afterward — not just whether the
+        typed key is valid. A bare 'valid' used to be misleading (root
+        cause (d)): the key could pass here and still never reach a crawl
+        because it was never persisted. Daemon-thread + invokeMethod
+        mechanics unchanged; only the message text and what is tested."""
         import asyncio
         import threading
 
@@ -669,15 +750,34 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
                 ok, message = asyncio.run(test_connection(key))
             except Exception as exc:  # noqa: BLE001
                 ok, message = False, str(exc)
-            mark = "✓" if ok else "✗"
+            text = self._semrush_test_status(ok, message)
             QtCore.QMetaObject.invokeMethod(
                 self.lbl_semrush_test,
                 "setText",
                 QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, f"{mark} {message}"),
+                QtCore.Q_ARG(str, text),
             )
 
         threading.Thread(target=_target, daemon=True).start()
+
+    @staticmethod
+    def _semrush_test_status(ok: bool, message: str) -> str:
+        """Compose the Test-connection label text. Pure -- it reports whether
+        the typed key is valid and whether OK will be able to store it, but
+        never writes to the keychain itself: this runs in a daemon thread
+        that can outlive the dialog, so storing here would commit a
+        credential the user may still discard with Cancel. Root cause (d) is
+        addressed by saying what a crawl will see, not by persisting early;
+        persistence stays in ``accept()``/``_persist_semrush``."""
+        if not ok:
+            return f"✗ {message}"
+        if _keyring_available():
+            return "✓ Working — not stored yet: press OK to save the key in the OS keychain."
+        return (
+            "✓ Working — but the key cannot be stored (keyring is not installed: run "
+            "`pip install silentfrog[semrush]`). It will only work via the "
+            "SILENTFROG_SEMRUSH_API_KEY environment variable."
+        )
 
     def _on_sov_test(self) -> None:
         """Test every keyed engine off the UI thread and show a combined

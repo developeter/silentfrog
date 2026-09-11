@@ -140,6 +140,11 @@ run_silentfrog.bat
 ./run_silentfrog.sh
 ```
 
+On Windows, `run_silentfrog.bat` starts the windowed app detached and its own
+console window closes immediately — it does not stay open for the session.
+(If no `.venv` is found yet, it falls back to `poetry run silentfrog` for
+developers, which keeps its console open to show output.)
+
 The installer also creates a Desktop launcher automatically:
 
 - **Windows**: double-click `Silentfrog.lnk`

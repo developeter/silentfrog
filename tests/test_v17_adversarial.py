@@ -137,8 +137,12 @@ def test_measured_authority_checks_never_warn_or_critical() -> None:
     assert all(check.status == "good" for check in build_semrush_authority_checks(strong))
 
 
-def test_collect_semrush_skips_when_disabled(monkeypatch) -> None:
+def test_collect_semrush_skips_when_disabled(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("SILENTFROG_SEMRUSH_ENABLE", raising=False)
+    # gap-fix isolation: _semrush_enabled() now also falls back to the
+    # persisted SemrushConfig, so point it at an empty temp dir rather than
+    # the developer's real (possibly opted-in) Silentfrog data dir.
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     from silentfrog import seo_crawler
 
     assert asyncio.run(seo_crawler._collect_semrush("https://example.com/page")) == {}

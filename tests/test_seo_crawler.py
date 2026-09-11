@@ -453,3 +453,63 @@ async def test_fetch_analysis_response_raises_helpful_error_on_fetch_failure(mon
             timeout=5,
             crawl_options=CrawlOptions.default(),
         )
+
+
+# --- v2.0 gap fix: _semrush_enabled / _semrush_max_calls env-vs-config ---
+# A Settings-dialog opt-in used to have no effect on a crawl because these
+# read only the env var; now they fall back to the persisted SemrushConfig,
+# with env still winning so headless/CI behaviour is unchanged.
+
+
+def test_semrush_enabled_env_wins_over_config(monkeypatch, tmp_path):
+    from silentfrog.integrations.semrush.config import SemrushConfig, save_config
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    save_config(SemrushConfig(enabled=False))
+    monkeypatch.setenv("SILENTFROG_SEMRUSH_ENABLE", "1")
+
+    assert crawler._semrush_enabled() is True
+
+
+def test_semrush_enabled_falls_back_to_config_when_env_unset(monkeypatch, tmp_path):
+    from silentfrog.integrations.semrush.config import SemrushConfig, save_config
+
+    monkeypatch.delenv("SILENTFROG_SEMRUSH_ENABLE", raising=False)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    save_config(SemrushConfig(enabled=True))
+
+    assert crawler._semrush_enabled() is True
+
+
+def test_semrush_enabled_false_when_neither_env_nor_config_set(monkeypatch, tmp_path):
+    monkeypatch.delenv("SILENTFROG_SEMRUSH_ENABLE", raising=False)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+
+    assert crawler._semrush_enabled() is False
+
+
+def test_semrush_max_calls_env_wins_over_config(monkeypatch, tmp_path):
+    from silentfrog.integrations.semrush.config import SemrushConfig, save_config
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    save_config(SemrushConfig(max_calls=5))
+    monkeypatch.setenv("SILENTFROG_SEMRUSH_MAX_CALLS", "42")
+
+    assert crawler._semrush_max_calls() == 42
+
+
+def test_semrush_max_calls_falls_back_to_config_when_env_unset(monkeypatch, tmp_path):
+    from silentfrog.integrations.semrush.config import SemrushConfig, save_config
+
+    monkeypatch.delenv("SILENTFROG_SEMRUSH_MAX_CALLS", raising=False)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    save_config(SemrushConfig(max_calls=17))
+
+    assert crawler._semrush_max_calls() == 17
+
+
+def test_semrush_max_calls_defaults_to_100_when_neither_set(monkeypatch, tmp_path):
+    monkeypatch.delenv("SILENTFROG_SEMRUSH_MAX_CALLS", raising=False)
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+
+    assert crawler._semrush_max_calls() == 100
