@@ -212,6 +212,11 @@ class PerformanceMetrics:
     top_offenders: list[PerformanceOffender]
     scripts: PerformanceScripts
     opportunity_details: list[PerformanceOpportunity]
+    # v2.0 perf-payload-roundtrip: heaviest individual resources and third-party
+    # hosts, JSON-native lists emitted by perf_metrics.py for a LIVE audit.
+    # default_factory=list so an OLD persisted blob (no such keys) loads as [].
+    heaviest_resources: list[dict[str, Any]] = field(default_factory=list)
+    third_party_hosts: list[dict[str, Any]] = field(default_factory=list)
 
     @staticmethod
     def _resource_breakdown_from_summary(
@@ -277,6 +282,8 @@ class PerformanceMetrics:
             top_offenders=[],
             scripts=PerformanceScripts.empty(),
             opportunity_details=[],
+            heaviest_resources=[],
+            third_party_hosts=[],
         )
 
     @staticmethod
@@ -296,6 +303,12 @@ class PerformanceMetrics:
     @staticmethod
     def _model_list(raw: Any, factory):
         return [factory(item) for item in _mapping_items(raw)]
+
+    @staticmethod
+    def _dict_items(raw: Any) -> list[dict[str, Any]]:
+        # Tolerant of absence: an OLD blob has no such key, `raw` is None,
+        # `_mapping_items` returns [], and the field loads as [].
+        return [dict(item) for item in _mapping_items(raw)]
 
     @classmethod
     def from_raw(cls, value: Any) -> PerformanceMetrics:
@@ -333,6 +346,8 @@ class PerformanceMetrics:
             top_offenders=offenders,
             scripts=scripts,
             opportunity_details=opportunity_details,
+            heaviest_resources=cls._dict_items(value.get("heaviest_resources")),
+            third_party_hosts=cls._dict_items(value.get("third_party_hosts")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -349,6 +364,8 @@ class PerformanceMetrics:
             "top_offenders": [entry.to_dict() for entry in self.top_offenders],
             "scripts": self.scripts.to_dict(),
             "opportunity_details": [item.to_dict() for item in self.opportunity_details],
+            "heaviest_resources": [dict(item) for item in self.heaviest_resources],
+            "third_party_hosts": [dict(item) for item in self.third_party_hosts],
         }
 
 

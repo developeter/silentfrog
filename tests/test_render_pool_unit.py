@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 
 import pytest
 
-from silentfrog.render_pool import RenderPool
+from silentfrog.render_pool import (
+    RenderPool,
+    active_render_pool,
+    render_pool_scope_async,
+)
 
 
 class _FakePage:
@@ -168,6 +173,58 @@ async def test_launch_failure_resolves_renders_with_error_instead_of_hanging() -
 
 
 @pytest.mark.asyncio
+async def test_worker_retries_after_a_failed_launch_instead_of_failing_forever() -> None:
+    # render-pool repair: every worker launches at once on a crawl's first
+    # render, so a transient launch failure under that contention is normal.
+    # A worker that kept its dead browser failed EVERY later job it dequeued
+    # for the rest of the crawl; the pre-pool direct call relaunched per page
+    # and lost exactly one page to the same failure.
+    class _FlakyManager:
+        def __init__(self) -> None:
+            self.launch_count = 0
+            self.stopped = False
+
+        def launch(self) -> _FakeBrowser:
+            self.launch_count += 1
+            if self.launch_count == 1:
+                raise RuntimeError("Target page, context or browser has been closed")
+            return _FakeBrowser(lambda: "<html>retried</html>")
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    manager = _FlakyManager()
+    pool = RenderPool(browser_factory=lambda: manager)
+    first = await asyncio.wait_for(pool.render("https://e.com/a"), timeout=5)
+    second = await asyncio.wait_for(pool.render("https://e.com/b"), timeout=5)
+    assert first.error.startswith("Browser launch failed:")
+    assert second.error == ""
+    assert "retried" in second.rendered_html
+    pool.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_the_browser_factory_itself_after_it_failed() -> None:
+    # Same repair one level up: when the factory (not the launch) is what
+    # raised, the worker has no manager to relaunch from and must rebuild it.
+    calls: list[int] = []
+
+    def factory() -> _FakeManager:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("playwright install missing")
+        return _FakeManager()
+
+    pool = RenderPool(browser_factory=factory)
+    first = await asyncio.wait_for(pool.render("https://e.com/a"), timeout=5)
+    second = await asyncio.wait_for(pool.render("https://e.com/b"), timeout=5)
+    assert first.error.startswith("Browser launch failed:")
+    assert second.error == ""
+    assert "<html>" in second.rendered_html
+    pool.close()
+
+
+@pytest.mark.asyncio
 async def test_render_passes_the_requested_user_agent_to_the_page() -> None:
     # v2.0 V10: per-bot renders override the UA; the default path leaves it "".
     manager = _FakeManager()
@@ -226,3 +283,123 @@ async def test_render_without_script_args_leaves_page_untouched() -> None:
     assert page.injected_scripts == []
     assert page.evaluated == []
     pool.close()
+
+
+# --- render-pool track: crawl-scoped pool (render_js / ssr_parity reuse) ----
+
+
+def test_active_render_pool_is_none_outside_any_scope() -> None:
+    # Single-page audits call analyse() with no enclosing render_pool_scope();
+    # the fallback-to-direct-call path in seo_crawler._render_page depends on
+    # this returning None.
+    assert active_render_pool() is None
+
+
+@pytest.mark.asyncio
+async def test_render_pool_scope_reuses_one_browser_across_pages() -> None:
+    manager = _FakeManager()
+    async with render_pool_scope_async(browser_factory=lambda: manager) as pool:
+        for i in range(4):
+            await pool.render(f"https://e.com/{i}")
+    # One Chromium launch served all 4 pages of the crawl — the exact cost
+    # the crawl-scoped pool exists to flatten (one launch per page before).
+    assert manager.launch_count == 1
+    assert manager.browsers[0].pages_created == 4
+
+
+def test_playwright_available_follows_render_diffs_own_gate(monkeypatch) -> None:
+    # The crawl-side gate must never disagree with the direct-call path's own
+    # gate: render_diff.sync_playwright is the exact symbol that module's
+    # tests patch to simulate the optional extra being absent, so
+    # playwright_available() reads it rather than probing the import again.
+    from silentfrog import render_diff, render_pool
+
+    monkeypatch.setattr(render_diff, "sync_playwright", None)
+    assert render_pool.playwright_available() is False
+    monkeypatch.setattr(render_diff, "sync_playwright", object())
+    assert render_pool.playwright_available() is True
+
+
+# --- render-pool repair: size the pool to the crawl's own concurrency -------
+#
+# One worker thread == one browser == every render serialised, regardless of
+# how many pages a crawl fetches in parallel. That made a render-enabled
+# crawl SLOWER than the pre-pool direct-call path (measured ~3.8x at the
+# default concurrency=4). ``workers=`` must actually put N browsers to work,
+# not just accept the kwarg.
+
+
+def test_pool_launches_one_browser_per_worker_thread() -> None:
+    lock = threading.Lock()
+    managers: list[_FakeManager] = []
+
+    def factory() -> _FakeManager:
+        manager = _FakeManager()
+        with lock:
+            managers.append(manager)
+        return manager
+
+    pool = RenderPool(browser_factory=factory, workers=3)
+
+    async def render_three() -> None:
+        await asyncio.gather(*(pool.render(f"https://e.com/{i}") for i in range(3)))
+
+    asyncio.run(render_three())
+    try:
+        # Each worker thread calls the factory once for its own browser —
+        # 3 workers must mean 3 independently launched browsers, not 3
+        # requests queued behind a single serial worker.
+        assert len(managers) == 3
+        assert all(manager.launch_count == 1 for manager in managers)
+    finally:
+        pool.close()
+    # close() sends one sentinel per worker and joins every thread — no
+    # worker (and so no browser) is left running.
+    assert all(manager.stopped for manager in managers)
+
+
+@pytest.mark.asyncio
+async def test_pool_defaults_to_a_single_worker_when_unspecified() -> None:
+    # Backward compatibility: every pre-existing caller (and test) that never
+    # passed ``workers=`` must keep getting exactly the one-worker pool it
+    # always got.
+    manager = _FakeManager()
+    pool = RenderPool(browser_factory=lambda: manager)
+    await asyncio.gather(*(pool.render(f"https://e.com/{i}") for i in range(4)))
+    assert manager.launch_count == 1
+    pool.close()
+
+
+# --- render-pool repair: async scope closes off the event loop -------------
+
+
+@pytest.mark.asyncio
+async def test_render_pool_scope_async_activates_and_restores_pool() -> None:
+    assert active_render_pool() is None
+    async with render_pool_scope_async(browser_factory=_FakeManager) as pool:
+        assert active_render_pool() is pool
+    assert active_render_pool() is None
+
+
+@pytest.mark.asyncio
+async def test_render_pool_scope_async_closes_the_pool_without_raising() -> None:
+    # Regression guard: the ContextVar reset must happen on the calling
+    # task's own context, not inside the asyncio.to_thread(pool.close) call
+    # — resetting a Token from a copied context raises ValueError. This
+    # exercises the full scope (activate, render, close) end to end.
+    manager = _FakeManager()
+    async with render_pool_scope_async(browser_factory=lambda: manager, workers=2) as pool:
+        await asyncio.gather(pool.render("https://e.com/a"), pool.render("https://e.com/b"))
+    assert manager.stopped is True
+    assert active_render_pool() is None
+
+
+@pytest.mark.asyncio
+async def test_render_pool_scope_async_closes_the_pool_on_error() -> None:
+    manager = _FakeManager()
+    with pytest.raises(RuntimeError, match="crawl blew up"):
+        async with render_pool_scope_async(browser_factory=lambda: manager) as pool:
+            await pool.render("https://e.com/a")
+            raise RuntimeError("crawl blew up")
+    assert manager.stopped is True
+    assert active_render_pool() is None

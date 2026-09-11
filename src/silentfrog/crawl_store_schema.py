@@ -32,6 +32,25 @@ import sqlite3
 
 SCHEMA_VERSION = 2
 
+
+class NewerSchemaError(RuntimeError):
+    """Raised when an on-disk store's ``PRAGMA user_version`` is newer than
+    this build's ``SCHEMA_VERSION`` — a newer version of the app wrote this
+    file. Refusing (rather than silently stamping the version backward) keeps
+    a newer store from being downgraded and losing whatever that newer schema
+    added. ``apply_schema`` closes the refused connection before raising, so
+    handlers get a released file, not a locked one."""
+
+    def __init__(self, found: int, expected: int) -> None:
+        self.found = found
+        self.expected = expected
+        super().__init__(
+            f"This crawl database was written by a newer version of the app "
+            f"(schema {found}, this build supports up to {expected}). "
+            "Open it with a newer version of the app instead."
+        )
+
+
 _RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id      TEXT PRIMARY KEY,
@@ -78,7 +97,22 @@ CREATE TABLE IF NOT EXISTS frontier (
 
 
 def apply_schema(conn: sqlite3.Connection) -> None:
-    """Create tables + indexes and set the schema version. Idempotent."""
+    """Create tables + indexes and set the schema version. Idempotent.
+
+    Refuses (:class:`NewerSchemaError`) instead of applying anything when the
+    store's existing ``user_version`` is already newer than this build's
+    ``SCHEMA_VERSION`` — that store was written by a newer app version, and
+    silently stamping ``PRAGMA user_version`` backward would downgrade its
+    recorded schema without migrating anything. The file is left byte-for-byte
+    untouched, and ``conn`` is closed before the raise: the store behind it is
+    unusable to this build, and the raising frames stay alive inside the
+    exception's traceback (``CrawlStore.__init__`` holds the connection it
+    just opened), so an unclosed handle keeps the ``.db`` locked on Windows
+    ([WinError 32]) until a garbage-collection pass."""
+    current = schema_version(conn)
+    if current > SCHEMA_VERSION:
+        conn.close()
+        raise NewerSchemaError(current, SCHEMA_VERSION)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute(_RUNS_TABLE)
@@ -94,4 +128,4 @@ def schema_version(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
-__all__ = ["SCHEMA_VERSION", "apply_schema", "schema_version"]
+__all__ = ["SCHEMA_VERSION", "NewerSchemaError", "apply_schema", "schema_version"]

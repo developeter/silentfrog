@@ -145,7 +145,34 @@ class HomeWindow(QMainWindow):
         window. Callers that store the window on ``self`` end up
         overwriting the previous one — losing its Python ref while it
         is still visible, which segfaults PySide6.
+
+        WA_DeleteOnClose lets Qt actually destroy the window on close, so
+        the ``destroyed`` connection below fires ``_forget_child`` and
+        ``_child_windows`` shrinks instead of growing forever. That is only
+        reasonable for a window type whose background worker emits its
+        cross-thread signals from an object that is NOT this window, and
+        whose closeEvent detaches this window's slots from it first:
+        SiteCrawlWindow's per-crawl ``_CrawlSignalBridge`` (a parentless
+        QObject the worker's own closures keep alive) and LogWindow's
+        ``LogWorker`` QThread, which owns its ``failed``/``completed``
+        signals. A callback landing after close then emits on a still-valid
+        source with no receivers: it neither touches this window's state nor
+        raises, so destroying the window is safe with no process-wide
+        exception filtering. RedirectWindow only blocks close on
+        ``worker.wait(5000)`` without detaching if that wait times out, and
+        WebpageSeoWindow has no closeEvent at all and still emits its own
+        ``errorSig`` from a plain daemon thread, so both keep the attribute
+        off. Checked by (module, class name) instead of ``isinstance`` so
+        opening one of those two unrelated window types is never made to pay
+        for importing site_crawl_gui/log_gui — both already-heavy modules the
+        open_redirect/open_seo callers never load otherwise.
         """
+        safe_to_destroy = {
+            ("silentfrog.site_crawl_gui", "SiteCrawlWindow"),
+            ("silentfrog.log_gui", "LogWindow"),
+        }
+        if (type(window).__module__, type(window).__name__) in safe_to_destroy:
+            window.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         self._child_windows.append(window)
         window.destroyed.connect(lambda *_: self._forget_child(window))
         window.show()

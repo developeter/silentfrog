@@ -297,8 +297,12 @@ def test_site_crawl_recap_issue_activation_filters_to_url(qtbot, tmp_path: Path)
 
 
 def test_site_crawl_recap_issue_activation_resets_active_status_filter(qtbot, tmp_path: Path) -> None:
-    result = SiteCrawlResult.failed("https://example.com/fail", "boom")
-    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    healthy = SiteCrawlResult.from_payload("https://example.com/ok", _payload("https://example.com/ok"))
+    failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
+    # A healthy "200" row alongside the failed one: item 4's status filter now
+    # only offers statuses this run actually has, so "200" must be present
+    # for setCurrentText("200") below to take effect.
+    report = SiteCrawlReport.from_results([healthy, failed], discovered_count=2)
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
     win._history_store = CrawlHistoryStore(tmp_path)
@@ -679,6 +683,191 @@ def test_close_event_keeps_stores_on_disk(qtbot, tmp_path: Path) -> None:
     win.close()
     assert live.exists()
     assert previous.exists()
+
+
+def test_close_event_stops_eta_timer_and_detaches_crawl_signals(qtbot) -> None:
+    # Regression: closeEvent used to request cancellation but leave the ETA
+    # QTimer running and the crawl worker's cross-thread signals connected --
+    # safe only because the window was never actually destroyed. Once a
+    # window CAN be destroyed on close (WA_DeleteOnClose in gui.py), a
+    # callback landing on a dangling connection is the crash class the
+    # R1/R3/R4 lifetime work removed.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    bridge = win._attach_crawl_bridge()
+    win._eta_timer.start()
+    assert win._eta_timer.isActive()
+
+    win.close()
+
+    assert not win._eta_timer.isActive()
+    # A stray callback from the still-running background thread must no
+    # longer reach the window's own handlers.
+    assert win._crawl_bridge is None
+    before = win._discovered_total
+    bridge.progress.emit({"event": "discovered", "total": 5})
+    QtWidgets.QApplication.processEvents()
+    assert win._discovered_total == before
+
+    # A second close (Qt permits calling closeEvent more than once) must not
+    # raise despite everything already being disconnected/stopped.
+    win.close()
+
+
+def test_close_event_closes_tracked_detail_windows(qtbot) -> None:
+    # Regression: SiteCrawlDetailDialog (and the graph/cluster/diff dialogs
+    # that share _detail_windows) are independent top-level QDialogs, not
+    # embedded in the parent -- closing the Site Crawl window used to leave
+    # any open one fully visible.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    dialog = QtWidgets.QDialog(win)
+    dialog.show()
+    win._detail_windows.append(dialog)
+    assert dialog.isVisible()
+
+    win.close()
+
+    assert not dialog.isVisible()
+
+
+def test_detach_crawl_signals_targets_only_this_windows_own_slot(qtbot) -> None:
+    # Regression: _detach_crawl_signals used to call signal.disconnect() with
+    # no argument, dropping every receiver on the crawl bridge's
+    # progress/report/error -- harmless only because each signal happened to
+    # have exactly one connection. An unrelated receiver added by something
+    # else must survive this window's own close.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    bridge = win._attach_crawl_bridge()
+    calls: list[dict] = []
+    bridge.progress.connect(calls.append)
+
+    win.close()
+    bridge.progress.emit({"event": "discovered", "total": 3})
+    QtWidgets.QApplication.processEvents()
+
+    assert calls == [{"event": "discovered", "total": 3}]
+    # This window's own handler is still gone.
+    before = win._discovered_total
+    assert before != 3
+
+
+def test_close_event_unparents_tracked_detail_windows(qtbot) -> None:
+    # Regression: a tracked SiteCrawlDetailDialog is opened with parent=self,
+    # so leaving it parented after close() (which only hides it) means this
+    # window's own later destruction (WA_DeleteOnClose in gui.py) cascades
+    # into destroying the dialog too -- and an in-flight run_image_analysis
+    # callback that still holds a reference to the dialog then raises
+    # RuntimeError on dialog.imageSig.emit(...) the same way a callback into
+    # a destroyed SiteCrawlWindow does. Dropping the parent link on close
+    # means this window's destruction cannot take the dialog down with it.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    dialog = QtWidgets.QDialog(win)
+    dialog.show()
+    win._detail_windows.append(dialog)
+    assert dialog.parent() is win
+
+    win.close()
+
+    assert dialog.parent() is None
+    assert win._detail_windows == []
+
+
+def test_status_filter_reflects_statuses_present_in_report(qtbot, tmp_path: Path) -> None:
+    # Regression: the status dropdown was a fixed curated list, not
+    # exhaustive of what the crawler can emit, with no other way to isolate
+    # an unlisted status. It must instead reflect what THIS run actually has.
+    healthy = SiteCrawlResult.from_payload("https://example.com/ok", _payload("https://example.com/ok"))
+    failed = SiteCrawlResult.failed("https://example.com/fail", "boom")
+    report = SiteCrawlReport.from_results([healthy, failed], discovered_count=2)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+
+    win._handle_report(report)
+
+    items = [win.status_filter.itemText(i) for i in range(win.status_filter.count())]
+    assert items[0] == "All"
+    assert set(items[1:]) == {"200", "error"}
+    assert "404" not in items  # never crawled, so never offered
+
+
+def test_status_filter_gains_live_statuses_before_any_report_lands(qtbot) -> None:
+    # Regression: _sync_status_filter_items only ran from _update_charts (report
+    # completion / history reopen) and _start_crawl clears the table, so during a
+    # live crawl the dropdown offered nothing to filter the rows already on
+    # screen by. Each progress row must contribute its own unseen status.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win.status_filter.setCurrentText("All")
+    assert win._latest_report is None
+
+    for url, status in (("https://example.com/a", "418"), ("https://example.com/b", "503")):
+        result = replace(SiteCrawlResult.from_payload(url, _payload(url)), status=status)
+        win._handle_progress({"event": "row", "completed": 1, "result": result})
+
+    items = [win.status_filter.itemText(i) for i in range(win.status_filter.count())]
+    assert items[0] == "All"  # "All" stays first
+    assert "418" in items
+    assert "503" in items
+    assert len(items) == len(set(items))  # no duplicates
+    assert win.status_filter.currentText() == "All"  # selection untouched
+    assert win._latest_report is None  # still mid-crawl: no report has landed
+
+    # A repeat of an already-listed status must not append a second entry.
+    repeat = replace(
+        SiteCrawlResult.from_payload("https://example.com/c", _payload("https://example.com/c")),
+        status="418",
+    )
+    win._handle_progress({"event": "row", "completed": 2, "result": repeat})
+    assert [win.status_filter.itemText(i) for i in range(win.status_filter.count())] == items
+
+
+def test_status_filter_drops_the_previous_runs_statuses_on_a_zero_row_run(qtbot, tmp_path: Path) -> None:
+    # Regression: _update_charts returns early when a run produced no audited
+    # rows, which used to skip the dropdown sync too -- so a crawl that
+    # returned nothing left the previous run's statuses (e.g. "404") on
+    # offer, filtering an empty table by a status it can no longer contain.
+    crawled = SiteCrawlResult.from_payload("https://example.com/ok", _payload("https://example.com/ok"))
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win._handle_report(SiteCrawlReport.from_results([crawled], discovered_count=1))
+    assert [win.status_filter.itemText(i) for i in range(win.status_filter.count())] == ["All", "200"]
+
+    win._handle_report(SiteCrawlReport.from_results([], discovered_count=0))
+
+    assert [win.status_filter.itemText(i) for i in range(win.status_filter.count())] == ["All"]
+    assert win.status_filter.currentText() == "All"
+
+
+def test_status_filter_populates_the_same_way_for_a_stored_run(qtbot, tmp_path: Path) -> None:
+    # The same sync must happen when a saved scan is reopened from history
+    # (_open_stored_run), not only for a live crawl (_handle_report).
+    from silentfrog.crawl_history import build_history_run
+
+    db = tmp_path / "crawl_saved.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.save_audit(
+        run_id,
+        StoredAudit(url="https://e.com/a", http_status="404", indexability="Not indexable", title="A", geo_score=0),
+    )
+    store.finish_run(run_id)
+    store.close()
+    report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id), discovered_count=1, crawled_count=1, skipped_count=0, failed_count=0
+    )
+    history_run = build_history_run(report)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    win._open_stored_run(history_run)
+
+    items = [win.status_filter.itemText(i) for i in range(win.status_filter.count())]
+    assert items == ["All", "404"]
 
 
 def test_open_stored_run_binds_paged_model_and_detail_payload(qtbot, tmp_path: Path) -> None:

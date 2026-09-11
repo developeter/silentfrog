@@ -98,6 +98,62 @@ def test_apply_schema_adds_frontier_to_legacy_db(tmp_path) -> None:
     conn.close()
 
 
+def test_apply_schema_refuses_a_store_written_by_a_newer_app(tmp_path) -> None:
+    # A store stamped past this build's SCHEMA_VERSION was written by a newer
+    # app version. apply_schema must refuse instead of silently stamping
+    # PRAGMA user_version backward (which would downgrade the store's
+    # recorded version without migrating anything) and must leave the file
+    # untouched — no tables created, no PRAGMA rewritten. It also closes the
+    # connection it was handed before raising (see the CrawlStore test below).
+    from silentfrog.crawl_store_schema import NewerSchemaError, apply_schema
+
+    db = tmp_path / "future.db"
+    newer = sqlite3.connect(str(db))
+    newer.execute(f"PRAGMA user_version={SCHEMA_VERSION + 1}")
+    newer.commit()
+    newer.close()
+    before = db.read_bytes()
+
+    conn = sqlite3.connect(str(db))
+    with pytest.raises(NewerSchemaError) as excinfo:
+        apply_schema(conn)
+    assert (excinfo.value.found, excinfo.value.expected) == (SCHEMA_VERSION + 1, SCHEMA_VERSION)
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("PRAGMA user_version")  # refused connections are closed
+
+    assert db.read_bytes() == before
+    reopened = sqlite3.connect(str(db))
+    try:
+        tables = {row[0] for row in reopened.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == set()
+        assert schema_version(reopened) == SCHEMA_VERSION + 1
+    finally:
+        reopened.close()
+
+
+def test_crawl_store_on_a_newer_db_releases_the_file(tmp_path) -> None:
+    # Regression: CrawlStore.__init__ opens the connection and only then calls
+    # apply_schema, so when apply_schema refuses, the half-built store (and
+    # its connection) stays alive in the raised exception's traceback. An
+    # unclosed handle left the .db locked on Windows — unlink raised
+    # [WinError 32] both inside and after the except block, and only succeeded
+    # after dropping the exception and forcing a gc pass. apply_schema closes
+    # before raising, so the file is deletable immediately, even while the
+    # exception (hence the traceback, hence the store) is still held.
+    from silentfrog.crawl_store_schema import NewerSchemaError
+
+    db = tmp_path / "future_store.db"
+    newer = sqlite3.connect(str(db))
+    newer.execute(f"PRAGMA user_version={SCHEMA_VERSION + 1}")
+    newer.commit()
+    newer.close()
+
+    with pytest.raises(NewerSchemaError) as excinfo:
+        CrawlStore(db)
+    assert excinfo.value.found == SCHEMA_VERSION + 1
+    db.unlink()  # [WinError 32] here if the refusal leaked the connection
+
+
 def test_admit_records_frontier_and_dedups(store: CrawlStore) -> None:
     run_id = store.start_run("e.com", "https://e.com/", "spider")
     assert store.admit(run_id, "https://e.com/a", "https://e.com/", 1) is True

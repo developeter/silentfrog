@@ -1,4 +1,6 @@
 import asyncio
+import dataclasses
+import functools
 import warnings
 from pathlib import Path
 
@@ -6,7 +8,9 @@ import aiohttp  # type: ignore[reportMissingImports]
 import pytest
 from aiohttp import web  # type: ignore[reportMissingImports]
 
+from silentfrog import render_pool as render_pool_module  # type: ignore[reportMissingImports]
 from silentfrog import seo_crawler as crawler  # type: ignore[reportMissingImports]
+from silentfrog import site_crawler  # type: ignore[reportMissingImports]
 from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
 from silentfrog.image_diagnostics import (  # type: ignore[reportMissingImports]
     CACHE_COL,
@@ -453,6 +457,183 @@ async def test_fetch_analysis_response_raises_helpful_error_on_fetch_failure(mon
             timeout=5,
             crawl_options=CrawlOptions.default(),
         )
+
+
+# --- render-pool track: thread the shared RenderPool through a site crawl ---
+# render_js / ssr_parity used to call render_with_playwright directly, one
+# fresh Chromium launch per crawled page. site_crawler now activates a
+# render_pool.render_pool_scope_async() around the whole crawl, sized to the
+# crawl's own concurrency, so pages reuse a shared pool of browsers instead of
+# one launch per page; a single-page analyse() call (outside a crawl) has no
+# active scope and keeps using the direct per-call render unchanged.
+
+
+class _CountingFakePage:
+    def goto(self, url: str, timeout: int = 0, wait_until: str = "") -> None:
+        pass
+
+    def content(self) -> str:
+        return "<html><body>rendered</body></html>"
+
+    def close(self) -> None:
+        pass
+
+
+class _CountingFakeBrowser:
+    def __init__(self) -> None:
+        self.pages_created = 0
+
+    def new_page(self, user_agent: str = "") -> _CountingFakePage:
+        self.pages_created += 1
+        return _CountingFakePage()
+
+    def close(self) -> None:
+        pass
+
+
+class _CountingFakeManager:
+    def __init__(self) -> None:
+        self.launch_count = 0
+        self.stopped = False
+        self.browsers: list[_CountingFakeBrowser] = []
+
+    def launch(self) -> _CountingFakeBrowser:
+        self.launch_count += 1
+        browser = _CountingFakeBrowser()
+        self.browsers.append(browser)
+        return browser
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+@pytest.mark.asyncio
+async def test_single_page_audit_falls_back_to_direct_render_without_a_pool(monkeypatch, local_server):
+    from silentfrog.render_diff import RenderResult
+    from silentfrog.render_pool import active_render_pool
+
+    calls: list[str] = []
+
+    def fake_render_with_playwright(url, timeout_seconds=15, collect_vitals=False):
+        calls.append(url)
+        # No crawl_site() is running, so no render_pool_scope is active —
+        # _render_page must fall back to the direct call, never a pool.
+        assert active_render_pool() is None
+        return RenderResult(url=url, rendered_html="<html><body>rendered</body></html>")
+
+    monkeypatch.setattr(crawler, "render_with_playwright", fake_render_with_playwright)
+    opts = dataclasses.replace(CrawlOptions.default(), ssr_parity_check=True)
+
+    payload = await analyse(local_server, timeout=5, options=opts)
+
+    assert calls == [local_server]
+    assert payload.render.get("status") in {"good", "warning", "critical"}
+
+
+@pytest.mark.asyncio
+async def test_stock_site_crawl_makes_zero_renders(monkeypatch, local_server):
+    # H4/M8/M4 invariant: render_js and ssr_parity_check both default False,
+    # so a stock crawl must never touch the (pooled or direct) render path —
+    # unchanged by threading the pool through the crawl.
+    from silentfrog.site_crawl_types import SiteCrawlConfig
+
+    render_calls: list[str] = []
+
+    async def fake_render_page(url, timeout, collect_vitals):
+        render_calls.append(url)
+        return None
+
+    monkeypatch.setattr(crawler, "_render_page", fake_render_page)
+
+    config = SiteCrawlConfig.from_text(
+        base_url=local_server,
+        url_list_text=f"{local_server}?a=1\n{local_server}?b=2",
+        crawl_options=CrawlOptions.default(),
+        limit=5,
+    )
+    report = await site_crawler.crawl_site(config, timeout=5)
+
+    assert report.failed_count == 0
+    assert render_calls == []
+
+
+@pytest.mark.asyncio
+async def test_site_crawl_reuses_one_render_pool_across_pages_and_closes_it(monkeypatch, local_server):
+    from silentfrog.crawl_mode import CrawlMode
+    from silentfrog.site_crawl_types import SiteCrawlConfig, SpiderConfig
+
+    manager = _CountingFakeManager()
+    monkeypatch.setattr(
+        site_crawler,
+        "render_pool_scope_async",
+        functools.partial(render_pool_module.render_pool_scope_async, browser_factory=lambda: manager),
+    )
+    # Playwright itself is never installed in CI; the pool path is gated on
+    # render_pool.playwright_available() so it's stubbed here the same way
+    # bot_render's tests stub its own availability gate.
+    monkeypatch.setattr(crawler, "playwright_available", lambda: True)
+
+    opts = dataclasses.replace(CrawlOptions.default(), render_js=True)
+    config = SiteCrawlConfig.from_text(
+        base_url=local_server,
+        url_list_text=f"{local_server}?a=1\n{local_server}?b=2",
+        crawl_options=opts,
+        limit=5,
+        # Pinned to 1 so the pool (sized to this crawl's own concurrency,
+        # render-pool repair) launches exactly one browser — the property
+        # this test is about is browser REUSE across pages, not sizing
+        # (covered separately below).
+        spider=SpiderConfig(mode=CrawlMode.LIST, max_urls=5, crawl_concurrency=1),
+    )
+
+    report = await site_crawler.crawl_site(config, timeout=5)
+
+    assert report.failed_count == 0
+    # Both pages rendered through ONE launched browser — the shared pool —
+    # instead of one fresh Chromium per page.
+    assert manager.launch_count == 1
+    assert sum(browser.pages_created for browser in manager.browsers) == 2
+    # The crawl-scoped pool is torn down when the crawl ends.
+    assert manager.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_site_crawl_sizes_the_render_pool_to_its_own_concurrency(monkeypatch, local_server):
+    # render-pool repair (MAJOR): one worker thread serialised every render
+    # regardless of the crawl's concurrency, making a render-enabled crawl
+    # SLOWER than the pre-pool direct-call path at concurrency > 1. The pool
+    # must actually put N browsers to work for an N-concurrency crawl.
+    from silentfrog.crawl_mode import CrawlMode
+    from silentfrog.site_crawl_types import SiteCrawlConfig, SpiderConfig
+
+    manager = _CountingFakeManager()
+    monkeypatch.setattr(
+        site_crawler,
+        "render_pool_scope_async",
+        functools.partial(render_pool_module.render_pool_scope_async, browser_factory=lambda: manager),
+    )
+    monkeypatch.setattr(crawler, "playwright_available", lambda: True)
+
+    opts = dataclasses.replace(CrawlOptions.default(), render_js=True)
+    config = SiteCrawlConfig.from_text(
+        base_url=local_server,
+        url_list_text=f"{local_server}?a=1\n{local_server}?b=2\n{local_server}?c=3",
+        crawl_options=opts,
+        limit=5,
+        spider=SpiderConfig(mode=CrawlMode.LIST, max_urls=5, crawl_concurrency=3),
+    )
+
+    report = await site_crawler.crawl_site(config, timeout=5)
+
+    assert report.failed_count == 0
+    # 3-way crawl concurrency -> 3 worker threads, each launching its own
+    # browser off the SAME shared manager. This guards the SIZING only
+    # (forcing workers=1 anywhere on the path fails it); it does not prove the
+    # renders overlapped, since every worker launches eagerly whether or not
+    # it ends up dequeuing a job.
+    assert manager.launch_count == 3
+    assert sum(browser.pages_created for browser in manager.browsers) == 3
+    assert manager.stopped is True
 
 
 # --- v2.0 gap fix: _semrush_enabled / _semrush_max_calls env-vs-config ---

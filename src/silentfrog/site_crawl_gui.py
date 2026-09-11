@@ -357,11 +357,25 @@ class SiteCrawlFilterProxy(QtCore.QSortFilterProxyModel):
         self.setFilterFixedString(str(self._filter_revision))
 
 
-class SiteCrawlWindow(QtWidgets.QWidget):
-    progressSig = QtCore.Signal(dict)
-    reportSig = QtCore.Signal(object)
-    errorSig = QtCore.Signal(str)
+class _CrawlSignalBridge(QtCore.QObject):
+    """Carries workers.run_site_crawl's three callbacks back to the GUI thread.
 
+    A crawl runs on a plain daemon thread whose callbacks used to emit
+    SiteCrawlWindow's *own* signals. Once the window is really destroyed
+    (WA_DeleteOnClose, gui.py:_spawn_child) that emit fails on the signal's
+    source object no matter who is connected, so a late callback raised in the
+    worker thread. One of these is created per crawl instead, parentless -- so
+    destroying the window cannot cascade into it -- and kept alive by the
+    worker's own closures. The window connects its slots to it and drops them
+    on close, leaving a late emit to land on a signal with no receivers.
+    """
+
+    progress = QtCore.Signal(dict)
+    report = QtCore.Signal(object)
+    error = QtCore.Signal(str)
+
+
+class SiteCrawlWindow(QtWidgets.QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Silentfrog - Site Crawl")
@@ -394,6 +408,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._eta_timer = QtCore.QTimer(self)
         self._eta_timer.setInterval(1000)
         self._detail_windows: list[QtWidgets.QDialog] = []
+        # Per-crawl carrier for the worker thread's callbacks (see
+        # _CrawlSignalBridge); None whenever no crawl's signals are attached.
+        self._crawl_bridge: _CrawlSignalBridge | None = None
         self._history_store = CrawlHistoryStore()
         self._build_ui()
         self._apply_tooltips()
@@ -469,12 +486,42 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _update_charts(self, report: SiteCrawlReport) -> None:
         if not report.has_rows:
+            # No audited rows means no distribution to chart, but the status
+            # dropdown must still stop offering the previous run's statuses,
+            # so sync it with an empty distribution ("All" only).
+            self._sync_status_filter_items({})
             return
         with open_report_repository(report) as repo:
-            self._status_chart.set_distribution(repo.status_distribution())
+            distribution = repo.status_distribution()
+            self._status_chart.set_distribution(distribution)
             self._indexability_chart.set_distribution(repo.indexability_distribution())
             self._score_chart.set_distribution(bin_scores(repo.score_values()))
+        self._sync_status_filter_items(distribution)
         self._charts_strip.setVisible(True)
+
+    def _sync_status_filter_items(self, distribution: dict[str, int]) -> None:
+        """The dropdown used to offer a fixed curated list of statuses that
+        was never exhaustive of what the crawler can emit, with no other way
+        to isolate an unlisted one. Rebuild it from what this run's data
+        actually contains instead -- both a live crawl (_handle_report) and a
+        history reopen (_open_stored_run) reach here via _update_charts,
+        including a run that produced no rows at all (empty ``distribution``,
+        so "All" is the only choice left) -- keeping "All" first and the
+        current selection if it is still one of the choices."""
+        current = self.status_filter.currentText()
+        choices = ["All", *sorted(distribution)]
+        resolved = current if current in choices else "All"
+        self.status_filter.blockSignals(True)
+        self.status_filter.clear()
+        self.status_filter.addItems(choices)
+        self.status_filter.setCurrentText(resolved)
+        self.status_filter.blockSignals(False)
+        self._status_filter_choices = set(choices)
+        # blockSignals suppressed currentTextChanged, so the already-bound
+        # model/proxy (bound before this runs) never heard the resolved
+        # value -- apply it explicitly to keep the visible selection and the
+        # actual filter in sync.
+        self._on_status_changed(resolved)
 
     def _build_source_form(self) -> QtWidgets.QFormLayout:
         form = QtWidgets.QFormLayout()
@@ -547,7 +594,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.search_edit = QtWidgets.QLineEdit()
         self.search_edit.setPlaceholderText("Filter URL or title")
         self.status_filter = QtWidgets.QComboBox()
-        self.status_filter.addItems(["All", "200", "301", "302", "403", "404", "429", "error", "skipped"])
+        statuses = ["All", "200", "301", "302", "403", "404", "429", "error", "skipped"]
+        self.status_filter.addItems(statuses)
+        # Mirrors the combo's items so _offer_status_filter_item can reject an
+        # already-listed status in O(1) per crawled row (see below).
+        self._status_filter_choices: set[str] = set(statuses)
         self.indexability_filter = QtWidgets.QComboBox()
         self.indexability_filter.addItems(
             [
@@ -696,9 +747,6 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.search_edit.textChanged.connect(self._on_search_changed)
         self.status_filter.currentTextChanged.connect(self._on_status_changed)
         self.indexability_filter.currentTextChanged.connect(self._on_indexability_changed)
-        self.progressSig.connect(self._handle_progress)
-        self.reportSig.connect(self._handle_report)
-        self.errorSig.connect(self._show_error)
         self._eta_timer.timeout.connect(self._update_eta_label)
 
     def _apply_initial_state(self) -> None:
@@ -833,14 +881,28 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._teardown_stored_model()
         self._roll_store_generation()
         self._crawl_run_id = ""
+        bridge = self._attach_crawl_bridge()
         _, self._active_cancel = run_site_crawl(
             config,
             timeout=15,
-            on_progress=lambda event: self.progressSig.emit(event),
-            on_success=lambda report: self.reportSig.emit(report),
-            on_error=lambda error: self.errorSig.emit(error),
+            on_progress=lambda event: bridge.progress.emit(event),
+            on_success=lambda report: bridge.report.emit(report),
+            on_error=lambda error: bridge.error.emit(error),
             store_path=self._crawl_store_path,
         )
+
+    def _attach_crawl_bridge(self) -> _CrawlSignalBridge:
+        """Fresh bridge for one crawl, wired to this window's slots.
+
+        Detaching first means a finished run's bridge can never deliver a
+        stray late callback into the run that replaced it."""
+        self._detach_crawl_signals()
+        bridge = _CrawlSignalBridge()
+        bridge.progress.connect(self._handle_progress)
+        bridge.report.connect(self._handle_report)
+        bridge.error.connect(self._show_error)
+        self._crawl_bridge = bridge
+        return bridge
 
     def _config_from_ui(self) -> SiteCrawlConfig:
         return SiteCrawlConfig.from_text(
@@ -916,6 +978,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         result = event.get("result")
         if isinstance(result, SiteCrawlResult):
             self.model.add_result(result)
+            self._offer_status_filter_item(result.status)
         total = max(1, self._discovered_total or self.limit_spin.value())
         completed = min(total, int(event.get("completed", self.model.rowCount())))
         self._completed_count = completed
@@ -928,6 +991,24 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         # The worker's explicit 'finalizing' event drives that state instead.
         self.progress.setFormat(f"Crawled {completed} of {total} URLs")
         self._update_eta_label()
+
+    def _offer_status_filter_item(self, status: str) -> None:
+        """Keep the status dropdown usable *during* a crawl.
+
+        _sync_status_filter_items only runs once the report lands (or a stored
+        run is reopened), and _start_crawl clears the table, so until then the
+        dropdown could not isolate a status already visible in the live rows.
+        Append each unseen status as its row arrives: one set lookup per row,
+        never a rebuild, so a 1M-row crawl pays nothing measurable. "All" stays
+        at index 0 and the current selection is untouched (appending to a
+        non-empty combo leaves currentIndex alone, so no currentTextChanged
+        fires and the proxy filter stays in sync). The completion-time
+        _sync_status_filter_items remains the authoritative rebuild -- it
+        replaces this best-effort list with exactly what the run contains."""
+        if not status or status in self._status_filter_choices:
+            return
+        self._status_filter_choices.add(status)
+        self.status_filter.addItem(status)
 
     def _enter_finalizing(self) -> None:
         """item 5: between the last fetched page and the final report the worker
@@ -1443,10 +1524,65 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self._active_cancel:
             self._active_cancel.set()
+        self._eta_timer.stop()
+        self._detach_crawl_signals()
+        for dialog in list(self._detail_windows):
+            dialog.close()
+            # SiteCrawlDetailDialog (opened with parent=self) can still have
+            # an in-flight run_image_analysis daemon thread whose on_success/
+            # on_error callbacks hold a direct reference to the dialog and
+            # call dialog.imageSig.emit(...)/errorSig.emit(...) from that
+            # thread. close() only hides it; as long as it stays a Qt child of
+            # this window, this window's own WA_DeleteOnClose destruction
+            # cascades into the dialog and that emit raises instead of landing
+            # harmlessly. setParent(None) hands ownership back to Python, so
+            # from here the dialog lives exactly as long as some Python
+            # reference to it does -- measured both ways: a dialog an analysis
+            # worker's closure still holds survives this close with parent
+            # None and its later imageSig.emit lands normally, while a dialog
+            # nothing but _detail_windows held is destroyed right here, inside
+            # closeEvent (the clear() below drops the last reference), rather
+            # than later together with this window.
+            dialog.setParent(None)
+        self._detail_windows.clear()
         self._teardown_stored_model()
         # v3 retention: stores survive the window so saved scans stay openable
         # from history; disk use is bounded by _prune_stored_crawls instead.
         super().closeEvent(event)
+
+    def _detach_crawl_signals(self) -> None:
+        """A running crawl is a plain daemon thread (workers.run_site_crawl),
+        not a QThread, and its progress/report/error callbacks reach this
+        window through the per-crawl ``_CrawlSignalBridge``. Disconnect this
+        window's slots from it the way robots_sim_dialog.py's and
+        log_gui.py's ``_detach_worker`` do, so a callback that lands after
+        this point finds no slot to invoke instead of touching this window's
+        state. The bridge itself is left alive by the worker's closures, so
+        that late emit has a valid source object and cannot raise.
+
+        Each disconnect names this window's own slot (the one connected in
+        _attach_crawl_bridge) rather than dropping every receiver, so it only
+        ever removes this window's own subscription -- verified against this
+        PySide6 build: ``signal.disconnect(self._handle_progress)`` does
+        match the connection made with the same bound method and returns
+        True. PySide6 does not raise when a disconnect has nothing left to
+        remove (closeEvent could in principle run twice) -- it emits a
+        RuntimeWarning ("Failed to disconnect ... from signal ...") and
+        returns False -- so the try/except below is belt-and-braces, not
+        load-bearing for that case."""
+        bridge = self._crawl_bridge
+        if bridge is None:
+            return
+        self._crawl_bridge = None
+        for signal, slot in (
+            (bridge.progress, self._handle_progress),
+            (bridge.report, self._handle_report),
+            (bridge.error, self._show_error),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
 
 
 class SiteCrawlDetailDialog(QtWidgets.QDialog):

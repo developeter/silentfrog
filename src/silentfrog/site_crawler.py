@@ -17,6 +17,7 @@ from .crawl_store import CrawlStore, StoredAudit
 from .discovery_files import discovery_scope
 from .frontier import CrawlFrontier, FrontierConfig
 from .http_client import fetch_page
+from .render_pool import render_pool_scope_async
 from .robots_matcher import RobotsCache
 from .seo_crawler import analyse
 from .site_crawl_types import (
@@ -51,21 +52,6 @@ _FRONTIER_STATES = {"error": "failed", "skipped": "skipped"}
 class _SitemapItems:
     urls: tuple[str, ...]
     sitemaps: tuple[str, ...]
-
-
-async def resolve_site_urls(config: SiteCrawlConfig, timeout: int = 15) -> list[str]:
-    candidates: list[str] = []
-    candidates.extend(config.url_list)
-    if config.sitemap_url:
-        candidates.extend(await _sitemap_urls(config.sitemap_url, config, timeout))
-        return _filter_urls(candidates, config)
-    if candidates:
-        return _filter_urls(candidates, config)
-    sitemap_candidates = await _auto_sitemap_urls(config, timeout)
-    filtered = _filter_urls(sitemap_candidates, config)
-    if filtered:
-        return filtered
-    return _filter_urls([config.base_url], config)
 
 
 class _PolitenessGate:
@@ -171,8 +157,19 @@ async def _orchestrate_crawl(
     # per origin for the whole crawl, in every profile, instead of per page.
     # robots_fetch_scope covers the separate robots.txt fetch the crawl-delay
     # check (respect_crawl_delay, on by default) makes per page.
-    with discovery_scope(), robots_fetch_scope():
-        drive = await _drive_frontier(ctx, work_source)
+    # render_pool_scope_async gives every page of this crawl a shared pool of
+    # Chromium browsers (render_js / SSR parity), sized to this crawl's own
+    # concurrency so rendering keeps the parallelism the pre-pool direct call
+    # had instead of serialising every render behind one worker thread;
+    # closed on exit here (normal, cancelled, or errored) so the pool's
+    # worker threads never leak, and off the event loop (see its docstring)
+    # so a render still in flight at crawl end never freezes progress
+    # callbacks. A crawl that never enables rendering never starts a worker
+    # thread — see render_pool.RenderPool._ensure_started — so this costs
+    # nothing when off.
+    async with render_pool_scope_async(workers=ctx.concurrency):
+        with discovery_scope(), robots_fetch_scope():
+            drive = await _drive_frontier(ctx, work_source)
     # item 5: the last page is fetched; report building (store finish + summaries)
     # starts now. Emit here — not after crawl_site returns — so the GUI shows the
     # finalize phase *while* that work runs, in every crawl mode.
@@ -685,4 +682,4 @@ def _emit(callback: ProgressCallback | None, event: str, **payload: Any) -> None
     callback({"event": event, **payload})
 
 
-__all__ = ["crawl_site", "resolve_site_urls"]
+__all__ = ["crawl_site"]

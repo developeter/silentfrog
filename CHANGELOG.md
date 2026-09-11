@@ -181,6 +181,73 @@ test. Full list: `docs/site_crawl_2_0_readiness.md`.
   and an absolute "never bypasses WAF" promise that the opt-in
   stealth fetcher contradicts. All corrected and pinned by
   `tests/test_docs_consistency.py`.
+- **Closing a Site Crawl window mid-crawl** left the ETA timer
+  running and the cross-thread progress/report/error signals
+  connected, safe only because the window was never actually
+  destroyed: nothing set `WA_DeleteOnClose`, so `_forget_child` never
+  fired and every close+reopen grew `HomeWindow._child_windows`
+  forever. `closeEvent` now stops the timer and disconnects the
+  signals first, and `_spawn_child` sets `WA_DeleteOnClose` for
+  `SiteCrawlWindow` / `LogWindow` so the home window reclaims the
+  child once it's safely detached.
+- **Detail dialogs outlived their parent** — `SiteCrawlDetailDialog`
+  is an independent top-level `QDialog`, so closing the Site Crawl
+  window left any open detail dialog fully visible with its worker
+  still wired to the now-hidden parent. `closeEvent` now closes every
+  tracked detail dialog first.
+- **The status filter dropdown** was a fixed, curated list that was
+  never exhaustive of every status the crawler can emit, with no
+  other way to isolate one it didn't list. It's now rebuilt from the
+  statuses actually present in the run's own distribution, for both a
+  live crawl and a reopened past scan.
+- **`render_js` / SSR parity** launched and tore down a fresh
+  Chromium per crawled page instead of reusing one, the exact
+  at-crawl-scale cost the shared `RenderPool` exists to avoid. Both
+  now share one pool per crawl via `render_pool_scope()` in
+  `site_crawler.py`; a crawl with neither enabled never starts the
+  pool's worker thread.
+- **A crawl store written by a newer schema** was silently stamped
+  back to this build's `PRAGMA user_version`, downgrading its
+  recorded schema. `crawl_store_schema.apply_schema()` now refuses
+  with `NewerSchemaError` instead of touching the file.
+- **Performance resource detail didn't survive reopening a past
+  scan** — `heaviest_resources` / `third_party_hosts` were computed
+  for a live audit but had no field on `PerformanceMetrics`, so a
+  reopened stored run lost both tables. They're now persisted
+  add-only (an old blob with neither key loads as `[]`).
+- **`resolve_site_urls`** (`site_crawler.py`) was dead code — a
+  public, tested function with zero production callers, superseded
+  by the path `crawl_site()` actually uses. Removed, along with its
+  `__all__` export and its own now-pointless tests.
+
+### Settings and desktop polish
+
+Four problems reported from real use of the 2.0.0 candidate.
+
+#### Fixed
+- **`run_silentfrog.bat`** ran the windowed exe inside its own
+  console and then paused, so a cmd window stayed open for the whole
+  session. It now starts the app detached and exits immediately; the
+  developer `poetry run` fallback still keeps its console open.
+- **Every dropdown lost its arrow** — styling `QComboBox::drop-down`
+  suppressed the native arrow with no `::down-arrow` rule to replace
+  it (a plain CSS triangle paints a solid block under the Windows Qt
+  style), so e.g. the past-scans list on the Single Page URL box was
+  invisible. Two small SVG assets now supply the arrow.
+- **The Performance tab** reported third-party weight as a bare count
+  and byte total. It now lists the heaviest individual resources and
+  third-party hosts with sizes, and the issue text names the top
+  offending hosts.
+- **Semrush key / enable / max-calls settings never reached a
+  crawl** — the API key was written to keyring inside a silent
+  `except` (keyring is absent on a stock install), and the crawler
+  gated only on an env var, so the Settings checkbox and "Max Semrush
+  calls per day" spinbox had no effect. Enablement and max-calls now
+  live in a pure `SemrushConfig` the crawler reads (env still wins
+  when set); a missing keyring disables the API-key field with a
+  tooltip naming the install command instead of silently discarding
+  what was typed; Test connection no longer stores the key without
+  an explicit OK.
 
 ### v2.0 feature waves (V1–V20)
 

@@ -247,7 +247,28 @@ silentfrog-cli crawl https://example.com \
   --digest
 ```
 
-Key options: `--sitemap URL`, `--url-list FILE` (one URL per line), `--limit N` (default 500), `--timeout N` (default 10 seconds), `--out-report PATH` (also writes the v3 G8 HTML report), `--digest` (send the digest via the configured transports below).
+Key options: `--sitemap URL`, `--url-list FILE` (one URL per line), `--limit N` (default 500), `--timeout N` (default 10 seconds), `--out-report PATH` (also writes the v3 G8 HTML report), `--out-llms-txt PATH` (writes a proposed llms.txt), `--allow-private-network` (disable the SSRF guard for intranet targets), `--allow-insecure-tls` (skip certificate verification), `--digest` (send the digest via the configured transports below).
+
+#### CLI vs GUI Crawl Settings
+
+The CLI intentionally exposes only the automation-relevant controls (seed, size, timeout, output, network/TLS opt-ins, alerting). Most of the GUI's **Crawl Settings** dialog has no CLI flag in 2.0.0 — it silently applies the same default the GUI ships with, or (for the opt-in extras) stays off:
+
+| GUI Crawl Setting | CLI flag | Without the flag |
+|---|---|---|
+| Sitemap URL | `--sitemap` | not seeded |
+| URL list (LIST mode) | `--url-list` | not used |
+| Crawl size cap | `--limit` | default `500` |
+| Per-request timeout | `--timeout` | default `10` seconds |
+| Allow private-network targets | `--allow-private-network` | off (SSRF guard stays on) |
+| Allow insecure TLS | `--allow-insecure-tls` | off (certificate verification stays on) |
+| Gentle crawl mode | none | always on (`gentle_mode=True`, matches the GUI default) |
+| Max parallel requests per host | none | fixed at `2` (matches the GUI default) |
+| Audit profile | none | fixed at `STANDARD` (matches the GUI's Site Crawl default) |
+| SSR parity check, per-bot SSR rendering, render JS-rendered links, accessibility audit, tech stack detection, topic embeddings | none | off — GUI-only in 2.0.0 |
+| Custom headers, cookies, custom extraction rules | none | none set — GUI-only in 2.0.0 |
+| Stealth fetching | none | off — GUI-only in 2.0.0 |
+
+Semrush, Google, and AI-provider integrations aren't part of this table: they're saved separately (Settings, persisted via `keyring`/config, not per-crawl `CrawlOptions`), so once enabled in the GUI they apply to CLI crawls automatically too.
 
 Every scheduled run is saved under the crawl's own on-disk SQLite store (`<data dir>/cli_crawls/`, newest 10 kept) and lands in crawl history exactly like a GUI-run crawl, so it appears in **View past scans** with a working "Open scan" button.
 

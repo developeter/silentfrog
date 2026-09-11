@@ -58,6 +58,7 @@ from .parsers_meta import (
 )
 from .perf_metrics import _collect_performance_metrics
 from .render_diff import compute_render_diff, render_with_playwright
+from .render_pool import active_render_pool, playwright_available
 from .robots_simulator import RobotsRules
 from .schema_extractor import _extract_schema_all
 from .seo_basics import extract_seo_basics
@@ -278,6 +279,19 @@ async def _redirect_chain(
     return [request_url], str(response.status), 0, False
 
 
+async def _render_page(url: str, timeout: int, collect_vitals: bool) -> Any:
+    """Render *url*, reusing the crawl-scoped ``RenderPool`` when one crawl
+    activated it (see ``render_pool.render_pool_scope_async``) instead of the
+    direct call's fresh-Chromium-per-page cost. Falls back to the direct
+    call for a single-page audit (no active pool) and whenever Playwright
+    is not importable, so a missing extra keeps degrading exactly as it did
+    before this pool existed: ``None``, not a pool "launch failed" warning."""
+    pool = active_render_pool()
+    if pool is not None and playwright_available():
+        return await pool.render(url, timeout=timeout, collect_vitals=collect_vitals)
+    return await asyncio.to_thread(render_with_playwright, url, timeout, collect_vitals)
+
+
 async def _collect_render_diff_and_vitals(
     response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -290,7 +304,7 @@ async def _collect_render_diff_and_vitals(
     """
     if not crawl_options.ssr_parity_check or not policy.render:
         return {}, {}
-    rendered = await asyncio.to_thread(render_with_playwright, response.url, 15, True)
+    rendered = await _render_page(response.url, 15, True)
     if rendered is None:
         return (
             {"status": "not_measured", "reason": "Playwright not installed"},
@@ -341,7 +355,7 @@ async def _augment_links_with_rendered_dom(
     a render failure degrades to the raw rows (never raises)."""
     if not crawl_options.render_js or not policy.render:
         return raw_rows
-    rendered = await asyncio.to_thread(render_with_playwright, url, 15, False)
+    rendered = await _render_page(url, 15, False)
     if rendered is None or rendered.error or not rendered.rendered_html:
         return raw_rows
     return merge_rendered_links(url, raw_rows, rendered.rendered_html)

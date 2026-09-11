@@ -7,7 +7,11 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from silentfrog.crawl_types import PAYLOAD_SCHEMA_VERSION, CrawlPayload  # type: ignore[reportMissingImports]
+from silentfrog.crawl_types import (  # type: ignore[reportMissingImports]
+    PAYLOAD_SCHEMA_VERSION,
+    CrawlPayload,
+    PerformanceMetrics,
+)
 
 
 def _raw_payload() -> dict[str, object]:
@@ -242,6 +246,45 @@ _json_value = st.recursive(
 )
 _json_object = st.dictionaries(_safe_text, _json_value, max_size=4)
 _url = st.none() | _safe_text
+
+
+def test_performance_metrics_roundtrip_keeps_heaviest_and_third_party() -> None:
+    # perf-payload-roundtrip: a LIVE audit's heaviest_resources/third_party_hosts
+    # lists must survive persistence (to_mapping -> from_raw) so a reopened past
+    # scan's PerformanceTab still has its two detail tables.
+    raw = {
+        "status": 200,
+        "transfer_size": 2048,
+        "heaviest_resources": [
+            {"url": "https://example.com/a.js", "bytes": 900, "type": "js", "third_party": False},
+            {"url": "https://cdn.example.net/b.png", "bytes": 500, "type": "img", "third_party": True},
+        ],
+        "third_party_hosts": [
+            {"host": "cdn.example.net", "bytes": 500, "count": 1, "types": ["img"]},
+        ],
+    }
+    metrics = PerformanceMetrics.from_raw(raw)
+    assert metrics.heaviest_resources == raw["heaviest_resources"]
+    assert metrics.third_party_hosts == raw["third_party_hosts"]
+
+    restored = PerformanceMetrics.from_raw(metrics.to_dict())
+    assert restored == metrics
+    assert restored.heaviest_resources == raw["heaviest_resources"]
+    assert restored.third_party_hosts == raw["third_party_hosts"]
+
+    # JSON round trip too, mirroring how CrawlStore persists the payload.
+    blob = json.dumps(metrics.to_dict()).encode("utf-8")
+    from_json = PerformanceMetrics.from_raw(json.loads(blob.decode("utf-8")))
+    assert from_json == metrics
+
+
+def test_performance_metrics_old_blob_without_new_keys_loads_empty_lists() -> None:
+    # OLD persisted blobs predate heaviest_resources/third_party_hosts: absence
+    # must decode as [], never raise.
+    old_blob = {"status": 200, "transfer_size": 1024}
+    metrics = PerformanceMetrics.from_raw(old_blob)
+    assert metrics.heaviest_resources == []
+    assert metrics.third_party_hosts == []
 
 
 @given(group=_json_object, requested=_url, final=_url)

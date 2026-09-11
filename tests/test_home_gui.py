@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from qtpy import QtWidgets
+import threading
+
+import pytest
+from qtpy import QtCore, QtWidgets
 
 from silentfrog.gui import HomeWindow, _SettingsDialog  # type: ignore[reportMissingImports]
 
@@ -83,3 +86,89 @@ def test_settings_dialog_radio_indicator_is_styled_for_visibility(qtbot) -> None
     qtbot.addWidget(dlg)
     assert dlg.dark_radio.text() == "Dark theme"
     assert dlg.light_radio.text() == "Light theme"
+
+
+def _close_and_destroy_mid_crawl(qtbot, hook_calls: list) -> None:
+    """One race iteration: park a fake crawl worker on an Event, close the Site
+    Crawl window so WA_DeleteOnClose really destroys it, then release the
+    worker so its three callbacks fire at a window that no longer exists.
+
+    This is the exact shape workers.run_site_crawl uses -- three closures over
+    the per-crawl _CrawlSignalBridge -- so it exercises the real failure mode:
+    before the bridge, those callbacks emitted the window's own signals and
+    raised RuntimeError("Signal source has been deleted") in the worker thread
+    (measured 30/30 on this build with the bridge parented to the window).
+    """
+    shiboken = pytest.importorskip("shiboken6")
+    win = HomeWindow()
+    qtbot.addWidget(win)
+    win.open_site_crawl()
+    crawl_window = win._child_windows[0]
+    crawl_window._crawl_active = True
+    crawl_window._active_cancel = threading.Event()
+    bridge = crawl_window._attach_crawl_bridge()
+
+    released = threading.Event()
+
+    def worker_callbacks() -> None:
+        released.wait(10)
+        # No try/except on purpose: anything raised here escapes the thread
+        # and lands in the threading.excepthook spy the caller installed.
+        bridge.progress.emit({"event": "row", "completed": 1})
+        bridge.report.emit(object())
+        bridge.error.emit("boom")
+
+    thread = threading.Thread(target=worker_callbacks)
+    thread.start()
+    try:
+        crawl_window.close()
+        qtbot.waitUntil(lambda: len(win._child_windows) == 0, timeout=2000)
+        # Destroyed for real: Qt fired ``destroyed`` (above) AND shiboken
+        # reports the C++ object gone, so the emits below are genuinely late.
+        assert not shiboken.isValid(crawl_window)
+        assert crawl_window._active_cancel.is_set()  # closeEvent still cancelled
+    finally:
+        released.set()
+        thread.join(10)
+    assert not thread.is_alive()
+    QtWidgets.QApplication.processEvents()
+    assert win._child_windows == []
+    assert hook_calls == []
+
+
+def test_late_crawl_callbacks_on_a_destroyed_window_never_raise(qtbot, monkeypatch) -> None:
+    """Regression: a Site Crawl window is destroyed on close (WA_DeleteOnClose,
+    _spawn_child) while workers.run_site_crawl's daemon thread is still alive.
+    Its callbacks must reach a signal source that outlives the window -- the
+    parentless _CrawlSignalBridge -- so a late emit finds no receivers instead
+    of raising. This used to raise in the worker thread and was masked by a
+    process-wide threading.excepthook; there is no filter now, so the hook spy
+    below must stay empty.
+
+    Looped because the outcome was timing-dependent: an emit strictly after
+    destruction raised RuntimeError("Signal source has been deleted"), while
+    one landing at the instant of destruction raised TypeError(" only accepts
+    0 argument(s)"). Neither is reachable once the source is not the window.
+    """
+    hook_calls: list[threading.ExceptHookArgs] = []
+    monkeypatch.setattr(threading, "excepthook", hook_calls.append)
+
+    for _ in range(30):
+        _close_and_destroy_mid_crawl(qtbot, hook_calls)
+
+
+def test_redirect_and_seo_windows_are_not_destroyed_on_close(qtbot) -> None:
+    """Only Site Crawl and Log Analysis detach their background worker's
+    cross-thread signals before close (SiteCrawlWindow.closeEvent /
+    LogWindow._detach_worker). Redirect Check only blocks close on
+    worker.wait(5000) without detaching if that wait times out, and Webpage
+    SEO has no closeEvent at all -- neither is proven safe to actually
+    destroy on close, so _spawn_child must leave WA_DeleteOnClose off for
+    both."""
+    win = HomeWindow()
+    qtbot.addWidget(win)
+    win.open_redirect()
+    win.open_seo()
+
+    for child in win._child_windows:
+        assert not child.testAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)

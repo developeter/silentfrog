@@ -190,7 +190,7 @@ The uninstaller never touches the shared `~/nltk_data` cache (used by other NLTK
 
 - **"Python is not recognized..."** → reinstall Python from python.org with **Add to PATH** ticked, or run `py install_silentfrog.py` instead of `python install_silentfrog.py`.
 - **SmartScreen blocks Silentfrog.exe** → click **More info** → **Run anyway**. This is normal for unsigned apps.
-- **`run_silentfrog.bat` flashes and disappears** → run it from an open Command Prompt to see the error. Most often `.venv` was not created yet — re-run the installer.
+- **`run_silentfrog.bat`'s console window closes immediately** → by design: it launches Silentfrog detached and closes its own console right away, so it no longer stays open for the app's session. If the Silentfrog window itself never appears, most often `.venv` was not created yet — re-run the installer, or run `poetry run silentfrog` from the repo in an open Command Prompt to see the underlying error.
 
 ### Both platforms
 

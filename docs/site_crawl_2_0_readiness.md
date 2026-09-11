@@ -44,7 +44,7 @@ is not a release-time change.
    - regression test: tests/test_crawl_http_unit.py::test_apply_host_delay_credits_elapsed_time
 5. **[MAJOR]** `src/silentfrog/site_crawler.py` — Auto sitemap discovery unconditionally probes 3 hardcoded common paths even when robots.txt already names an authoritative Sitemap, and unions whatever both return instead of preferring the robots-declared one
    - what: `_discover_sitemap_urls` (site_crawler.py:537-541) always does `candidates = await _robots_sitemap_urls(...); candidates.extend(_common_sitemap_urls(config))` -- the 3 fixed guesses (sitemap.xml, sitemap_index.xml, sitemap-index.xml) are appended regardless of whether robots.txt already supplied a working Sitemap: URL, and `_auto_sitemap_urls` then fetches and unions pages from EVERY discovered sitemap. This means (a
-   - regression test: tests/test_site_crawl_unit.py::test_resolve_site_urls_prefers_robots_sitemap_over_common_paths
+   - regression test: tests/test_site_crawl_unit.py::test_build_seeds_sitemap_mode_prefers_robots_sitemap_over_common_paths
 6. **[MAJOR]** `src/silentfrog/site_crawl_gui.py` — Link graph on a reopened past scan opens the store read-write and turns any I/O failure into the wrong user-facing message
    - what: Every other reader on the history-reopen path (StoredCrawlTableModel/SqliteCrawlRunRepository, the cluster map's _cluster_inputs_from_report via open_report_repository) is careful to open the crawl's .db READ-ONLY and to never create/migrate storage on a read (that invariant is stated explicitly in crawl_run_repository.py's module docstring and enforced by SqliteCrawlRunRepository._open_readonly). _graph_inputs_from_
    - regression test: tests/test_site_crawl_gui.py::test_graph_inputs_from_store_reads_read_only_history_db

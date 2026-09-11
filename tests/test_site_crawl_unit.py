@@ -101,7 +101,13 @@ def test_from_text_defaults_to_standard_profile_for_cli_callers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_site_urls_parses_sitemap_index_filters_and_caps(aiohttp_server):
+async def test_build_seeds_sitemap_mode_parses_sitemap_index_filters_and_caps(aiohttp_server):
+    # Regression target moved from the deleted resolve_site_urls (dead code,
+    # zero production callers) to _build_seeds — the seed builder crawl_site
+    # actually calls. SITEMAP mode runs the same sitemap fetch/filter/cap
+    # logic the old sitemap_url branch did (via _seed_from_sitemap); it does
+    # not also seed config.url_list, which that branch prepended — irrelevant
+    # here (no url_list is set), and this keeps the coverage on the real path.
     async def index(_):
         body = f"""<?xml version="1.0"?>
         <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -130,17 +136,18 @@ async def test_resolve_site_urls_parses_sitemap_index_filters_and_caps(aiohttp_s
         include_text="/design/",
         exclude_text="private",
         limit=1,
+        spider=SpiderConfig(mode=CrawlMode.SITEMAP),
     )
 
     # The sitemap is served from a loopback test server; opt past the SSRF guard.
     with allow_private_network():
-        urls = await site_crawler.resolve_site_urls(config, timeout=5)
+        urls = await site_crawler._build_seeds(config, timeout=5)
 
     assert urls == [str(server.make_url("/design/table/"))]
 
 
 @pytest.mark.asyncio
-async def test_resolve_site_urls_discovers_sitemap_from_robots(aiohttp_server):
+async def test_build_seeds_sitemap_mode_discovers_sitemap_from_robots(aiohttp_server):
     async def robots(_):
         return web.Response(text=f"Sitemap: {server.make_url('/branch-sitemap.xml')}\n")
 
@@ -157,22 +164,28 @@ async def test_resolve_site_urls_discovers_sitemap_from_robots(aiohttp_server):
     app.router.add_get("/branch-sitemap.xml", sitemap)
     server = await aiohttp_server(app)
 
-    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")), include_text="/design/")
+    config = SiteCrawlConfig.from_text(
+        base_url=str(server.make_url("/")),
+        include_text="/design/",
+        spider=SpiderConfig(mode=CrawlMode.SITEMAP),
+    )
 
     with allow_private_network():
-        urls = await site_crawler.resolve_site_urls(config, timeout=5)
+        urls = await site_crawler._build_seeds(config, timeout=5)
 
     assert urls == [str(server.make_url("/design/table/"))]
 
 
 @pytest.mark.asyncio
-async def test_resolve_site_urls_prefers_robots_sitemap_over_common_paths(aiohttp_server):
+async def test_build_seeds_sitemap_mode_prefers_robots_sitemap_over_common_paths(aiohttp_server):
     # Regression: _discover_sitemap_urls used to always probe the 3 hardcoded
     # common paths and union whatever they returned with the robots-declared
     # sitemap, even when robots.txt was already authoritative. An unrelated
     # sitemap sitting at /sitemap.xml would then silently scope-creep into
     # the crawl. robots.txt naming a Sitemap: must short-circuit the common
-    # path probes entirely.
+    # path probes entirely. SITEMAP mode (unlike HYBRID) seeds ONLY from the
+    # sitemap, so the result is exactly the robots-declared page, not
+    # base_url + sitemap.
     common_path_requested = {"hit": False}
 
     async def robots(_):
@@ -199,11 +212,11 @@ async def test_resolve_site_urls_prefers_robots_sitemap_over_common_paths(aiohtt
     app.router.add_get("/sitemap.xml", common_sitemap)
     server = await aiohttp_server(app)
 
-    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")))
+    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")), spider=SpiderConfig(mode=CrawlMode.SITEMAP))
 
     with allow_private_network():
         discovered = await site_crawler._discover_sitemap_urls(config, timeout=5)
-        urls = await site_crawler.resolve_site_urls(config, timeout=5)
+        urls = await site_crawler._build_seeds(config, timeout=5)
 
     assert str(server.make_url("/sitemap.xml")) not in discovered
     assert common_path_requested["hit"] is False
@@ -211,7 +224,7 @@ async def test_resolve_site_urls_prefers_robots_sitemap_over_common_paths(aiohtt
 
 
 @pytest.mark.asyncio
-async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
+async def test_build_seeds_sitemap_mode_discovers_common_sitemap_path(aiohttp_server):
     async def sitemap(_):
         body = f"""<?xml version="1.0"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -222,10 +235,10 @@ async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
     app = web.Application()
     app.router.add_get("/sitemap.xml", sitemap)
     server = await aiohttp_server(app)
-    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")))
+    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")), spider=SpiderConfig(mode=CrawlMode.SITEMAP))
 
     with allow_private_network():
-        urls = await site_crawler.resolve_site_urls(config, timeout=5)
+        urls = await site_crawler._build_seeds(config, timeout=5)
 
     assert urls == [str(server.make_url("/page-one/"))]
 
@@ -260,14 +273,19 @@ async def test_crawl_site_sitemap_mode_with_nothing_discovered_warns(aiohttp_ser
 
 
 @pytest.mark.asyncio
-async def test_resolve_site_urls_uses_base_url_when_sitemap_detection_finds_nothing(monkeypatch):
+async def test_build_seeds_hybrid_mode_falls_back_to_base_url_when_sitemap_detection_finds_nothing(monkeypatch):
+    # HYBRID is the CLI/default mode (test_from_text_threads_limit_into_spider_max_urls_for_cli_callers).
+    # _build_seeds must still seed the crawl from base_url when sitemap
+    # discovery finds nothing — this is the real base-URL fallback crawl_site
+    # depends on, previously covered only by the dead resolve_site_urls.
     async def no_sitemaps(*_args, **_kwargs):
         return []
 
     monkeypatch.setattr(site_crawler, "_discover_sitemap_urls", no_sitemaps)
     config = SiteCrawlConfig.from_text(base_url="https://example.com")
+    assert config.spider.mode is CrawlMode.HYBRID
 
-    urls = await site_crawler.resolve_site_urls(config, timeout=5)
+    urls = await site_crawler._build_seeds(config, timeout=5)
 
     assert urls == ["https://example.com/"]
 
