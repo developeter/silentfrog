@@ -42,6 +42,40 @@ durable detail lives there, not here.
   pinned, so `Help → Check for Updates…` fails closed by design until a
   maintainer signs a published release (`docs/RELEASING.md`).
 
+## Addendum 2026-09-11 — release candidate hardened, tag still pending
+
+Everything below is committed locally on `feature/v2.0`; **nothing is
+pushed and `v2.0.0` is not tagged** (the user owns that step).
+
+- `5e63bc2` Site Crawl readiness audit: 20 reproduced findings fixed
+  (`docs/site_crawl_2_0_readiness.md` has the full list, the refuted ones,
+  and 89 confirmed-working checks).
+- `c3f45dd` user-reported fixes: `run_silentfrog.bat` launches detached (no
+  console); every QComboBox shows its arrow again (SVG assets in theme.py);
+  Performance tab lists heaviest resources + third-party hosts; Semrush
+  key/enable/max-calls live in a pure `integrations/semrush/config.py` the
+  crawler reads (env still wins), mirroring `integrations/google/config.py`.
+- `9b50083` all non-blocking audit items closed. Load-bearing shape: the
+  Site Crawl worker emits on a parentless `_CrawlSignalBridge`, never on
+  the window, so close-during-crawl cannot raise; Site Crawl / Log windows
+  are `WA_DeleteOnClose`. A process-wide `threading.excepthook` was tried
+  and rejected — never mask, detach instead.
+- `13a6ba9` `keyring` is a base dependency (user decision: keys optional,
+  but storable on a stock install). The `semrush` extra no longer exists.
+
+**Open decision (user's):** ship a maintainer-owned Google OAuth client
+("app badge": user registers the app once at Google, end users just click
+Connect and log into *their own* account — no data ever passes through the
+maintainer) vs. today's bring-your-own `client_secret.json`. Option A needs
+the user to create the Desktop-app client in Google Cloud and hand over its
+client id/secret; the consent screen must be *In production* (Testing
+tokens expire after 7 days) and Google shows "unverified app" until a free
+verification form is submitted.
+
+**Before tagging:** reinstall with the app closed (About must show 2.0.0,
+keyring now present); one real crawl against a real site (the audit used
+only local fixtures); a real BYO Google round-trip if BYO stays.
+
 ## How the roadmaps fit (avoid confusion)
 
 - **`PLAN.md`** = the product north star (M0–M9: issue model → recap → export →
