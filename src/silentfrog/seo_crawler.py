@@ -94,8 +94,10 @@ async def _fetch_analysis_response(
         delay_seconds = robots_snapshot.crawl_delay(crawl_options.user_agent) if robots_snapshot else 0.0
         active_delay = delay_seconds if (crawl_options.gentle_mode and crawl_options.respect_crawl_delay) else 0.0
         crawl_http._HOST_DELAYS[host_key] = active_delay  # adjust host delay used by link-status helper
-        if active_delay > 0:
-            await asyncio.sleep(active_delay)
+        # Shares the same per-host pacer as every canonical/redirect/link-status
+        # probe that follows in this page audit, instead of sleeping the full
+        # flat delay again on top of theirs (see crawl_http._apply_host_delay).
+        await crawl_http._apply_host_delay(host_key, crawl_options)
         headers = _headers_from_options(crawl_options)
         attempts = 2 if crawl_options.gentle_mode else 1
         resp: Any = None

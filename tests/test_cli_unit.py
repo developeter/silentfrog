@@ -228,12 +228,41 @@ def test_build_parser_crawl_defaults() -> None:
     assert args.timeout == 10
     assert args.digest is False
     assert args.url_list is None
+    assert args.allow_private_network is False
+    assert args.allow_insecure_tls is False
+
+
+def _ok_result(base_url: str):
+    from silentfrog.site_crawl_types import SiteCrawlResult
+
+    return SiteCrawlResult(
+        url=base_url,
+        status="ok",
+        redirect_status="",
+        final_url=base_url,
+        title="Example",
+        description_state="ok",
+        canonical_state="ok",
+        indexability="indexable",
+        hreflang_count=0,
+        schema_count=0,
+        image_issue_count=0,
+        h1_state="ok",
+        word_count=100,
+        link_issue_count=0,
+        performance_verdict="-",
+        ai_visibility_verdict="-",
+    )
 
 
 async def _stub_crawl_fn(config, timeout, store):
+    # A genuinely successful single-page crawl (discovered=1, crawled=1,
+    # failed=0) -- NOT the discovered_count=0 shape this stub used to return,
+    # which was actually the malformed-URL *failure* case (see
+    # test_crawl_cmd_returns_one_when_every_page_fails below).
     from silentfrog.site_crawl_types import SiteCrawlReport
 
-    return SiteCrawlReport.from_results([], discovered_count=0, base_url=config.base_url)
+    return SiteCrawlReport.from_results([_ok_result(config.base_url)], discovered_count=1, base_url=config.base_url)
 
 
 @pytest.mark.asyncio
@@ -250,6 +279,30 @@ async def test_crawl_cmd_prints_digest_and_returns_zero(tmp_path, monkeypatch, c
 
 
 @pytest.mark.asyncio
+async def test_crawl_cmd_threads_ssrf_and_tls_flags_into_crawl_options(tmp_path, monkeypatch) -> None:
+    """MAJOR regression: `silentfrog-cli crawl` had no way to reach an
+    intranet/loopback/self-signed target -- unlike the GUI's Crawl Settings
+    dialog -- because _crawl_cmd built SiteCrawlConfig.from_text() without a
+    crawl_options= argument, so allow_private_network/allow_insecure_tls
+    stayed at CrawlOptions.from_ui's default (False) regardless of what the
+    user passed on the command line."""
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "http://127.0.0.1:8931/", "--allow-private-network", "--allow-insecure-tls"])
+    captured: dict[str, object] = {}
+
+    async def _capture_config(config, timeout, store):
+        captured["config"] = config
+        return await _stub_crawl_fn(config, timeout, store)
+
+    await cli._crawl_cmd(args, crawl_fn=_capture_config)
+
+    config = captured["config"]
+    assert config.crawl_options.allow_private_network is True
+    assert config.crawl_options.allow_insecure_tls is True
+
+
+@pytest.mark.asyncio
 async def test_crawl_cmd_failure_returns_one(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
     parser = cli._build_parser()
@@ -262,6 +315,47 @@ async def test_crawl_cmd_failure_returns_one(tmp_path, monkeypatch, capsys) -> N
 
     assert exit_code == 1
     assert "network down" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_crawl_cmd_returns_one_when_every_page_fails(tmp_path, monkeypatch, capsys) -> None:
+    """BLOCKER regression: an unreachable host (e.g. http://192.0.2.1/) never
+    raises inside crawl_site/fetch_page -- it records a per-page error and
+    still returns a normal 'completed' SiteCrawlReport -- so _crawl_cmd must
+    read the run's counts, not rely on an exception, to tell a scheduler
+    (cron/Task Scheduler) the crawl failed via the exit code."""
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    parser = cli._build_parser()
+    args = parser.parse_args(["crawl", "https://example.com/"])
+
+    async def _all_failed(config, timeout, store):
+        from silentfrog.site_crawl_types import SiteCrawlReport, SiteCrawlResult
+
+        failed = SiteCrawlResult(
+            url=config.base_url,
+            status="error",
+            redirect_status="",
+            final_url=config.base_url,
+            title="",
+            description_state="missing",
+            canonical_state="missing",
+            indexability="unknown",
+            hreflang_count=0,
+            schema_count=0,
+            image_issue_count=0,
+            h1_state="missing",
+            word_count=0,
+            link_issue_count=0,
+            performance_verdict="-",
+            ai_visibility_verdict="-",
+            error="Name or service not known",
+        )
+        return SiteCrawlReport.from_results([failed], discovered_count=1, base_url=config.base_url)
+
+    exit_code = await cli._crawl_cmd(args, crawl_fn=_all_failed)
+
+    assert exit_code == 1
+    assert "failed" in capsys.readouterr().err
 
 
 @pytest.mark.asyncio

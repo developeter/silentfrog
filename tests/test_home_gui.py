@@ -5,16 +5,21 @@ from qtpy import QtWidgets
 from silentfrog.gui import HomeWindow, _SettingsDialog  # type: ignore[reportMissingImports]
 
 
-def test_home_window_exposes_three_primary_actions(qtbot) -> None:
+def test_home_window_exposes_four_primary_actions(qtbot) -> None:
     win = HomeWindow()
     qtbot.addWidget(win)
 
     labels = [button.text() for button in win.findChildren(QtWidgets.QPushButton)]
 
-    assert "Massive Redirect Check" in labels
-    assert "Single Page SEO Check" in labels
-    assert "Site Crawl" in labels
-    assert "Server Log Analysis" in labels
+    # Exact set + count: a future action added/removed must fail this named
+    # test instead of silently drifting from docs/site_crawl_feature_spec.md's
+    # "Home screen has four actions" UX Contract line the way the stale
+    # "...three_primary_actions" name previously masked.
+    assert labels.count("Massive Redirect Check") == 1
+    assert labels.count("Single Page SEO Check") == 1
+    assert labels.count("Site Crawl") == 1
+    assert labels.count("Server Log Analysis") == 1
+    assert len(labels) == 4
 
 
 def test_home_window_can_open_multiple_seo_windows_without_dropping_refs(

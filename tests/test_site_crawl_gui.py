@@ -179,6 +179,48 @@ def test_start_crawl_button_populates_rows(monkeypatch, qtbot, tmp_path: Path) -
     assert win.stack.currentWidget() is win.setup_page
 
 
+def test_second_button_driven_crawl_retains_previous_report(monkeypatch, qtbot, tmp_path: Path) -> None:
+    # The only UI path to a second crawl is Results -> "New crawl" -> "Start crawl".
+    # _start_crawl() used to null out _latest_report before the crawl ran, so
+    # _handle_report's "previous = latest" always captured None instead of the
+    # just-finished prior run -- permanently disabling "Compare with previous"
+    # and "Map redirects" after a user's very first re-crawl.
+    result1 = SiteCrawlResult.from_payload("https://example.com/run1", _payload("https://example.com/run1"))
+    result2 = SiteCrawlResult.from_payload("https://example.com/run2", _payload("https://example.com/run2"))
+    report1 = SiteCrawlReport.from_results([result1], discovered_count=1)
+    report2 = SiteCrawlReport.from_results([result2], discovered_count=1)
+    calls = {"n": 0}
+
+    def fake_run_site_crawl(config, timeout, on_progress, on_success, on_error, store_path=None):
+        calls["n"] += 1
+        report, result = (report1, result1) if calls["n"] == 1 else (report2, result2)
+        on_progress({"event": "discovered", "total": 1})
+        on_progress({"event": "row", "result": result, "completed": 1})
+        on_success(report)
+        return threading.Thread(), threading.Event()
+
+    monkeypatch.setattr("silentfrog.site_crawl_gui.run_site_crawl", fake_run_site_crawl)
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win.base_url.setText("https://example.com")
+    win.url_list.setPlainText("https://example.com/run1")
+    qtbot.mouseClick(win.btn_start, QtCore.Qt.MouseButton.LeftButton)
+
+    assert win._latest_report is report1
+    assert win._previous_report is None  # no prior run yet -- expected
+
+    qtbot.mouseClick(win.btn_new_crawl, QtCore.Qt.MouseButton.LeftButton)
+    win.url_list.setPlainText("https://example.com/run2")
+    qtbot.mouseClick(win.btn_start, QtCore.Qt.MouseButton.LeftButton)
+
+    assert win._latest_report is report2
+    assert win._previous_report is report1
+    assert win.btn_diff.isEnabled() is True
+    assert win.btn_redirect_map.isEnabled() is True
+
+
 def test_site_crawl_stop_button_only_visible_while_running(qtbot) -> None:
     win = SiteCrawlWindow()
     qtbot.addWidget(win)
@@ -251,6 +293,23 @@ def test_site_crawl_recap_issue_activation_filters_to_url(qtbot, tmp_path: Path)
     win.recap_widget.action_list.itemActivated.emit(item)
 
     assert win.search_edit.text() == "https://example.com/fail"
+    assert win.table.selectionModel().hasSelection()
+
+
+def test_site_crawl_recap_issue_activation_resets_active_status_filter(qtbot, tmp_path: Path) -> None:
+    result = SiteCrawlResult.failed("https://example.com/fail", "boom")
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+
+    win._show_results()
+    win._handle_report(report)
+    win.status_filter.setCurrentText("200")  # excludes the "error"-status row
+    item = win.recap_widget.action_list.item(0)
+    win.recap_widget.action_list.itemActivated.emit(item)
+
+    assert win.status_filter.currentText() == "All"
     assert win.table.selectionModel().hasSelection()
 
 
@@ -662,6 +721,67 @@ def test_open_stored_run_binds_paged_model_and_detail_payload(qtbot, tmp_path: P
     assert payload is not None  # detail dialog path reads the stored payload
 
 
+def test_open_stored_run_blocked_while_crawl_is_active(monkeypatch, qtbot, tmp_path: Path) -> None:
+    # Regression: opening a saved scan from History while a crawl is still
+    # running used to silently hide Stop and re-enable Start, because
+    # _open_stored_run unconditionally called _set_running(False) -- the same
+    # UI-only toggle _handle_report/_show_error use on completion -- even
+    # though the background crawl thread was still alive and its cancel Event
+    # was never set. That orphaned the live crawl's only cancel path (Stop,
+    # now hidden) and let its later completion silently overwrite whatever
+    # the user opened next. _crawl_active tracks "a thread is genuinely in
+    # flight" independently of _set_running, and _open_stored_run must refuse
+    # to touch running/report state while it is True.
+    from silentfrog.crawl_history import build_history_run
+
+    release_first = threading.Event()
+    thread_started = threading.Event()
+
+    def fake_run_site_crawl(config, timeout, on_progress, on_success, on_error, store_path=None):
+        cancel_event = threading.Event()
+
+        def _target():
+            thread_started.set()
+            release_first.wait(timeout=5)  # still "running" until the test releases it
+            on_success(SiteCrawlReport.from_results([], discovered_count=0, base_url=config.base_url))
+
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        return t, cancel_event
+
+    monkeypatch.setattr(site_crawl_gui, "run_site_crawl", fake_run_site_crawl)
+    warned = {"n": 0}
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *a, **k: warned.__setitem__("n", warned["n"] + 1))
+
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win.base_url.setText("https://live.test/")
+    win._start_crawl()
+    qtbot.waitUntil(lambda: thread_started.is_set(), timeout=3000)
+
+    live_cancel = win._active_cancel
+    assert win._crawl_active is True
+    assert win.btn_stop.isHidden() is False
+    assert win.btn_start.isEnabled() is False
+
+    _, saved_report = _build_store(tmp_path, "crawl_saved.db", [("https://e.com/p", "200", 80)])
+    history_run = build_history_run(saved_report)
+
+    try:
+        win._open_stored_run(history_run)
+
+        assert warned["n"] == 1, "opening a saved scan during a live crawl must warn, not silently switch"
+        assert win.btn_stop.isHidden() is False, "Stop control got hidden while a crawl is still running"
+        assert win.btn_start.isEnabled() is False, "Start got re-enabled while a crawl is still running"
+        assert win._active_cancel is live_cancel, "the live crawl's cancel token must not be displaced"
+        assert live_cancel.is_set() is False
+        assert win._crawl_run_id == "", "the live run's id must not be swapped for the opened history run's"
+    finally:
+        release_first.set()
+        qtbot.waitUntil(lambda: win._crawl_active is False, timeout=3000)
+
+
 def test_stored_model_owns_connection_on_building_thread(qtbot, tmp_path: Path) -> None:
     # The SQL model opens its own read connection on the thread that builds it
     # (the GUI thread), and reads succeed there without locking out a writer.
@@ -702,6 +822,19 @@ def test_export_site_crawl_button_uses_bulk_export(monkeypatch, qtbot, tmp_path:
     # CrawlRunRef itself (H2), so the button just hands it the report + path.
     assert called["report"] is report
     assert called["path"] == target
+
+
+def test_export_tooltips_disclose_filters_are_not_applied(qtbot) -> None:
+    # All four export paths (_export_excel/_export_html_report/_export_llms_txt/
+    # _export_ai) always export self._latest_report / stream_report_results(...)
+    # in full -- they never consult the search/status/indexability filter row
+    # (self.proxy / self._stored_model). That's invisible to the user unless the
+    # tooltip says so, so each export button's tooltip must disclose it.
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    for btn in (win.btn_export, win.btn_html_report, win.btn_export_ai, win.btn_llms_txt):
+        tip = btn.toolTip().lower()
+        assert "filter" in tip, f"{btn.text()} tooltip does not disclose filter/export mismatch"
 
 
 def test_html_report_button_present_and_disabled(qtbot) -> None:
@@ -790,6 +923,40 @@ def test_graph_node_click_opens_page_detail(monkeypatch, qtbot) -> None:
 
     assert win._detail_windows
     assert isinstance(win._detail_windows[-1], SiteCrawlDetailDialog)
+
+
+def test_graph_inputs_from_store_reads_read_only_history_db(qtbot, tmp_path: Path) -> None:
+    # Regression: _graph_inputs_from_store used to open a reopened history run's
+    # store via the write-capable CrawlStore(...) (which runs apply_schema --
+    # CREATE TABLE/PRAGMA/commit -- on open) just to read graph edges, wrapped
+    # in a bare `except Exception: return []`. A Windows read-only file
+    # attribute (a common way users "protect" old scan files) then made that
+    # write-side open raise `OperationalError: attempt to write a readonly
+    # database`, silently swallowed into an empty list -- so "Link graph" told
+    # the user "No crawl data to graph yet" even though the run has data and is
+    # perfectly readable (SqliteCrawlRunRepository succeeds against the same
+    # file). read_graph_inputs opens the file READ-ONLY instead.
+    import os
+    import stat
+
+    db = tmp_path / "crawl_history.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.save_audit(run_id, StoredAudit(url="https://e.com/p", http_status="200", geo_score=80))
+    store.finish_run(run_id)
+    store.close()
+    os.chmod(db, stat.S_IREAD)  # Windows "read-only" file attribute
+    try:
+        win = SiteCrawlWindow()
+        qtbot.addWidget(win)
+        win._crawl_store_path = str(db)
+        win._crawl_run_id = run_id
+
+        rows = win._graph_inputs_from_store()
+
+        assert rows == [("https://e.com/p", "", 80)]
+    finally:
+        os.chmod(db, stat.S_IWRITE)  # restore so tmp_path cleanup can delete it
 
 
 def test_graph_caption_notes_sampling_when_sampled(qtbot) -> None:

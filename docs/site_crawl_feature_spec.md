@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented in v1 scope.
+Implemented in v1 scope (see README.md § "Site Crawl hardening (v2.0)" and HANDOFF.md § "v2.0 status" for v2.0+ hardening -- SQLite store, AuditProfile gating, resumable frontier, hybrid/spider crawl with render_js, per-bot SSR rendering, crawl history/diff, link graph, topic map, redirect mapping, and llms.txt export -- this file's V1 Scope/Out-Of-Scope sections below describe only the original v1 feature set).
 
 ## Goal
 
@@ -13,13 +13,13 @@ Add a scoped **Site Crawl** mode that audits many pages without trying to discov
 - Crawl sources: automatic sitemap discovery from the base URL, explicit sitemap URL, sitemap index URL, and pasted URL lists.
 - URL filtering: include path prefixes and exclude patterns.
 - Safety default: gentle crawl mode with a 500 URL cap.
-- Crawling behavior: no recursive link discovery in v1.
+- Crawling behavior: **Hybrid** (sitemap + spider) is the default when only a base URL is given, and recursively follows same-host links; a **Crawl mode** control (Auto / Hybrid / Spider / Sitemap only / URL list only) plus Max depth, Politeness, and Follow subdomains settings let the user restrict this to sitemap- or list-only discovery.
 - Result behavior: one summary row per URL plus cached page payloads for detail opening.
 - Export behavior: one bulk Excel workbook with summary, issue, and consolidated per-page detail sheets.
 
 ## UX Contract
 
-- Home screen has three actions: **Massive Redirect Check**, **Single Page SEO Check**, and **Site Crawl**.
+- Home screen has four actions: **Massive Redirect Check**, **Single Page SEO Check**, **Site Crawl**, and **Server Log Analysis**.
 - Site Crawl has its own window and does not expose single-page-only settings or per-page Excel export controls.
 - Site Crawl uses separate setup and results screens. Starting a crawl hides the setup form and shows only results, filters, progress, and result actions.
 - After URL discovery finishes, the results screen shows how many URLs Silentfrog found to crawl.
@@ -35,16 +35,18 @@ Add a scoped **Site Crawl** mode that audits many pages without trying to discov
 - Robots crawl-delay is respected by default.
 - Repeated 403/429 outcomes should be treated as a WAF/rate-limit signal and surfaced to the user.
 - If only the base URL is provided, the crawler detects sitemaps from `robots.txt` and common sitemap paths before falling back to the base URL only.
-- The crawler must not spoof Googlebot or attempt to bypass Cloudflare/WAF protection.
+- By default, the crawler does not spoof Googlebot or attempt to bypass Cloudflare/WAF protection. An explicit opt-in "Stealth fetching" setting (Crawl settings -> Advanced; requires `pip install silentfrog[stealth]`) may escalate blocked fetches through TLS-impersonation and headless-browser backends -- enable only for sites you are authorized to audit.
 
 ## Out Of Scope For V1
 
-- Recursive link-following discovery.
-- JavaScript rendering.
 - Google Search Console integration.
 - Server log analysis.
-- Crawl history and crawl diff.
 - Every single-page worksheet per URL in the bulk Excel export.
+
+## In Scope (Shipped)
+
+- JavaScript rendering: an opt-in "Crawl JavaScript-rendered links (SPA sites)" checkbox (Crawl settings, requires Playwright) merges JS-rendered DOM links into the crawl frontier in Spider/Hybrid mode so SPA/React/Vue routes are discovered.
+- Crawl history and crawl diff: "View past scans" on both the setup and results screens opens `CrawlHistoryDialog`, which lists saved local runs and diffs two of them via `diff_runs`.
 
 ## LAGO Test Shape
 

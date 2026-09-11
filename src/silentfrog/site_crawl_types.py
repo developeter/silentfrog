@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlunparse
 
 from .crawl_mode import CrawlMode
-from .crawl_options import CrawlOptions
+from .crawl_options import AuditProfile, CrawlOptions
 from .crawl_types import CrawlPayload
 from .image_diagnostics import DIAGNOSTIC_COL
 from .indexability import build_indexability_rows
@@ -136,17 +136,32 @@ class SiteCrawlConfig:
     ) -> SiteCrawlConfig:
         url_list = tuple(normalize_site_url(url) for url in _split_lines(url_list_text))
         sitemap_clean = normalize_site_url(sitemap_url) if sitemap_url.strip() else ""
-        resolved_spider = spider or SpiderConfig(mode=_auto_mode(url_list, sitemap_clean))
+        # v2.0 V3: store-backed crawls run at bounded memory — verified to
+        # 100k URLs (tools/perf_harness.py); 1M is a post-gate follow-up.
+        clamped_limit = max(1, min(1_000_000, int(limit)))
+        # Callers that don't pass spider= explicitly (the CLI) must get a
+        # spider.max_urls that matches limit — max_urls, not limit, is the
+        # actual crawl-time admission cap (site_crawler._build_frontier), so
+        # leaving it at SpiderConfig's 100_000 default made --limit a no-op
+        # for HYBRID/SPIDER crawls. The GUI is unaffected: it always passes
+        # spider=self._spider_from_ui() explicitly.
+        resolved_spider = spider or SpiderConfig(
+            mode=_auto_mode(url_list, sitemap_clean),
+            max_urls=clamped_limit,
+        )
         return cls(
             base_url=normalize_site_url(base_url),
             sitemap_url=sitemap_clean,
             include_patterns=tuple(_split_lines(include_text)),
             exclude_patterns=tuple(_split_lines(exclude_text)),
             url_list=url_list,
-            # v2.0 V3: store-backed crawls run at bounded memory — verified to
-            # 100k URLs (tools/perf_harness.py); 1M is a post-gate follow-up.
-            limit=max(1, min(1_000_000, int(limit))),
-            crawl_options=crawl_options or CrawlOptions.from_ui(gentle_mode=True, max_parallel=2),
+            limit=clamped_limit,
+            # H4: CLI/scheduled callers that don't pass crawl_options= must
+            # match the GUI's documented STANDARD default (site_crawl_gui.py)
+            # instead of silently falling through to CrawlOptions.default()'s
+            # DEEP — same nominal crawl, unconditionally heavier otherwise.
+            crawl_options=crawl_options
+            or CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD),
             spider=resolved_spider,
         )
 
@@ -320,19 +335,23 @@ class SiteCrawlReport:
         discovered_count: int,
         *,
         base_url: str = "",
+        extra_warning: str = "",
     ) -> SiteCrawlReport:
         """Build a store-less report from an in-memory result tuple (tests +
-        bounded small crawls). Production crawls use :meth:`from_run`."""
+        bounded small crawls). Production crawls use :meth:`from_run`.
+        ``extra_warning`` (e.g. sitemap-only mode discovering nothing) is
+        joined after the WAF warning when both apply."""
         rows = tuple(results)
         failed = sum(1 for result in rows if result.status == "error")
         skipped = sum(1 for result in rows if result.status == "skipped")
+        waf_warning = _waf_warning_text(sum(1 for result in rows if result.has_waf_signal))
         return cls(
             run_ref=None,
             discovered_count=discovered_count,
             crawled_count=len(rows) - skipped,
             skipped_count=skipped,
             failed_count=failed,
-            warning=_waf_warning_text(sum(1 for result in rows if result.has_waf_signal)),
+            warning=_combine_warnings(waf_warning, extra_warning),
             base_url=base_url,
             results=rows,
         )
@@ -348,15 +367,18 @@ class SiteCrawlReport:
         failed_count: int,
         waf_count: int = 0,
         base_url: str = "",
+        extra_warning: str = "",
     ) -> SiteCrawlReport:
-        """Build a store-backed report: carries the run handle + counts only."""
+        """Build a store-backed report: carries the run handle + counts only.
+        ``extra_warning`` (e.g. sitemap-only mode discovering nothing) is
+        joined after the WAF warning when both apply."""
         return cls(
             run_ref=run_ref,
             discovered_count=discovered_count,
             crawled_count=crawled_count,
             skipped_count=skipped_count,
             failed_count=failed_count,
-            warning=_waf_warning_text(waf_count),
+            warning=_combine_warnings(_waf_warning_text(waf_count), extra_warning),
             base_url=base_url,
         )
 
@@ -488,6 +510,12 @@ def _waf_warning_text(signals: int) -> str:
         "Several URLs returned 403/429-like responses. Slow the crawl, add approved "
         "headers/cookies, or ask the site owner to allowlist the crawler."
     )
+
+
+def _combine_warnings(waf_warning: str, extra_warning: str) -> str:
+    """Join the WAF warning with another warning (e.g. sitemap-only mode
+    finding nothing), WAF first, when both apply."""
+    return " ".join(text for text in (waf_warning, extra_warning) if text)
 
 
 __all__ = [

@@ -117,6 +117,38 @@ def _open_readonly(db_path: Path | str) -> sqlite3.Connection | None:
         return None
 
 
+def read_graph_inputs(db_path: Path | str, run_id: str) -> list[tuple[str, str, int]]:
+    """Link-graph rows for ``run_id``, opened READ-ONLY via :func:`_open_readonly`.
+
+    Mirrors ``CrawlStore.iter_graph_inputs``'s query without ever instantiating
+    the write-capable ``CrawlStore`` (which runs ``apply_schema`` — CREATE
+    TABLE/PRAGMA/commit — on open): a history run being reopened just to view
+    its link graph must not require write access to the file, and a read-only
+    or otherwise unopenable database degrades to ``[]`` like every other read
+    here instead of raising.
+    """
+    conn = _open_readonly(db_path)
+    if conn is None:
+        return []
+    try:
+        cursor = conn.execute(
+            """
+            SELECT a.url, COALESCE(f.source_url, ''), a.geo_score
+            FROM audits a
+            LEFT JOIN frontier f ON f.run_id = a.run_id AND f.normalized_url = a.url
+            WHERE a.run_id = ?
+            ORDER BY a.insertion_order
+            """,
+            (run_id,),
+        )
+        rows = cursor.fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+    return [(str(row[0]), str(row[1]), int(row[2])) for row in rows]
+
+
 def _payload_from_blob(blob: bytes | None) -> CrawlPayload | None:
     raw = _decompress(blob)
     if raw is None:
@@ -482,6 +514,7 @@ __all__ = [
     "SqliteCrawlRunRepository",
     "hydrate_payloads",
     "open_report_repository",
+    "read_graph_inputs",
     "stream_report_lightweight",
     "stream_report_results",
 ]

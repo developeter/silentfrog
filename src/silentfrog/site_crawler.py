@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from .crawl_http import _headers_from_options
+from .crawl_http import _headers_from_options, robots_fetch_scope
 from .crawl_mode import CrawlMode
 from .crawl_run_repository import CrawlRunRef
 from .crawl_store import CrawlStore, StoredAudit
@@ -147,6 +147,7 @@ async def _orchestrate_crawl(
 ) -> SiteCrawlReport:
     spider = config.spider
     seeds = await _build_seeds(config, timeout)
+    seed_warning = _sitemap_only_empty_warning(config) if spider.mode is CrawlMode.SITEMAP and not seeds else ""
     frontier = _build_frontier(config)
     run_id = _start_or_resume(store, config, resume_run_id)
     work_source = _make_work_source(store, run_id, frontier, spider.max_urls)
@@ -168,13 +169,15 @@ async def _orchestrate_crawl(
     )
     # H4: site-wide discovery (robots/sitemap/llms.txt/ai.json) is fetched once
     # per origin for the whole crawl, in every profile, instead of per page.
-    with discovery_scope():
+    # robots_fetch_scope covers the separate robots.txt fetch the crawl-delay
+    # check (respect_crawl_delay, on by default) makes per page.
+    with discovery_scope(), robots_fetch_scope():
         drive = await _drive_frontier(ctx, work_source)
     # item 5: the last page is fetched; report building (store finish + summaries)
     # starts now. Emit here — not after crawl_site returns — so the GUI shows the
     # finalize phase *while* that work runs, in every crawl mode.
     _emit(on_event, "finalizing")
-    return _build_report(config, store, run_id, drive, work_source.count(), _is_cancelled(ctx))
+    return _build_report(config, store, run_id, drive, work_source.count(), _is_cancelled(ctx), seed_warning)
 
 
 def _start_or_resume(store: CrawlStore | None, config: SiteCrawlConfig, resume_run_id: str | None) -> str:
@@ -196,14 +199,19 @@ def _build_report(
     drive: _Drive,
     discovered: int,
     cancelled: bool,
+    seed_warning: str = "",
 ) -> SiteCrawlReport:
     """Store-less crawls return their bounded in-memory results; store-backed
     crawls return only a CrawlRunRef + counts (H2) so the report stays flat —
     the summary counts come from the store, never an in-memory result list. A
     cancelled run is finished as ``cancelled`` (not ``completed``) but stays
-    fully queryable through its CrawlRunRef (partial-run persistence, PR-9)."""
+    fully queryable through its CrawlRunRef (partial-run persistence, PR-9).
+    ``seed_warning`` (e.g. sitemap-only mode finding nothing) is joined after
+    the WAF warning, when both apply."""
     if store is None:
-        return SiteCrawlReport.from_results(drive.results, discovered_count=discovered, base_url=config.base_url)
+        return SiteCrawlReport.from_results(
+            drive.results, discovered_count=discovered, base_url=config.base_url, extra_warning=seed_warning
+        )
     store.finish_run(run_id, status="cancelled" if cancelled else "completed")
     summary = store.summary(run_id)
     return SiteCrawlReport.from_run(
@@ -214,6 +222,7 @@ def _build_report(
         failed_count=summary.failed,
         waf_count=drive.waf_count,
         base_url=config.base_url,
+        extra_warning=seed_warning,
     )
 
 
@@ -242,6 +251,19 @@ async def _build_seeds(config: SiteCrawlConfig, timeout: int) -> list[str]:
         return _filter_urls([config.base_url], config)
     sitemap_seeds = await _seed_from_sitemap(config, timeout)
     return _filter_urls([config.base_url, *sitemap_seeds], config)
+
+
+def _sitemap_only_empty_warning(config: SiteCrawlConfig) -> str:
+    """The user explicitly chose sitemap-only mode and discovery found no
+    sitemap URL, robots.txt Sitemap: line, or sitemap at a common path — so
+    ``_build_seeds`` returned nothing and the crawl would otherwise finish
+    'successfully' with 0 discovered/crawled and no explanation. Do NOT fall
+    back to the base URL here (that would override an explicit user choice) —
+    just make the empty result legible."""
+    return (
+        f"No URLs were found in any sitemap for {config.base_url}, so nothing was crawled. "
+        "Check the sitemap URL, or switch Crawl mode to Auto to crawl from the base URL."
+    )
 
 
 async def _seed_from_sitemap(config: SiteCrawlConfig, timeout: int) -> list[str]:
@@ -535,8 +557,13 @@ async def _auto_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[str]
 
 
 async def _discover_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[str]:
+    # robots.txt is authoritative when it names a Sitemap: only fall back to
+    # the hardcoded common paths when robots.txt supplied nothing usable, so
+    # an unrelated sitemap sitting at a common path can't scope-creep into
+    # the crawl once robots.txt already answered the question.
     candidates = await _robots_sitemap_urls(config, timeout)
-    candidates.extend(_common_sitemap_urls(config))
+    if not candidates:
+        candidates.extend(_common_sitemap_urls(config))
     return list(dict.fromkeys(url for url in candidates if _valid_http_url(url)))
 
 

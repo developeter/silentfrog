@@ -112,6 +112,76 @@ to reach it. All three are now wired to a GUI entry point:
   Remote sync (M8, `remote_sync.py`) remains unwired — see Known
   limitations below.
 
+### Site Crawl release audit
+
+An eight-lens audit of the Site Crawl surface against the 2.0.0
+candidate (runtime smoke, engine safety, store/history, threading,
+exports, recap/table, docs-vs-code, CLI parity); every item below was
+independently reproduced before being fixed and carries a regression
+test. Full list: `docs/site_crawl_2_0_readiness.md`.
+
+#### Fixed
+- **Compare with previous / Map redirects** never had a previous run
+  to compare against: `_start_crawl` cleared the latest report before
+  `_handle_report` copied it into "previous", so both buttons failed on
+  every genuine second crawl. The previous run is now captured at
+  start.
+- **`silentfrog-cli crawl --limit N`** was a no-op for the default
+  Hybrid/Spider modes: the cap the frontier actually enforces is
+  `spider.max_urls`, which `SiteCrawlConfig.from_text` left at its
+  100 000 default for callers that don't pass an explicit spider
+  config. It now follows `limit`.
+- **`silentfrog-cli crawl` exit code** — a malformed URL or an
+  unreachable host produced a "completed" report with zero reachable
+  pages and exit 0, so cron / Task Scheduler could never notice. It
+  now exits 1 when nothing was discovered or every page failed.
+- **CLI audit profile** — CLI and scheduled crawls silently ran the
+  `DEEP` profile while the GUI's Site Crawl defaults to `STANDARD`;
+  the same nominal crawl was unconditionally heavier from the CLI.
+  Both default to `STANDARD` now.
+- **`--allow-private-network` / `--allow-insecure-tls`** CLI flags —
+  the GUI could audit intranet, loopback or self-signed targets; the
+  CLI had no way to opt in.
+- **robots.txt fetched once per origin per crawl** instead of once per
+  page: the crawl-delay check (`respect_crawl_delay`, on by default)
+  re-fetched it uncached for every URL, unlike every other discovery
+  file. `robots_fetch_scope` now mirrors `discovery_scope`.
+- **Crawl-delay pacing** — the delay was slept in full before every
+  sub-request of a page audit (main fetch, canonical probe, redirect
+  trace, link-status probes) instead of once against elapsed time per
+  host, multiplying a 2 s crawl-delay several-fold per page. Requests
+  to a host are now paced by a shared next-allowed clock.
+- **Sitemap discovery scope** — the three hard-coded common sitemap
+  paths were probed even when `robots.txt` already named a sitemap,
+  so an unrelated sitemap at a common path could widen the crawl.
+  Common paths are now a fallback only.
+- **Opening a saved scan during a live crawl** silently hid Stop and
+  re-enabled Start while the crawl thread kept running; a second Start
+  could then overlap the first. The history browser refuses while a
+  crawl is active, and Start is guarded.
+- **Link graph on a reopened past scan** opened the store read-write
+  (running schema creation on a history file) just to read edges, and
+  any failure surfaced as the wrong "no links" message. It reads
+  read-only via `crawl_run_repository.read_graph_inputs` now.
+- **Recap hint click with an active filter** — clicking a hint whose
+  row was hidden by the status / indexability filter did nothing;
+  the filters are reset before the row is selected.
+- **Export buttons** always export the full crawl, never the filtered
+  view; their tooltips now say so instead of leaving it ambiguous.
+- **Sitemap-only crawl with nothing discoverable** completed as a
+  "successful" run of 0 URLs with no explanation. The report now
+  carries a warning naming the base URL and suggesting Auto mode or a
+  corrected sitemap URL; no silent fallback is added, since the mode
+  was an explicit choice.
+- **Site Crawl docs** — `docs/site_crawl_feature_spec.md`,
+  `docs/site_crawl_roadmap.md` and the README described the v1
+  feature set as current: three home actions (there are four), no
+  recursive link discovery (Hybrid mode follows links by default), JS
+  rendering and crawl history/diff as out of scope (both shipped),
+  and an absolute "never bypasses WAF" promise that the opt-in
+  stealth fetcher contradicts. All corrected and pinned by
+  `tests/test_docs_consistency.py`.
+
 ### v2.0 feature waves (V1–V20)
 
 The full v2.0 milestone catalogue, landed since the last changelog

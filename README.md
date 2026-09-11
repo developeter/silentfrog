@@ -420,7 +420,7 @@ Results also feed the recap and the site-wide Excel export.
 
 ### Site Crawl mode
 
-The **Site Crawl** window audits multiple URLs without recursively following every link on the page.
+The **Site Crawl** window audits multiple URLs. By default (Auto mode, base URL only) it recursively follows same-host links via a hybrid sitemap+spider crawl; pass an explicit URL list or sitemap to audit only those URLs without following links.
 
 Supported crawl sources:
 
@@ -437,7 +437,7 @@ Defaults are intentionally conservative:
 - speed: **Gentle crawl**
 - per-host concurrency: **2**
 - robots crawl-delay: respected when available
-- recursive link discovery: **off** by default
+- recursive link discovery: **on** by default when only a base URL is given (Hybrid mode); off when you supply an explicit URL list or sitemap
 
 Leaving the sitemap field empty lets Silentfrog auto-detect sitemaps from the base URL. If no sitemap yields URLs, Silentfrog falls back to auditing the base URL only.
 

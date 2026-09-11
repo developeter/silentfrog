@@ -6,9 +6,10 @@ import pytest
 from aiohttp import web  # type: ignore[reportMissingImports]
 
 from silentfrog import site_crawler  # type: ignore[reportMissingImports]
-from silentfrog.crawl_options import CrawlOptions  # type: ignore[reportMissingImports]
+from silentfrog.crawl_mode import CrawlMode  # type: ignore[reportMissingImports]
+from silentfrog.crawl_options import AuditProfile, CrawlOptions  # type: ignore[reportMissingImports]
 from silentfrog.crawl_types import CrawlPayload  # type: ignore[reportMissingImports]
-from silentfrog.site_crawl_types import SiteCrawlConfig  # type: ignore[reportMissingImports]
+from silentfrog.site_crawl_types import SiteCrawlConfig, SpiderConfig  # type: ignore[reportMissingImports]
 from silentfrog.transport import allow_private_network, open_crawl_session  # type: ignore[reportMissingImports]
 
 
@@ -67,6 +68,36 @@ def test_site_crawl_result_uses_fetch_status_before_redirect_probe_status() -> N
     assert result.status == "200"
     assert result.redirect_status == "403"
     assert result.row()[1:4] == ["200", "403", url]
+
+
+def test_from_text_threads_limit_into_spider_max_urls_for_cli_callers() -> None:
+    # Regression: the CLI's default/primary crawl (base URL only -> HYBRID
+    # mode, via _crawl_cmd) never passed spider=, so --limit only bounded the
+    # one-shot seed list (_filter_urls) and not spider.max_urls, the actual
+    # crawl-time admission cap used by the frontier/work-source
+    # (site_crawler._build_frontier / _make_work_source). That left every
+    # scheduled HYBRID crawl bounded by SpiderConfig's undocumented 100_000
+    # default instead of the user's --limit. The GUI is unaffected: it always
+    # passes spider=self._spider_from_ui() explicitly.
+    config = SiteCrawlConfig.from_text(base_url="https://example.com", limit=3)
+
+    assert config.spider.mode is CrawlMode.HYBRID  # the CLI's default path
+    assert config.spider.max_urls == 3
+    assert config.limit == 3
+
+
+def test_from_text_defaults_to_standard_profile_for_cli_callers() -> None:
+    # Regression: callers that don't pass crawl_options= (the CLI/scheduled
+    # path, cli.py _crawl_cmd) fell through CrawlOptions.from_ui's base=
+    # CrawlOptions.default(), whose profile is DEEP. The GUI's sole from_text
+    # call always passes crawl_options=CrawlOptions.from_ui(...,
+    # profile=AuditProfile.STANDARD) explicitly (site_crawl_gui.py, H4: site
+    # crawls default to STANDARD), so "the same" crawl command was silently
+    # far more expensive from the CLI than from the GUI. from_text's own
+    # implicit default must match the GUI's documented STANDARD default.
+    config = SiteCrawlConfig.from_text(base_url="https://example.com")
+
+    assert config.crawl_options.profile is AuditProfile.STANDARD
 
 
 @pytest.mark.asyncio
@@ -135,6 +166,51 @@ async def test_resolve_site_urls_discovers_sitemap_from_robots(aiohttp_server):
 
 
 @pytest.mark.asyncio
+async def test_resolve_site_urls_prefers_robots_sitemap_over_common_paths(aiohttp_server):
+    # Regression: _discover_sitemap_urls used to always probe the 3 hardcoded
+    # common paths and union whatever they returned with the robots-declared
+    # sitemap, even when robots.txt was already authoritative. An unrelated
+    # sitemap sitting at /sitemap.xml would then silently scope-creep into
+    # the crawl. robots.txt naming a Sitemap: must short-circuit the common
+    # path probes entirely.
+    common_path_requested = {"hit": False}
+
+    async def robots(_):
+        return web.Response(text=f"Sitemap: {server.make_url('/branch-sitemap.xml')}\n")
+
+    async def branch_sitemap(_):
+        body = f"""<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>{server.make_url("/only-in-robots.html")}</loc></url>
+        </urlset>"""
+        return web.Response(text=body, content_type="application/xml")
+
+    async def common_sitemap(_):
+        common_path_requested["hit"] = True
+        body = f"""<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>{server.make_url("/only-in-default.html")}</loc></url>
+        </urlset>"""
+        return web.Response(text=body, content_type="application/xml")
+
+    app = web.Application()
+    app.router.add_get("/robots.txt", robots)
+    app.router.add_get("/branch-sitemap.xml", branch_sitemap)
+    app.router.add_get("/sitemap.xml", common_sitemap)
+    server = await aiohttp_server(app)
+
+    config = SiteCrawlConfig.from_text(base_url=str(server.make_url("/")))
+
+    with allow_private_network():
+        discovered = await site_crawler._discover_sitemap_urls(config, timeout=5)
+        urls = await site_crawler.resolve_site_urls(config, timeout=5)
+
+    assert str(server.make_url("/sitemap.xml")) not in discovered
+    assert common_path_requested["hit"] is False
+    assert urls == [str(server.make_url("/only-in-robots.html"))]
+
+
+@pytest.mark.asyncio
 async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
     async def sitemap(_):
         body = f"""<?xml version="1.0"?>
@@ -152,6 +228,35 @@ async def test_resolve_site_urls_discovers_common_sitemap_path(aiohttp_server):
         urls = await site_crawler.resolve_site_urls(config, timeout=5)
 
     assert urls == [str(server.make_url("/page-one/"))]
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_sitemap_mode_with_nothing_discovered_warns(aiohttp_server):
+    # Defect repro: the user explicitly picks Sitemap-only mode (no
+    # sitemap_url given), robots.txt has no Sitemap: line, and no sitemap
+    # exists at the common paths -> _build_seeds returns []. The crawl must
+    # not silently "succeed" with discovered 0 / crawled 0 and an empty
+    # warning; it must explain what happened and how to fix it. HYBRID (the
+    # default mode) is unaffected -- it always seeds config.base_url too.
+    async def robots(_):
+        return web.Response(text="User-agent: *\nAllow: /\n")
+
+    app = web.Application()
+    app.router.add_get("/robots.txt", robots)
+    server = await aiohttp_server(app)
+
+    config = SiteCrawlConfig.from_text(
+        base_url=str(server.make_url("/")),
+        spider=SpiderConfig(mode=CrawlMode.SITEMAP),
+    )
+
+    with allow_private_network():
+        report = await site_crawler.crawl_site(config, timeout=5)
+
+    assert report.discovered_count == 0
+    assert report.results == ()
+    assert config.base_url in report.warning
+    assert "No URLs were found in any sitemap" in report.warning
 
 
 @pytest.mark.asyncio

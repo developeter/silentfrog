@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import re
-from contextlib import asynccontextmanager
+import time
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -21,6 +24,11 @@ from .transport import open_crawl_session
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
 _HOST_DELAYS: dict[str, float] = {}
+# Per-host "next allowed request" clock (mirrors site_crawler._PolitenessGate)
+# so the configured Crawl-delay paces actual elapsed time between requests to
+# a host instead of being re-applied in full before every sub-request.
+_HOST_NEXT_ALLOWED: dict[str, float] = {}
+_HOST_DELAY_LOCK = asyncio.Lock()
 _BACKOFF_STATUSES = {403, 429}
 _PROBE_GET_FALLBACK_STATUSES = {0, 403, 405, 429}
 _BACKOFF_DELAY = 1.5
@@ -159,11 +167,22 @@ async def _polite_probe_response(
 
 
 async def _apply_host_delay(host: str, options: CrawlOptions) -> None:
+    """Pace requests to ``host`` so the configured Crawl-delay is honoured
+    against actual elapsed time since the last request, not re-applied in
+    full before every sub-request (main fetch, canonical/redirect/link-status
+    probes) that touches the same host during a page audit."""
     if not options.gentle_mode or not options.respect_crawl_delay:
         return
     delay = _HOST_DELAYS.get(host, 0.0)
-    if delay > 0:
-        await asyncio.sleep(delay)
+    if delay <= 0:
+        return
+    async with _HOST_DELAY_LOCK:
+        now = time.monotonic()
+        next_at = max(now, _HOST_NEXT_ALLOWED.get(host, 0.0))
+        _HOST_NEXT_ALLOWED[host] = next_at + delay
+        wait_for = next_at - now
+    if wait_for > 0:
+        await asyncio.sleep(wait_for)
 
 
 async def _probe_response(
@@ -241,13 +260,55 @@ async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
     return await fetch_text(robots_url, timeout)
 
 
+class _RobotsTextCache:
+    """Per-origin single-flight cache for robots.txt fetches, mirroring
+    ``discovery_files.DiscoveryCache`` (H4): concurrent pages of the same
+    origin await the first fetch's future instead of each issuing their
+    own GET."""
+
+    def __init__(self) -> None:
+        self._by_origin: dict[str, asyncio.Future[str | None]] = {}
+
+    async def get(self, origin: str, fetch: Callable[[], Awaitable[str | None]]) -> str | None:
+        future = self._by_origin.get(origin)
+        if future is not None:
+            return await future
+        future = asyncio.get_running_loop().create_future()
+        self._by_origin[origin] = future  # set before awaiting: no race on a single loop
+        future.set_result(await fetch())
+        return await future
+
+
+# Crawl-delay checks (the ``respect_crawl_delay`` default) re-fetch robots.txt
+# once per page unless a crawl activates this scope; a site crawl does so
+# alongside ``discovery_files.discovery_scope`` so robots.txt is fetched once
+# per origin per crawl too, like every other discovery file (H4).
+_active_robots_cache: ContextVar[_RobotsTextCache | None] = ContextVar("silentfrog_robots_cache", default=None)
+
+
+@contextmanager
+def robots_fetch_scope() -> Iterator[None]:
+    """Activate per-origin robots.txt caching for the enclosed crawl."""
+    token = _active_robots_cache.set(_RobotsTextCache())
+    try:
+        yield
+    finally:
+        _active_robots_cache.reset(token)
+
+
 async def _parse_robots(url: str, timeout: int = 5) -> RobotsRules:
     """Fetch + parse robots.txt for ``url`` into the single live engine (H3).
 
     Replaces the v1.x line-loop parser (which reset the group on every
     ``User-agent`` line); grouping, allow/deny, crawl-delay, and sitemaps all
     come from ``robots_simulator.parse_robots`` now."""
-    txt = await _fetch_robots(url, timeout)
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    cache = _active_robots_cache.get()
+    if cache is None:
+        txt = await _fetch_robots(url, timeout)
+    else:
+        txt = await cache.get(origin, lambda: _fetch_robots(url, timeout))
     return parse_robots(txt or "")
 
 

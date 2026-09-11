@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from dataclasses import replace
 
 import pytest
@@ -27,6 +28,38 @@ def test_host_semaphore_reuse() -> None:
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+
+
+@pytest.mark.asyncio
+async def test_apply_host_delay_credits_elapsed_time(monkeypatch) -> None:
+    # Regression: _apply_host_delay used to unconditionally sleep the FULL
+    # configured Crawl-delay before every sub-request (main fetch, canonical
+    # probe, redirect trace, each link-status probe) instead of pacing
+    # against time already elapsed since the host's last request -- unlike
+    # site_crawler._PolitenessGate, which computes a shared "next allowed
+    # time" and only sleeps the remainder. That made the delay compound per
+    # sub-request rather than per elapsed wall-clock time.
+    crawl_http._HOST_DELAYS.clear()
+    crawl_http._HOST_NEXT_ALLOWED.clear()
+    host = "example.com"
+    crawl_http._HOST_DELAYS[host] = 0.6
+    options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=4, respect_crawl_delay=True)
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(crawl_http.time, "monotonic", lambda: fake_now[0])
+    sleeps: list[float] = []
+
+    async def fake_sleep(duration: float):
+        sleeps.append(duration)
+
+    monkeypatch.setattr(crawl_http.asyncio, "sleep", fake_sleep)
+
+    await crawl_http._apply_host_delay(host, options)  # first-ever request to host
+    assert sleeps == []  # no prior request -> no wait needed
+
+    fake_now[0] += 0.5  # 0.5s of real work elapses before the next sub-request
+    await crawl_http._apply_host_delay(host, options)  # only 0.1s remains of the 0.6s delay
+    assert sleeps == [pytest.approx(0.1, abs=1e-6)]
 
 
 @pytest.mark.asyncio
@@ -141,6 +174,47 @@ async def test_trace_redirects_reports_exception(monkeypatch) -> None:
     assert status == "error RuntimeError"
     assert hop_count == 0
     assert is_loop is False
+
+
+@pytest.mark.asyncio
+async def test_parse_robots_fetched_once_per_origin_in_scope(monkeypatch) -> None:
+    # Regression: a site crawl's default respect_crawl_delay=True path used to
+    # call _parse_robots -> _fetch_robots once per crawled page, unlike every
+    # other H4 discovery file (llms.txt/ai.json/sitemap.xml), which is fetched
+    # once per origin via discovery_files.DiscoveryCache. robots_fetch_scope
+    # mirrors that same per-origin single-flight cache for robots.txt.
+    calls: Counter = Counter()
+
+    async def fake_fetch_robots(url: str, timeout: int = 5) -> str | None:
+        calls[url] += 1
+        await asyncio.sleep(0)  # let a concurrent same-origin caller interleave
+        return "User-agent: *\nDisallow:"
+
+    monkeypatch.setattr(crawl_http, "_fetch_robots", fake_fetch_robots)
+
+    with crawl_http.robots_fetch_scope():
+        await asyncio.gather(
+            crawl_http._parse_robots("https://example.com/page1"),
+            crawl_http._parse_robots("https://example.com/page2"),  # same origin
+            crawl_http._parse_robots("https://example.com/page3"),  # same origin
+        )
+    assert sum(calls.values()) == 1  # once per origin despite 3 concurrent pages
+
+
+@pytest.mark.asyncio
+async def test_parse_robots_not_cached_without_scope(monkeypatch) -> None:
+    calls: Counter = Counter()
+
+    async def fake_fetch_robots(url: str, timeout: int = 5) -> str | None:
+        calls[url] += 1
+        return "User-agent: *\nDisallow:"
+
+    monkeypatch.setattr(crawl_http, "_fetch_robots", fake_fetch_robots)
+
+    await crawl_http._parse_robots("https://example.com/page1")
+    await crawl_http._parse_robots("https://example.com/page2")
+    assert calls["https://example.com/page1"] == 1
+    assert calls["https://example.com/page2"] == 1  # no active scope -> fetched per call
 
 
 @pytest.mark.asyncio

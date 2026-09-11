@@ -24,9 +24,10 @@ from .crawl_run_repository import (
     CrawlRunRef,
     SqliteCrawlRunRepository,
     open_report_repository,
+    read_graph_inputs,
     stream_report_results,
 )
-from .crawl_store import CrawlStore, new_crawl_db_path
+from .crawl_store import new_crawl_db_path
 from .crawl_types import CrawlPayload
 from .exporters import (
     export_crawl_for_llm,
@@ -368,6 +369,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         # H4: site crawls default to STANDARD (gated). Single-page audits stay DEEP.
         self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
         self._active_cancel: threading.Event | None = None
+        # Tracks "a background crawl thread is genuinely in flight", independent
+        # of the UI-only _set_running toggle that _open_stored_run also calls
+        # (history race: opening a saved scan must not hide Stop / re-enable
+        # Start while a real crawl thread is still running and uncancelled).
+        self._crawl_active: bool = False
         self._latest_report: SiteCrawlReport | None = None
         # v2.0 V8: previous crawl kept so "Compare with previous" can diff the
         # current run against it. PR-10: the previous run's on-disk store is
@@ -603,18 +609,24 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_html_report.setToolTip(
             "Write a single self-contained HTML file — executive summary, prioritised "
             "actions, GEO Score distribution, worst pages, and health trend — ready to "
-            "email a client or print to PDF."
+            "email a client or print to PDF. Always exports the full crawl — the search/"
+            "status/indexability filters above only narrow what's shown on screen, not "
+            "what's exported."
         )
         self.btn_export_ai = QtWidgets.QPushButton("Export for AI analysis")
         self.btn_export_ai.setToolTip(
             "Write a Markdown + JSON bundle you can paste into a Claude chat for a "
-            "prioritised fix list. Compact by default (worst pages + recurring issues)."
+            "prioritised fix list. Compact by default (worst pages + recurring issues). "
+            "Always exports the full crawl — the search/status/indexability filters above "
+            "only narrow what's shown on screen, not what's exported."
         )
         self.btn_llms_txt = QtWidgets.QPushButton("Generate llms.txt")
         self.btn_llms_txt.setToolTip(
             "Propose an llms.txt (llmstxt.org shape) from this crawl: a title, a summary, and "
             "H2 sections of links to the indexable pages that were actually crawled. Review "
-            "before publishing — this is a starting draft, not a validated policy file."
+            "before publishing — this is a starting draft, not a validated policy file. Always "
+            "exports the full crawl — the search/status/indexability filters above only narrow "
+            "what's shown on screen, not what's exported."
         )
         self.btn_diff = QtWidgets.QPushButton("Compare with previous")
         self.btn_diff.setToolTip(
@@ -720,7 +732,11 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_settings.setToolTip("Open crawl speed, headers, cookies, and robots settings.")
         self.btn_history_setup.setToolTip("Open saved local Site Crawl runs and compare past scans.")
         self.btn_stop.setToolTip("Request cancellation. Active requests finish before the crawl fully stops.")
-        self.btn_export.setToolTip("Export the current Site Crawl results to an Excel workbook.")
+        self.btn_export.setToolTip(
+            "Export the current Site Crawl results to an Excel workbook. Always exports the "
+            "full crawl — the search/status/indexability filters above only narrow what's "
+            "shown on screen, not what's exported."
+        )
         self.btn_history.setToolTip("Open saved local Site Crawl runs and compare past scans.")
         self.btn_new_crawl.setToolTip("Return to setup for another Site Crawl run.")
 
@@ -793,10 +809,14 @@ class SiteCrawlWindow(QtWidgets.QWidget):
                 pass
 
     def _start_crawl(self) -> None:
+        if self._crawl_active:
+            return
         config = self._config_from_ui()
         if not self._valid_config(config):
             return
         self.model.clear()
+        if self._latest_report is not None:
+            self._previous_report = self._latest_report
         self._latest_report = None
         self.recap_widget.reset("Crawl in progress. The recap updates when results are complete.")
         self._charts_strip.setVisible(False)  # re-hide until this run's charts populate
@@ -809,6 +829,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.progress.setValue(0)
         self.progress.setFormat("Discovering URLs...")
         self._set_running(True)
+        self._crawl_active = True
         self._teardown_stored_model()
         self._roll_store_generation()
         self._crawl_run_id = ""
@@ -920,7 +941,6 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_stop.setToolTip("Finalizing — the crawl has finished fetching and cannot be stopped now.")
 
     def _handle_report(self, report: SiteCrawlReport) -> None:
-        self._previous_report = self._latest_report
         self._latest_report = report
         self._crawl_run_id = report.run_ref.run_id if report.run_ref is not None else ""
         self._discovered_total = report.discovered_count
@@ -934,6 +954,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         elif report.results:
             self.model.set_results(list(report.results))
         self._set_running(False)
+        self._crawl_active = False
         self._update_recap_from_report(report)
         self._update_charts(report)
         self._update_history_from_report(report)
@@ -974,6 +995,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _show_error(self, message: str) -> None:
         self._set_running(False)
+        self._crawl_active = False
         self.lbl_discovery.setText("Site crawl failed.")
         self.lbl_eta.setText("ETA: failed")
         QtWidgets.QMessageBox.warning(self, "Site crawl failed", message)
@@ -1007,6 +1029,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _focus_recap_issue(self, issue: AuditIssue) -> None:
         if not issue.url:
             return
+        if self.status_filter.currentText() != "All":
+            self.status_filter.setCurrentText("All")
+        if self.indexability_filter.currentText() != "All":
+            self.indexability_filter.setCurrentText("All")
         self.search_edit.setText(issue.url)
         self._select_result_url(issue.url)
 
@@ -1033,6 +1059,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _open_stored_run(self, history_run: Any) -> None:
         """v3: reopen a saved scan from history — SQL-paged results table plus
         full per-page detail dialogs, all read from the stored SQLite run."""
+        if self._crawl_active:
+            QtWidgets.QMessageBox.warning(self, "Crawl running", "Stop the current crawl before opening a saved scan.")
+            return
         run_ref = CrawlRunRef(db_path=history_run.db_path, run_id=history_run.store_run_id)
         report = SiteCrawlReport.from_run(
             run_ref,
@@ -1162,14 +1191,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
     def _graph_inputs_from_store(self) -> list[tuple[str, str, int]]:
         if not self._crawl_store_path or not self._crawl_run_id:
             return []
-        try:
-            store = CrawlStore(self._crawl_store_path)
-            try:
-                return store.iter_graph_inputs(self._crawl_run_id)
-            finally:
-                store.close()
-        except Exception:
-            return []
+        return read_graph_inputs(self._crawl_store_path, self._crawl_run_id)
 
     def _show_cluster_map(self) -> None:
         from .content_clusters import build_cluster_map

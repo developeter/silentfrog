@@ -172,6 +172,16 @@ def _add_crawl_parser(subparsers: Any) -> None:
         default=None,
         help="Also write a proposed llms.txt (v3 G10) to this path.",
     )
+    crawl.add_argument(
+        "--allow-private-network",
+        action="store_true",
+        help="Allow crawling loopback/RFC1918/link-local targets (disables SSRF protection).",
+    )
+    crawl.add_argument(
+        "--allow-insecure-tls",
+        action="store_true",
+        help="Skip TLS certificate verification.",
+    )
 
 
 def _add_review_parser(subparsers: Any) -> None:
@@ -320,14 +330,26 @@ async def _crawl_cmd(
     crawl_fn: Any | None = None,
     deliver_fn: Callable[[Any], Awaitable[dict[str, bool]]] | None = None,
 ) -> int:
+    from .crawl_options import AuditProfile, CrawlOptions
     from .scheduled_crawl import build_digest, run_scheduled_crawl
     from .site_crawl_types import SiteCrawlConfig
 
+    # H4: match the GUI's documented STANDARD default (SiteCrawlConfig.from_text
+    # would otherwise apply this same default for us, but it can't once we pass
+    # crawl_options= explicitly here to thread the SSRF/TLS opt-ins below).
+    crawl_options = CrawlOptions.from_ui(
+        gentle_mode=True,
+        max_parallel=2,
+        profile=AuditProfile.STANDARD,
+        allow_private_network=args.allow_private_network,
+        allow_insecure_tls=args.allow_insecure_tls,
+    )
     config = SiteCrawlConfig.from_text(
         base_url=args.base_url,
         sitemap_url=args.sitemap_url,
         url_list_text=_read_url_list_file(args.url_list),
         limit=args.limit,
+        crawl_options=crawl_options,
     )
     try:
         report, run, diff = await run_scheduled_crawl(config, timeout=args.timeout, crawl_fn=crawl_fn)
@@ -343,7 +365,26 @@ async def _crawl_cmd(
         _write_llms_txt(report, args.out_llms_txt)
     if args.digest:
         await _deliver_digest(digest, deliver_fn)
+    if report.warning:
+        print(f"[crawl] warning: {report.warning}", file=sys.stderr)
+    if _crawl_totally_failed(run):
+        print(
+            f"[crawl] failed: 0 pages reachable (discovered {run.discovered_count}, "
+            f"crawled {run.crawled_count}, failed {run.failed_count})",
+            file=sys.stderr,
+        )
+        return 1
     return 0
+
+
+def _crawl_totally_failed(run: Any) -> bool:
+    """True when a scheduler-triggered crawl reached nothing: either no URL
+    was ever discovered (e.g. a malformed base URL) or every crawled page
+    failed (e.g. an unreachable host). ``crawl_site``/``fetch_page`` never
+    raise for these cases -- they record a per-page ``error`` and return a
+    normal 'completed' report -- so this is the only signal schedulers
+    (cron/Task Scheduler) can key off the exit code for."""
+    return run.discovered_count == 0 or (run.crawled_count > 0 and run.failed_count >= run.crawled_count)
 
 
 def _read_url_list_file(path: Path | None) -> str:

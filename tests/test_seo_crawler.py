@@ -305,6 +305,7 @@ async def test_host_throttle_limits_concurrency(aiohttp_server):
 @pytest.mark.asyncio
 async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
     crawler._HOST_DELAYS.clear()
+    crawler.crawl_http._HOST_NEXT_ALLOWED.clear()
     sleep_calls: list[float] = []
 
     async def fake_sleep(duration: float):
@@ -330,8 +331,19 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
     options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2)
     await crawler.analyse(url, timeout=5, options=options)
 
-    assert sleep_calls, "expected crawl-delay to trigger sleep"
-    assert all(pytest.approx(2.0, rel=0.05) == value for value in sleep_calls)
+    # The pacer (crawl_http._apply_host_delay) records a "next allowed" time
+    # for the host whenever a crawl-delay is configured, regardless of how
+    # much real fetch/probe time already elapsed -- unlike a real elapsed-time
+    # assertion below, this is deterministic and proves the delay engaged.
+    assert crawler._host_key(url) in crawler.crawl_http._HOST_NEXT_ALLOWED
+    # A page audit issues follow-up probes to the same host well inside the
+    # 2s window, so the pacer must actually wait at least once -- an empty
+    # sleep list would mean the delay never engaged for any request.
+    assert sleep_calls, "expected the crawl-delay to pace a follow-up request to the host"
+    # Paced against elapsed time, not a flat re-sleep per sub-request: any
+    # recorded wait is credited for time already spent on the prior
+    # fetch/probe, so it never exceeds the configured delay.
+    assert all(0 < value <= 2.0 for value in sleep_calls)
 
 
 @pytest.mark.asyncio
