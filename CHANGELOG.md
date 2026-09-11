@@ -32,6 +32,11 @@ directory present) keep working unchanged.
   falls back to `git rev-parse HEAD`.
 - `silentfrog.__version__` read once via `importlib.metadata` so the
   About dialog and any future telemetry share a single source.
+- `keyring` is now a base dependency (was behind the `[semrush]`/`[google]`
+  extras) so a stock install can store the optional Semrush/Google API
+  keys from Settings without installing an extra first; the keys
+  themselves stay off by default. The now-redundant `semrush` extra
+  (it shipped nothing but `keyring`) was removed.
 
 #### Fixed
 - `bootstrap/Get-Silentfrog.{ps1,command}` now track the latest

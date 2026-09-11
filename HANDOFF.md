@@ -251,7 +251,7 @@ above), V19 Stage B (QML), and the ~1M-URL scale goal (100k verified).
 **Invariants (hold on every change):** §1.5 myth rule (absent not-required signal
 → info, never warning/critical); add-only `CrawlPayload` keys; new
 Settings/integrations default OFF; zero new **base** deps — heavy deps go behind
-extras (`[stealth] [google] [semrush] [charts]` …); the code-shape baseline never
+extras (`[stealth] [google] [charts]` …); the code-shape baseline never
 grows.
 
 ## Running & testing

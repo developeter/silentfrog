@@ -369,6 +369,16 @@ export SILENTFROG_BRAVE_API_KEY=<your key>  # optional: adds the Brave Search fr
 
 Without `SILENTFROG_AI_CITATIONS_ENABLE=1` the check is skipped entirely (`info`, never a false warning). This is separate from the Settings → *"AI share of voice (BYO keys)"* group, which samples ChatGPT/Perplexity/Gemini directly with your own API keys.
 
+### Semrush authority (bring your own key)
+
+Optional and off by default — no extra install needed, the key field works out of the box. To turn it on:
+
+1. In Silentfrog, open **Settings** → *Authority (Semrush)* and paste your Semrush API key into **API key**; it's stored in the OS keychain via `keyring`, never in the repo or in plain-text config.
+2. Click **Test connection** to confirm the key works, then tick **"Use Semrush in audits"** — it starts unchecked, matching the app's default-off policy.
+3. Set the daily call cap if you want to stay under your Semrush plan's quota.
+
+Per §1.5, Authority Score and the other Semrush signals are off-page and never penalise the GEO Score either way — they're informational. Headless/CI use can skip the dialog entirely and set `SILENTFROG_SEMRUSH_API_KEY` instead.
+
 ### Google Search Console & Analytics 4 (bring your own credentials)
 
 Silentfrog never ships or requests a shared Google client — you connect your own Google Cloud OAuth client, and only the *path* to your `client_secret.json` is stored (never its contents). To connect:

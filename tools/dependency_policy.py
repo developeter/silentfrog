@@ -48,6 +48,10 @@ APPROVED_BASE_DEPENDENCIES: frozenset[str] = frozenset(
         "humanize",
         "extruct",
         "w3lib",
+        # user decision 2026-09-11: keyring moved to base so the optional
+        # Semrush/Google API-key fields can be stored on a stock install
+        # without an extra (see pyproject.toml [project.dependencies]).
+        "keyring",
     }
 )
 

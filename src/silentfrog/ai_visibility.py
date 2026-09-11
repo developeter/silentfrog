@@ -482,7 +482,7 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
         "Count of structured-data warnings that threaten rich-result eligibility.\n\n"
         "These are genuine defects in markup the page already ships, so they warn. Zero warnings => good."
     ),
-    # v2.0 V17 — Semrush authority signals (optional `silentfrog[semrush]`).
+    # v2.0 V17 — Semrush authority signals (optional API key, off by default).
     "semrush_domain_authority_above_30": (
         "Semrush Authority Score (0-100) for the domain.\n\n"
         "A higher score reflects a stronger, harder-to-fake link profile that AI engines and search "

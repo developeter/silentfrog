@@ -23,6 +23,7 @@ POETRY_REQUIRED_IMPORTS = (
     "xlsxwriter",
     "aiohttp",
     "humanize",
+    "keyring",
 )
 # Import names provided by the runtime distributions declared in pyproject.toml.
 # Distribution name → import name only differs for these entries; keep them paired
@@ -46,6 +47,7 @@ VENV_REQUIRED_IMPORTS = (
     "nltk",
     "PIL",  # pillow
     "humanize",
+    "keyring",
 )
 REQUIRED_PATHS = (
     Path("src/silentfrog/assets/icon.png"),

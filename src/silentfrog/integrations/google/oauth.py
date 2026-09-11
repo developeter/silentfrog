@@ -28,7 +28,7 @@ _DEFAULT_TIMEOUT_SECONDS = 180
 
 
 def _keyring() -> Any:
-    import keyring  # lazy, optional extra
+    import keyring  # lazy: base dep, but keep module import light
 
     return keyring
 

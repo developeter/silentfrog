@@ -117,7 +117,7 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
   opt-in via a `CrawlOptions` flag + Settings checkbox (or an env enable knob).
   A stock audit must make zero extra network calls and load zero heavy models.
 - **Zero new base deps.** `tools/dependency_policy.py` freezes the base set;
-  heavy deps go behind extras (`[stealth] [google] [semrush] [charts]
+  heavy deps go behind extras (`[stealth] [google] [charts]
   [embeddings] [geo-render]`). Verify a new dep is ≥48h old on PyPI, pin it,
   commit `poetry.lock`.
 - **Code shape** (`tools/code_shape_guard.py`): max nesting 2, no `if/elif`

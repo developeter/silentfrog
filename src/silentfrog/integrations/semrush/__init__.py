@@ -1,7 +1,7 @@
-"""Semrush authority integration (v2.0 V17, optional extra
-``silentfrog[semrush]``). Off by default — a stock audit never touches
-Semrush. The data layer (types, checks, budget) imports nothing heavy;
-``keyring`` is lazy-imported by the client and degrades to env-only."""
+"""Semrush authority integration (v2.0 V17). Off by default — a stock
+audit never touches Semrush. The data layer (types, checks, budget)
+imports nothing heavy; ``keyring`` (a base dependency) is lazy-imported
+by the client and degrades to env-only if unavailable."""
 
 from __future__ import annotations
 

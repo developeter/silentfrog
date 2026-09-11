@@ -117,7 +117,7 @@ def test_semrush_key_field_disabled_without_keyring_shows_pip_hint(qtbot, monkey
     qtbot.addWidget(dialog)
 
     assert dialog.edit_semrush_key.isEnabled() is False
-    assert "pip install silentfrog[semrush]" in dialog.edit_semrush_key.toolTip()
+    assert "pip install keyring" in dialog.edit_semrush_key.toolTip()
 
 
 def test_semrush_key_field_enabled_with_keyring_present(qtbot, monkeypatch, tmp_path) -> None:
@@ -215,11 +215,11 @@ def test_accept_with_key_and_no_keyring_warns_instead_of_swallowing(qtbot, monke
     dialog.accept()
 
     assert dialog.lbl_semrush_test.text().startswith("✗")
-    assert "pip install silentfrog[semrush]" in dialog.lbl_semrush_test.text()
+    assert "pip install keyring" in dialog.lbl_semrush_test.text()
     # The warning actually surfaced to the user, not just an invisible label
     # on an already-closed dialog.
     assert len(warnings) == 1
-    assert "pip install silentfrog[semrush]" in warnings[0][-1]
+    assert "pip install keyring" in warnings[0][-1]
     # The enabled flag + cap are still persisted even though the key wasn't.
     assert load_config().max_calls == 100
 
@@ -345,7 +345,7 @@ def test_semrush_test_status_success_without_keyring(monkeypatch) -> None:
 
     text = CrawlSettingsDialog._semrush_test_status(True, "Connection OK.")
     assert text.startswith("✓")
-    assert "pip install silentfrog[semrush]" in text
+    assert "pip install keyring" in text
     assert "cannot be stored" in text
 
 

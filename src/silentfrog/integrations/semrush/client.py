@@ -39,7 +39,7 @@ _BACKLINKS_COLUMNS = "ascore,total,domains_num"
 
 
 def _keyring() -> Any:
-    import keyring  # lazy, optional extra
+    import keyring  # lazy: base dep, but keep module import light
 
     return keyring
 
@@ -47,8 +47,9 @@ def _keyring() -> Any:
 def resolve_api_key() -> str:
     """Keyring (``silentfrog-semrush``/``api_key``) first, env fallback.
 
-    keyring is lazy-imported and degrades to env-only when the optional
-    extra is absent, mirroring ``integrations.google.oauth``.
+    keyring is a base dependency but stays lazy-imported (and degrades to
+    env-only if it's ever unavailable at runtime), mirroring
+    ``integrations.google.oauth``.
     """
     try:
         stored = _keyring().get_password(_KEYRING_SERVICE, "api_key")

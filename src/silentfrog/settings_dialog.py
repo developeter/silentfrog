@@ -55,12 +55,13 @@ def _google_available() -> bool:
 
 
 def _keyring_available() -> bool:
-    """Return True when ``keyring`` (the OS-keychain backend shipped by the
-    optional silentfrog[semrush]/[google]/[ai-engines] extras) is
-    importable. A stock ``pip install .`` build never has it, so the
-    Semrush API-key field must degrade visibly instead of silently
-    swallowing whatever the user types (see settings_dialog.py's Semrush
-    group)."""
+    """Return True when ``keyring`` (the OS-keychain backend used to store
+    the optional Semrush/Google API keys) is importable. ``keyring`` is a
+    base dependency (user decision 2026-09-11) so this is True on any
+    stock install; the seam stays so the Semrush API-key field can still
+    degrade visibly — instead of silently swallowing whatever the user
+    typed — on the rare venv where it is missing anyway (see
+    settings_dialog.py's Semrush group)."""
     return importlib.util.find_spec("keyring") is not None
 
 
@@ -228,8 +229,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         if not _keyring_available():
             self.edit_semrush_key.setEnabled(False)
             self.edit_semrush_key.setToolTip(
-                self.edit_semrush_key.toolTip() + "\n\nkeyring is not installed: enable by running "
-                "`pip install silentfrog[semrush]`."
+                self.edit_semrush_key.toolTip() + "\n\nkeyring is not installed: run "
+                "`pip install keyring`, or reinstall Silentfrog (keyring ships as a base dependency)."
             )
         form.addRow("API key", self.edit_semrush_key)
         self.spin_semrush_max_calls = QtWidgets.QSpinBox()
@@ -687,7 +688,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         if key and not stored and key != self._loaded_semrush_key:
             warning = (
                 "The Semrush API key could not be stored in the OS keychain. If the keyring backend is missing, "
-                "run `pip install silentfrog[semrush]`; otherwise set SILENTFROG_SEMRUSH_API_KEY instead."
+                "run `pip install keyring`; otherwise set SILENTFROG_SEMRUSH_API_KEY instead."
             )
             self.lbl_semrush_test.setText("✗ " + warning)
             QtWidgets.QMessageBox.warning(self, "Semrush key not saved", warning)
@@ -775,7 +776,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             return "✓ Working — not stored yet: press OK to save the key in the OS keychain."
         return (
             "✓ Working — but the key cannot be stored (keyring is not installed: run "
-            "`pip install silentfrog[semrush]`). It will only work via the "
+            "`pip install keyring`). It will only work via the "
             "SILENTFROG_SEMRUSH_API_KEY environment variable."
         )
 

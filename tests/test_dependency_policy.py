@@ -37,3 +37,12 @@ def test_unapproved_new_base_dependency_is_flagged() -> None:
 
 def test_policy_passes_on_current_tree() -> None:
     assert dependency_policy.policy_violations(_REPO_ROOT) == []
+
+
+def test_keyring_is_an_approved_base_dependency() -> None:
+    # user decision 2026-09-11: keyring moved from the semrush/google
+    # extras to base so the optional API-key fields are storable on a
+    # stock install (no extra required). Regression guard for that move.
+    assert "keyring" in dependency_policy.APPROVED_BASE_DEPENDENCIES
+    text = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "keyring" in dependency_policy.base_dependency_names(text)
