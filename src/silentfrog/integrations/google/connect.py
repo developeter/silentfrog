@@ -16,12 +16,19 @@ from pathlib import Path
 from typing import Any
 
 from . import oauth
+from .app_client import builtin_client_config
 from .config import load_config, save_config
 
 _INSTALL_HINT = "pip install silentfrog[google]"
 _DESKTOP_APP_HINT = (
     'This client_secret.json is a "Web application" credential. Create '
     'an OAuth client of type "Desktop app" in Google Cloud Console instead.'
+)
+# Exported (not underscored): google_connect_dialog.py's empty-path branch
+# reuses this exact text via its own `_builtin_config()` seam instead of
+# re-entering `resolve_client_secrets` (which would bypass that seam).
+NO_BUILTIN_APP_HINT = (
+    "No Google app is available in this build. Provide your own client_secret.json (Desktop app type) — see README."
 )
 
 _SCOPES_BY_ACCOUNT: dict[str, list[str]] = {
@@ -35,6 +42,7 @@ class ClientSecretsResult:
     ok: bool
     secrets: dict[str, Any] | None = None
     reason: str = ""
+    source: str = ""  # "byo" | "builtin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,10 +66,23 @@ def load_client_secrets(path: str) -> ClientSecretsResult:
     if not isinstance(data, dict):
         return ClientSecretsResult(ok=False, reason="Not a valid Google OAuth client secrets file.")
     if "installed" in data:
-        return ClientSecretsResult(ok=True, secrets=data)
+        return ClientSecretsResult(ok=True, secrets=data, source="byo")
     if "web" in data:
         return ClientSecretsResult(ok=False, reason=_DESKTOP_APP_HINT)
     return ClientSecretsResult(ok=False, reason="Not a valid Google OAuth client secrets file.")
+
+
+def resolve_client_secrets(path: str) -> ClientSecretsResult:
+    """Resolve the client secrets to use for a Connect click: a non-empty
+    ``path`` (an explicit BYO file) always wins over the built-in app; an
+    empty path falls back to the maintainer-owned built-in app when this
+    build has one. Never raises."""
+    if path:
+        return load_client_secrets(path)
+    config = builtin_client_config()
+    if config is None:
+        return ClientSecretsResult(ok=False, reason=NO_BUILTIN_APP_HINT)
+    return ClientSecretsResult(ok=True, secrets=config, source="builtin")
 
 
 def connect_account(
@@ -111,7 +132,9 @@ __all__ = [
     "ClientSecretsResult",
     "ConnectResult",
     "DisconnectResult",
+    "NO_BUILTIN_APP_HINT",
     "connect_account",
     "disconnect_account",
     "load_client_secrets",
+    "resolve_client_secrets",
 ]

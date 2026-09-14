@@ -402,19 +402,26 @@ Optional and off by default — no extra install needed, the key field works out
 
 Per §1.5, Authority Score and the other Semrush signals are off-page and never penalise the GEO Score either way — they're informational. Headless/CI use can skip the dialog entirely and set `SILENTFROG_SEMRUSH_API_KEY` instead.
 
-### Google Search Console & Analytics 4 (bring your own credentials)
+### Google Search Console & Analytics 4
 
-Silentfrog never ships or requests a shared Google client — you connect your own Google Cloud OAuth client, and only the *path* to your `client_secret.json` is stored (never its contents). To connect:
+Silentfrog ships a built-in Google OAuth app (a "Desktop app" client, once the maintainer has pasted its id/secret in — see `docs/RELEASING.md`) so connecting is normally just a sign-in: your Google account, your data. Data flows straight from Google to this computer; the maintainer never sees your tokens or your Search Console/GA4 data. To connect:
+
+1. In Silentfrog, open **Settings** and click **Connect Google…** (the source installer bundles the `silentfrog[google]` extra by default; if it's still disabled, run `pip install silentfrog[google]` in your `.venv`).
+2. Click **Connect…** next to Search Console and/or Analytics 4 — each opens your system browser for a normal Google sign-in (RFC 8252 loopback flow; no embedded webview). Tokens are stored in the OS keychain via `keyring`.
+3. The first time, Google shows **"Google hasn't verified this app"** — click **Advanced**, then **"Go to Silentfrog (unsafe)"** to continue. This is expected for a small open-source tool's OAuth client; Silentfrog only ever requests read-only Search Console / Analytics scopes.
+4. Pick your property: the Search Console combo is editable (Search Console property strings must match exactly, e.g. `sc-domain:example.com` vs `https://example.com/`) and can be filled from **Refresh** (lists your verified sites), or typed by hand. Enter the GA4 property ID as free text.
+5. Tick **"Use Google data in audits"** to actually pull real GSC impressions/clicks and GA4 engagement into audits — it starts unchecked, matching the app's default-off policy.
+6. Click **Test connection** to confirm before running a real audit, then **Disconnect** any time to revoke local tokens (this does not revoke Google's own grant — do that at [myaccount.google.com/permissions](https://myaccount.google.com/permissions)).
+
+For headless/CI use instead of the dialog, set `SILENTFROG_GOOGLE_ENABLE=1` plus `SILENTFROG_GSC_SITE_URL` / `SILENTFROG_GA4_PROPERTY_ID`.
+
+#### Advanced: bring your own client
+
+If this build has no built-in Google app yet, or you'd rather use your own Google Cloud project, the Connect Google dialog's "Google app" group has an optional client_secret.json field that overrides the built-in app — only the *path* is stored, never its contents:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create (or reuse) a project, enable the **Search Console API** and **Google Analytics Data API**, and create an **OAuth client ID** of type **Desktop app**.
-2. Download that client's `client_secret.json`.
-3. In Silentfrog, open **Settings** and click **Connect Google…** (the source installer bundles the `silentfrog[google]` extra by default; if it's still disabled, run `pip install silentfrog[google]` in your `.venv`).
-4. Browse to your `client_secret.json`, then click **Connect…** next to Search Console and/or Analytics 4 — each opens your system browser for a normal Google sign-in (RFC 8252 loopback flow; no embedded webview). Tokens are stored in the OS keychain via `keyring`.
-5. Pick your property: the Search Console combo is editable (Search Console property strings must match exactly, e.g. `sc-domain:example.com` vs `https://example.com/`) and can be filled from **Refresh** (lists your verified sites), or typed by hand. Enter the GA4 property ID as free text.
-6. Tick **"Use Google data in audits"** to actually pull real GSC impressions/clicks and GA4 engagement into audits — it starts unchecked, matching the app's default-off policy.
-7. Click **Test connection** to confirm before running a real audit, then **Disconnect** any time to revoke local tokens (this does not revoke Google's own grant — do that at [myaccount.google.com/permissions](https://myaccount.google.com/permissions)).
-
-If your Google Cloud OAuth consent screen is still in **Testing**, refresh tokens expire after **7 days** and the connection silently stops returning data — the dialog warns about this; set the consent screen to **In production** in Google Cloud Console to keep it working. For headless/CI use instead of the dialog, set `SILENTFROG_GOOGLE_ENABLE=1` plus `SILENTFROG_GSC_SITE_URL` / `SILENTFROG_GA4_PROPERTY_ID`.
+2. Download that client's `client_secret.json` and browse to it in the dialog before clicking Connect.
+3. If your own client's consent screen is still in **Testing**, refresh tokens expire after **7 days** and the connection silently stops returning data — the dialog warns about this; set the consent screen to **In production** in Google Cloud Console to keep it working. (The built-in app's consent screen is the maintainer's responsibility, not yours.)
 
 ## Server log analysis
 

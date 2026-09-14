@@ -450,8 +450,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         layout.addWidget(QtWidgets.QLabel("Google (Search Console / Analytics 4)"))
         self.btn_google_connect = QtWidgets.QPushButton("Connect Google…")
         self.btn_google_connect.setToolTip(
-            "Connect a Google account to pull real Search Console impressions/clicks and GA4 "
-            "engagement into the audit. Off by default; bring your own client_secret.json."
+            "Off by default. Connect your own Google account through Silentfrog's built-in "
+            "Google app (or bring your own client_secret.json)."
         )
         if not _google_available():
             self.btn_google_connect.setEnabled(False)

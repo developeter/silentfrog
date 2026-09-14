@@ -78,6 +78,24 @@ scope.
   a missing, wrong, unsigned, or tampered asset is refused and nothing is
   swapped. Updates target signed-tag releases, never an unsigned `dev`
   commit.
+- **Built-in Google OAuth client.** Silentfrog embeds a maintainer-owned
+  Google OAuth *Desktop app* client id and secret
+  (`src/silentfrog/integrations/google/app_client.py`) so connecting Search
+  Console / Analytics 4 doesn't require every user to create their own
+  Google Cloud project. Per Google's own OAuth documentation and RFC 8252
+  §8.5, a "Desktop app" (installed-application) client secret is explicitly
+  **not a confidential credential** — it only identifies the app to Google,
+  the same way a public client id does, and by itself it cannot grant
+  access to any account's data. Every connection still requires the end
+  user's own consent in their browser (loopback OAuth flow, RFC 8252), the
+  scopes requested are read-only (`webmasters.readonly`,
+  `analytics.readonly`), and the resulting token is stored only in that
+  user's own OS keychain. Data flows directly from Google to the user's
+  machine; the maintainer never receives tokens or audit data. Bringing
+  your own client (`client_secret.json`, Desktop app type) remains
+  supported and overrides the built-in one. This note describes what is
+  embedded and why; it makes no claim about the app's Google verification
+  status.
 
 ### Known limitation (later-scope)
 

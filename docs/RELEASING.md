@@ -60,6 +60,20 @@ Run these from the repo root, on the tag you're about to publish (so
 `docs/v2_0_release_roadmap.md` §7 item 1, `pyproject.toml:3` is the only
 version literal).
 
+### 1.0 Pre-tag checklist
+
+- [ ] `BUILTIN_CLIENT_ID` / `BUILTIN_CLIENT_SECRET` in
+      `src/silentfrog/integrations/google/app_client.py` are filled in with
+      the maintainer-owned Google OAuth Desktop-app client (paste both, or
+      neither — leaving one empty disables the built-in app entirely).
+      The Google Cloud consent screen for that client must be **In
+      production** (Testing tokens expire after 7 days) and list the
+      `webmasters.readonly` / `analytics.readonly` scopes.
+- [ ] Do one real Connect round-trip against the built-in app (Settings →
+      Connect Google… → Connect… with the client_secret.json field left
+      empty) before publishing, to confirm the pasted credentials and
+      consent screen actually work end to end.
+
 ### 1.1 Tag
 
 ```bash

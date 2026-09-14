@@ -2,6 +2,37 @@
 
 ## 2.0.0
 
+### Built-in Google OAuth app (bring-your-own stays as an override)
+
+Connecting Search Console / Analytics 4 required every user to create their
+own Google Cloud project and OAuth client before v2.0.0 could ship. The
+maintainer now ships a maintainer-owned Google OAuth *Desktop app* client so
+end users just click Connect and sign into their own Google account — data
+flows from Google straight to the user's machine, never through the
+maintainer. A Desktop-app client secret is not a confidential credential
+(Google's own docs, RFC 8252 §8.5): it only identifies the app, and access
+always requires the user's own browser consent. Scopes stay read-only
+(`webmasters.readonly`, `analytics.readonly`).
+
+#### New
+- `src/silentfrog/integrations/google/app_client.py` — `BUILTIN_CLIENT_ID`
+  / `BUILTIN_CLIENT_SECRET` (empty placeholders; see `docs/RELEASING.md`
+  for the pre-tag checklist), with a `SILENTFROG_GOOGLE_CLIENT_ID` /
+  `SILENTFROG_GOOGLE_CLIENT_SECRET` env override so the flow is testable
+  before the real credentials are pasted in.
+- `connect.resolve_client_secrets`: an explicit BYO `client_secret.json`
+  path always overrides the built-in app; an empty path falls back to it,
+  or fails with a README pointer when this build has neither.
+- The Connect Google dialog's credentials group is now "Google app": a
+  status line (built-in available vs. not), the existing path field
+  relabelled as an advanced override, and "Google hasn't verified this
+  app" click-through guidance shown only while the built-in app is in use.
+
+#### Fixed
+- The BYO Testing/7-day consent-screen warning now reads as applying to a
+  user's own OAuth client specifically — the built-in app's consent screen
+  is the maintainer's responsibility, not something a user configures.
+
 ### Reinstall regression: GEO checks and Connect Google disabled
 
 A reinstalled machine found most GEO checkboxes and the "Connect

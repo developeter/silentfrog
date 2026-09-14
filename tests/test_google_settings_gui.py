@@ -31,6 +31,13 @@ def _patch_status(monkeypatch, *, gsc: bool = False, ga4: bool = False) -> None:
     monkeypatch.setattr(GoogleConnectDialog, "_load_google_status", staticmethod(lambda: {"gsc": gsc, "ga4": ga4}))
 
 
+def _patch_no_builtin(monkeypatch) -> None:
+    """Most existing tests here predate PR-B's built-in app and assume BYO
+    is the only path — stub the built-in seam to absent so their
+    expectations (e.g. an empty path never starts a job) still hold."""
+    monkeypatch.setattr(GoogleConnectDialog, "_builtin_config", staticmethod(lambda: None))
+
+
 def _write_valid_secrets(tmp_path) -> str:
     path = tmp_path / "client_secret.json"
     path.write_text(json.dumps({"installed": {"client_id": "abc"}}), encoding="utf-8")
@@ -114,6 +121,45 @@ def test_gsc_property_combo_is_editable(qtbot, monkeypatch) -> None:
     assert dialog.combo_gsc_property.isEditable() is True
 
 
+def test_app_status_line_reflects_builtin_availability(qtbot, monkeypatch) -> None:
+    _patch_status(monkeypatch)
+    monkeypatch.setattr(GoogleConnectDialog, "_builtin_config", staticmethod(lambda: {"installed": {}}))
+    with_builtin = GoogleConnectDialog()
+    qtbot.addWidget(with_builtin)
+    assert "built-in Google app" in with_builtin.lbl_app_status.text()
+    assert "just click Connect" in with_builtin.lbl_app_status.text()
+
+    _patch_no_builtin(monkeypatch)
+    without_builtin = GoogleConnectDialog()
+    qtbot.addWidget(without_builtin)
+    assert "no built-in Google app" in without_builtin.lbl_app_status.text()
+    assert "client_secret.json" in without_builtin.lbl_app_status.text()
+
+
+def test_unverified_guidance_shown_only_for_builtin_app_with_empty_path(qtbot, monkeypatch) -> None:
+    _patch_status(monkeypatch)
+    monkeypatch.setattr(GoogleConnectDialog, "_builtin_config", staticmethod(lambda: {"installed": {}}))
+    dialog = GoogleConnectDialog()
+    qtbot.addWidget(dialog)
+
+    assert not dialog.lbl_unverified_guidance.isHidden()
+
+    dialog.edit_secrets_path.setText("/path/to/my/client_secret.json")
+    assert dialog.lbl_unverified_guidance.isHidden()
+
+    dialog.edit_secrets_path.setText("")
+    assert not dialog.lbl_unverified_guidance.isHidden()
+
+
+def test_unverified_guidance_hidden_without_a_builtin_app(qtbot, monkeypatch) -> None:
+    _patch_status(monkeypatch)
+    _patch_no_builtin(monkeypatch)
+    dialog = GoogleConnectDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.lbl_unverified_guidance.isHidden()
+
+
 def test_dialog_text_carries_the_required_copy(qtbot, monkeypatch) -> None:
     _patch_status(monkeypatch)
     dialog = GoogleConnectDialog()
@@ -189,7 +235,11 @@ def test_connect_failure_surfaces_the_typed_reason_not_a_traceback(qtbot, monkey
 
 
 def test_connect_click_without_a_secrets_path_never_starts_a_job(qtbot, monkeypatch) -> None:
+    """With no built-in app available, an empty path has nothing to
+    connect with — see test_connect_click_with_empty_path_and_builtin_app_starts_a_job
+    for the PR-B case where a built-in app IS available."""
     _patch_status(monkeypatch)
+    _patch_no_builtin(monkeypatch)
     started: list[object] = []
     monkeypatch.setattr(google_connect_dialog, "_start_daemon", lambda target, *args: started.append(target))
     dialog = GoogleConnectDialog()
@@ -200,6 +250,24 @@ def test_connect_click_without_a_secrets_path_never_starts_a_job(qtbot, monkeypa
     assert started == []
     assert dialog._active_job is None
     assert "client_secret.json" in dialog.lbl_gsc_status.text()
+
+
+def test_connect_click_with_empty_path_and_builtin_app_starts_a_job(qtbot, monkeypatch) -> None:
+    """PR-B: an available built-in app means Connect works with the path
+    field left empty — the counterpart of
+    test_connect_click_without_a_secrets_path_never_starts_a_job above."""
+    _patch_status(monkeypatch)
+    builtin_config = {"installed": {"client_id": "builtin-id", "client_secret": "builtin-secret"}}
+    monkeypatch.setattr(GoogleConnectDialog, "_builtin_config", staticmethod(lambda: builtin_config))
+    started: list[object] = []
+    monkeypatch.setattr(google_connect_dialog, "_start_daemon", lambda target, *args: started.append(target))
+    dialog = GoogleConnectDialog()
+    qtbot.addWidget(dialog)
+
+    qtbot.mouseClick(dialog.btn_gsc_connect, QtCore.Qt.MouseButton.LeftButton)
+
+    assert started != []
+    assert dialog._active_job is not None
 
 
 def test_disconnect_success_reverts_status_and_button(qtbot, monkeypatch) -> None:

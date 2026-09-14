@@ -3,9 +3,11 @@
 gsc_client.py). This module adds no new pure logic: it only wires existing,
 never-raising R2 entry points to widgets.
 
-Contents: a BYO ``client_secret.json`` file picker, Connect/Disconnect per
-account (``gsc`` / ``ga4``), an **editable** combo for the GSC property, a
-GA4 property-id field, and a 'Use Google data in audits' checkbox that
+Contents: a status line for Silentfrog's built-in Google app (PR-B) plus an
+advanced BYO ``client_secret.json`` file picker that overrides it,
+Connect/Disconnect per account (``gsc`` / ``ga4``), an **editable** combo
+for the GSC property, a GA4 property-id field, and a 'Use Google data in
+audits' checkbox that
 starts unchecked (preserves the app's default-OFF invariant). The combo is
 editable rather than a plain dropdown because a GSC property string must
 match Search Console *exactly* ('sc-domain:example.com' vs
@@ -46,8 +48,11 @@ from typing import Any
 from qtpy import QtCore, QtWidgets
 
 from .integrations.google import oauth
+from .integrations.google.app_client import builtin_client_config
 from .integrations.google.config import GoogleConfig, load_config, save_config
 from .integrations.google.connect import (
+    NO_BUILTIN_APP_HINT,
+    ClientSecretsResult,
     ConnectResult,
     DisconnectResult,
     connect_account,
@@ -136,20 +141,73 @@ class GoogleConnectDialog(QtWidgets.QDialog):
 
     # --- building -----------------------------------------------------
     def _build_secrets_group(self) -> QtWidgets.QGroupBox:
-        box = QtWidgets.QGroupBox("Client credentials")
-        layout = QtWidgets.QHBoxLayout(box)
+        box = QtWidgets.QGroupBox("Google app")
+        layout = QtWidgets.QVBoxLayout(box)
+        self.lbl_app_status = QtWidgets.QLabel(self._app_status_text())
+        self.lbl_app_status.setWordWrap(True)
+        layout.addWidget(self.lbl_app_status)
+        path_row = QtWidgets.QWidget()
+        path_row_layout = QtWidgets.QHBoxLayout(path_row)
+        path_row_layout.setContentsMargins(0, 0, 0, 0)
         self.edit_secrets_path = QtWidgets.QLineEdit()
-        self.edit_secrets_path.setPlaceholderText("Path to your client_secret.json (Desktop app type)")
-        self.edit_secrets_path.setToolTip(
-            "Bring your own OAuth client from a Google Cloud project you control — Silentfrog "
-            "never ships credentials. Create a Desktop app OAuth client (not Web application) "
-            "and download its client_secret.json."
+        self.edit_secrets_path.setPlaceholderText(
+            "Optional — your own client_secret.json (Desktop app) overrides the built-in app"
         )
-        layout.addWidget(self.edit_secrets_path, 1)
+        self.edit_secrets_path.setToolTip(
+            "Advanced: bring your own OAuth client from a Google Cloud project you control, "
+            "instead of Silentfrog's built-in app. Create a Desktop app OAuth client (not Web "
+            "application) and download its client_secret.json."
+        )
+        self.edit_secrets_path.textChanged.connect(self._on_secrets_path_changed)
+        path_row_layout.addWidget(self.edit_secrets_path, 1)
         self.btn_browse_secrets = QtWidgets.QPushButton("Browse…")
         self.btn_browse_secrets.clicked.connect(self._on_browse_secrets)
-        layout.addWidget(self.btn_browse_secrets)
+        path_row_layout.addWidget(self.btn_browse_secrets)
+        layout.addWidget(path_row)
+        self.lbl_unverified_guidance = QtWidgets.QLabel(
+            'Google will show "Google hasn\'t verified this app" the first time: click '
+            'Advanced, then "Go to Silentfrog (unsafe)". Silentfrog only asks for read-only '
+            "Search Console / Analytics access; your data goes from Google straight to this "
+            "computer and never through the app's maintainer."
+        )
+        self.lbl_unverified_guidance.setWordWrap(True)
+        layout.addWidget(self.lbl_unverified_guidance)
+        self._update_unverified_guidance()
         return box
+
+    @staticmethod
+    def _builtin_config() -> dict[str, Any] | None:
+        """Bare seam over ``app_client.builtin_client_config`` (mirrors
+        ``_load_google_status``) so tests stub built-in availability
+        directly instead of juggling env vars."""
+        return builtin_client_config()
+
+    @classmethod
+    def _resolve_builtin_secrets(cls) -> ClientSecretsResult:
+        """The empty-path branch of ``_on_connect_clicked``, routed
+        entirely through ``_builtin_config()`` so tests control it via that
+        one seam. Deliberately does NOT call ``connect.resolve_client_
+        secrets("")`` here — that would re-enter the real
+        ``app_client.builtin_client_config()`` and bypass the seam this
+        method just consulted, e.g. a test stubbing ``_builtin_config`` to
+        ``None`` would still see a job start once the real built-in
+        constants are populated."""
+        builtin = cls._builtin_config()
+        if builtin is not None:
+            return ClientSecretsResult(ok=True, secrets=builtin, source="builtin")
+        return ClientSecretsResult(ok=False, reason=NO_BUILTIN_APP_HINT)
+
+    def _app_status_text(self) -> str:
+        if self._builtin_config() is not None:
+            return "✓ Using Silentfrog's built-in Google app — just click Connect."
+        return "✗ This build has no built-in Google app — provide your own client_secret.json below."
+
+    def _update_unverified_guidance(self) -> None:
+        using_builtin = not self.edit_secrets_path.text().strip() and self._builtin_config() is not None
+        self.lbl_unverified_guidance.setVisible(using_builtin)
+
+    def _on_secrets_path_changed(self, _text: str) -> None:
+        self._update_unverified_guidance()
 
     def _build_gsc_group(self) -> QtWidgets.QGroupBox:
         box = QtWidgets.QGroupBox("Search Console")
@@ -224,9 +282,10 @@ class GoogleConnectDialog(QtWidgets.QDialog):
         )
         layout.addWidget(self.chk_use_google_data)
         warning = QtWidgets.QLabel(
-            "If your Google Cloud OAuth consent screen is still in Testing, refresh tokens "
-            "expire after 7 days and the connection will silently stop returning data. Set "
-            "your consent screen to In production in Google Cloud Console to keep it working."
+            "If you use your own client and its consent screen is still in Testing, refresh "
+            "tokens expire after 7 days and the connection will silently stop returning data. "
+            "Set your consent screen to In production in Google Cloud Console to keep it "
+            "working. The built-in app's consent screen is the maintainer's responsibility."
         )
         warning.setWordWrap(True)
         layout.addWidget(warning)
@@ -382,10 +441,7 @@ class GoogleConnectDialog(QtWidgets.QDialog):
         if self._active_job is not None:
             return
         path = self.edit_secrets_path.text().strip()
-        if not path:
-            self._set_status(account, "✗ Choose a client_secret.json file first.")
-            return
-        secrets_result = load_client_secrets(path)
+        secrets_result = load_client_secrets(path) if path else self._resolve_builtin_secrets()
         if not secrets_result.ok:
             self._set_status(account, f"✗ {secrets_result.reason}")
             return

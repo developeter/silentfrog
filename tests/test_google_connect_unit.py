@@ -11,9 +11,14 @@ from typing import Any
 
 import pytest
 
-from silentfrog.integrations.google import oauth
+from silentfrog.integrations.google import app_client, oauth
 from silentfrog.integrations.google.config import GoogleConfig, load_config, save_config
-from silentfrog.integrations.google.connect import connect_account, disconnect_account, load_client_secrets
+from silentfrog.integrations.google.connect import (
+    connect_account,
+    disconnect_account,
+    load_client_secrets,
+    resolve_client_secrets,
+)
 
 
 class _FakeKeyring:
@@ -67,6 +72,77 @@ def test_load_client_secrets_missing_file_returns_ok_false_without_raising(tmp_p
 
     assert result.ok is False
     assert result.secrets is None
+
+
+# --- resolve_client_secrets / app_client -----------------------------
+def _clear_builtin_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No built-in app available at all: clears both env overrides AND
+    pins the module constants to empty, so these tests hold once the
+    maintainer has pasted real BUILTIN_CLIENT_ID/SECRET values in."""
+    monkeypatch.delenv("SILENTFROG_GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SILENTFROG_GOOGLE_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(app_client, "BUILTIN_CLIENT_ID", "")
+    monkeypatch.setattr(app_client, "BUILTIN_CLIENT_SECRET", "")
+
+
+def test_resolve_client_secrets_byo_path_wins_over_builtin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SILENTFROG_GOOGLE_CLIENT_ID", "builtin-id")
+    monkeypatch.setenv("SILENTFROG_GOOGLE_CLIENT_SECRET", "builtin-secret")
+    path = tmp_path / "client_secret.json"
+    path.write_text(json.dumps({"installed": {"client_id": "byo-id"}}), encoding="utf-8")
+
+    result = resolve_client_secrets(str(path))
+
+    assert result.ok is True
+    assert result.source == "byo"
+    assert result.secrets == {"installed": {"client_id": "byo-id"}}
+
+
+def test_resolve_client_secrets_empty_path_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SILENTFROG_GOOGLE_CLIENT_ID", "builtin-id")
+    monkeypatch.setenv("SILENTFROG_GOOGLE_CLIENT_SECRET", "builtin-secret")
+
+    result = resolve_client_secrets("")
+
+    assert result.ok is True
+    assert result.source == "builtin"
+    installed = result.secrets["installed"]
+    assert installed["client_id"] == "builtin-id"
+    assert installed["client_secret"] == "builtin-secret"
+    assert installed["redirect_uris"] == ["http://localhost"]
+
+
+def test_resolve_client_secrets_empty_path_and_nothing_available_fails_with_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_builtin_env(monkeypatch)
+
+    result = resolve_client_secrets("")
+
+    assert result.ok is False
+    assert "README" in result.reason
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"SILENTFROG_GOOGLE_CLIENT_ID": "only-id"},
+        {"SILENTFROG_GOOGLE_CLIENT_SECRET": "only-secret"},
+    ],
+)
+def test_builtin_client_config_needs_both_env_vars(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
+    _clear_builtin_env(monkeypatch)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    assert app_client.builtin_client_config() is None
+    assert app_client.builtin_client_available() is False
+
+
+def test_builtin_client_config_none_when_constants_and_env_both_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_builtin_env(monkeypatch)
+
+    assert app_client.builtin_client_config() is None
 
 
 # --- connect_account ---------------------------------------------------
