@@ -558,6 +558,42 @@ async def test_review_cmd_no_client_exits_two_without_auditing(monkeypatch) -> N
     assert audited == []
 
 
+@pytest.mark.asyncio
+async def test_review_cmd_passes_provider_flag_and_model_override(monkeypatch) -> None:
+    # PR-D: --provider is threaded into auto_config(preferred=...) and
+    # --model overrides whatever model auto_config picked, before building
+    # the client -- stub both provider-module seams to prove the wiring
+    # without a real network call.
+    from silentfrog.ai_review import AiProviderConfig
+
+    parser = cli._build_parser()
+    args = parser.parse_args(["review", "https://example.com/page", "--provider", "gemini", "--model", "custom-model"])
+    seen_preferred: list[str | None] = []
+    captured_configs: list[AiProviderConfig] = []
+    client = _StubReviewClient()
+
+    def _fake_auto_config(preferred: str | None = None) -> AiProviderConfig:
+        seen_preferred.append(preferred)
+        return AiProviderConfig(provider="gemini", api_key="k", model="gemini-2.5-flash")
+
+    def _fake_client_for_config(config: AiProviderConfig):
+        captured_configs.append(config)
+        return client
+
+    monkeypatch.setattr("silentfrog.ai_review_providers.auto_config", _fake_auto_config)
+    monkeypatch.setattr("silentfrog.ai_review_providers.client_for_config", _fake_client_for_config)
+
+    async def _stub_analyser(url: str):
+        return _review_crawl_payload(url)
+
+    exit_code = await cli._review_cmd(args, analyser=_stub_analyser)
+
+    assert exit_code == 0
+    assert seen_preferred == ["gemini"]
+    assert captured_configs[0].provider == "gemini"
+    assert captured_configs[0].model == "custom-model"
+
+
 def test_print_encodable_survives_cp1252_stdout(monkeypatch) -> None:
     # Windows Task Scheduler redirects stdout through the console codepage;
     # a digest carrying non-cp1252 crawl content (non-Latin titles, arrows)

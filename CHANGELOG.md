@@ -2,6 +2,43 @@
 
 ## 2.0.0
 
+### AI review: Gemini free tier, provider picker, real error reasons
+
+The "AI review" button silently picked local Ollama when nothing else was
+configured, so on a machine without Ollama running it just showed
+`error: empty response` — the underlying failure (connection refused, bad
+key, rate limit) was swallowed. There was also no way to pick a provider or
+type a key from the GUI.
+
+#### New
+- `src/silentfrog/ai_review_providers.py` — `GeminiReviewClient` (Google's
+  free tier, `resolve_api_key("gemini")` shared with the AI share-of-voice
+  keyring entry); `auto_config(preferred=...)` replaces `default_config()`
+  (explicit env/`secrets.local.json` config wins, else the caller's
+  preferred provider, else the first of gemini/openai/anthropic with a
+  resolvable key, else Ollama); `provider_remedy(provider)` and
+  `PROVIDER_CHOICES`/`DEFAULT_MODELS` for the GUI/CLI picker.
+- `src/silentfrog/ai_review_dialog.py` (new module, moved out of
+  `seo_gui.py`) — `AiReviewSetupDialog` (provider/key/model picker, a free
+  Gemini-key help link, keys persisted to the OS keychain) and
+  `AiReviewResultDialog` (renders a failed review as a headline + remedy +
+  raw reason, or findings grouped by severity, with a Copy button).
+  Threading copies `google_connect_dialog`'s `_JobHolder` + polling
+  `QTimer` pattern instead of `QMetaObject.invokeMethod` on a live widget,
+  since a provider call can run long enough to make that a real
+  use-after-free risk.
+- `silentfrog-cli review` gained `--provider {gemini,openai,anthropic,ollama}`
+  and `--model NAME`.
+
+#### Changed
+- `ai_review_providers._post_json` now returns the real failure reason
+  (`HTTP <status>: <body>`, `connection refused / not reachable at <url>`,
+  `timed out after Ns`) instead of swallowing it — every client's
+  `raw_summary` carries that reason instead of a generic empty-response
+  message when the POST itself fails.
+- `AnthropicReviewClient` now also checks the shared ai-engines keyring
+  (`resolve_api_key("anthropic")`) before its direct env-var read.
+
 ### Full evidence dossier in "Export for AI analysis"
 
 The AI export dropped almost everything the audit measured — only the

@@ -643,6 +643,102 @@ def test_seo_window_ai_review_button_disabled_until_audit(qtbot) -> None:
     assert win.btn_ai_review.isEnabled() is False
 
 
+def test_on_ai_review_cancelled_setup_never_builds_a_result_dialog(qtbot, monkeypatch) -> None:
+    # PR-D: _on_ai_review is a thin wiring shim now — Cancel in the setup
+    # dialog must short-circuit before any client/result dialog is built.
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = _sample_payload()  # type: ignore[attr-defined]
+
+    class _FakeSetup:
+        def __init__(self, _parent, _url) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Rejected
+
+    result_dialogs_built: list[object] = []
+    monkeypatch.setattr("silentfrog.ai_review_dialog.AiReviewSetupDialog", _FakeSetup)
+    monkeypatch.setattr(
+        "silentfrog.ai_review_dialog.AiReviewResultDialog",
+        lambda *a, **k: result_dialogs_built.append((a, k)),
+    )
+
+    win._on_ai_review()
+
+    assert result_dialogs_built == []
+
+
+def test_on_ai_review_accepted_setup_runs_the_result_dialog(qtbot, monkeypatch) -> None:
+    from silentfrog.ai_review import AiProviderConfig
+
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = _sample_payload()  # type: ignore[attr-defined]
+
+    class _FakeSetup:
+        def __init__(self, _parent, _url) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+        def config(self) -> AiProviderConfig:
+            return AiProviderConfig(provider="gemini", api_key="k")
+
+        def question(self) -> str:
+            return "Any blockers?"
+
+    captured: dict[str, Any] = {}
+
+    class _FakeResultDialog:
+        def __init__(self, _parent, client, request, question) -> None:
+            captured["client"] = client
+            captured["request"] = request
+            captured["question"] = question
+
+        def exec(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.setattr("silentfrog.ai_review_dialog.AiReviewSetupDialog", _FakeSetup)
+    monkeypatch.setattr("silentfrog.ai_review_dialog.AiReviewResultDialog", _FakeResultDialog)
+
+    win._on_ai_review()
+
+    assert captured["question"] == "Any blockers?"
+    assert captured["ran"] is True
+    assert captured["client"] is not None
+
+
+def test_on_ai_review_unknown_provider_shows_info_box(qtbot, monkeypatch) -> None:
+    from silentfrog.ai_review import AiProviderConfig
+
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    win._latest_payload = _sample_payload()  # type: ignore[attr-defined]
+
+    class _FakeSetup:
+        def __init__(self, _parent, _url) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+        def config(self) -> AiProviderConfig:
+            return AiProviderConfig(provider="not-a-real-provider", api_key="")
+
+        def question(self) -> str:
+            return ""
+
+    monkeypatch.setattr("silentfrog.ai_review_dialog.AiReviewSetupDialog", _FakeSetup)
+    info_calls: list[Any] = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", lambda *a, **k: info_calls.append(a))
+
+    win._on_ai_review()
+
+    assert info_calls
+
+
 def test_seo_window_configures_scrollable_tabs(qtbot) -> None:
     win = WebpageSeoWindow()
     qtbot.addWidget(win)

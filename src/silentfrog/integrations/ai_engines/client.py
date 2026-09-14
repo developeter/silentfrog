@@ -41,6 +41,9 @@ _ENV_KEY_FALLBACKS = {
     "openai": "SILENTFROG_OPENAI_API_KEY",
     "perplexity": "SILENTFROG_PERPLEXITY_API_KEY",
     "gemini": "SILENTFROG_GEMINI_API_KEY",
+    # Not in _ENGINES (SoV sampling never probes Anthropic) — this entry
+    # exists only so resolve_api_key("anthropic") can serve ai_review_providers.
+    "anthropic": "SILENTFROG_ANTHROPIC_API_KEY",
 }
 
 # One sampling per host per app session: the collector runs per audited URL,

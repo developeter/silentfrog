@@ -18,6 +18,8 @@ Subcommands:
                          [--limit N] [--timeout N] [--digest]
                          [--out-report report.html] [--out-llms-txt llms.txt]
     silentfrog-cli review <url> [--prompt "..."] [--out findings.json]
+                          [--provider {gemini,openai,anthropic,ollama}]
+                          [--model NAME]
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -200,6 +203,20 @@ def _add_review_parser(subparsers: Any) -> None:
         type=Path,
         default=None,
         help="Write the findings JSON to this path (default: stdout).",
+    )
+    # Mirrors ai_review_providers.PROVIDER_CHOICES order (kept as a literal
+    # list so building the parser never imports the aiohttp-backed provider
+    # module for unrelated subcommands).
+    review.add_argument(
+        "--provider",
+        choices=["gemini", "openai", "anthropic", "ollama"],
+        default=None,
+        help="AI provider to use (default: auto — a configured/keyed provider, else Ollama).",
+    )
+    review.add_argument(
+        "--model",
+        default="",
+        help="Override the provider's default model.",
     )
 
 
@@ -434,11 +451,15 @@ async def _review_cmd(
     the provider error is reported inside the JSON's "summary" field instead
     of being treated as a CLI failure."""
     from .ai_review import build_review_input_from_payload, issues_for_ai_review
-    from .ai_review_providers import client_for_config, default_config
+    from .ai_review_providers import auto_config, client_for_config
     from .seo_crawler import analyse as default_analyser
 
-    active_client = client or client_for_config(default_config())
-    if active_client is None:
+    if client is None:
+        config = auto_config(preferred=args.provider)
+        if args.model:
+            config = replace(config, model=args.model)
+        client = client_for_config(config)
+    if client is None:
         print(
             "[review] no AI provider configured. Start a local Ollama server, or set "
             "SILENTFROG_AI_PROVIDER/_API_KEY (or secrets.local.json) for OpenAI/Anthropic.",
@@ -452,7 +473,7 @@ async def _review_cmd(
     # review() is sync (drives its own asyncio.run internally, see
     # ai_review_providers); hop to a worker thread so it doesn't nest inside
     # this coroutine's already-running event loop.
-    result = await asyncio.to_thread(active_client.review, request, args.prompt)
+    result = await asyncio.to_thread(client.review, request, args.prompt)
     body = {
         "provider": result.provider,
         "model": result.model,

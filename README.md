@@ -393,6 +393,18 @@ export SILENTFROG_BRAVE_API_KEY=<your key>  # optional: adds the Brave Search fr
 
 Without `SILENTFROG_AI_CITATIONS_ENABLE=1` the check is skipped entirely (`info`, never a false warning). This is separate from the Settings → *"AI share of voice (BYO keys)"* group, which samples ChatGPT/Perplexity/Gemini directly with your own API keys.
 
+### AI review (on-demand, BYO key)
+
+Click **AI review** after auditing a page to run a custom AI-assisted review over that page's collected evidence — nothing calls an external provider until you click Run in the setup dialog, which lets you pick:
+
+- **Gemini (Google — free tier)** — the recommended path when you don't want to run a local model: grab a free API key at <https://aistudio.google.com/apikey>, Google's free tier is enough for page reviews.
+- **OpenAI** / **Anthropic** — bring your own key.
+- **Ollama (local, no key)** — the fallback when nothing else is configured; start it with `ollama serve` (and `ollama pull llama3.2`) first.
+
+A non-empty key is stored in the OS keychain (`silentfrog-ai-engines`, the same keychain entry Settings → *AI share of voice* uses) via `keyring`, never in the repo or plain-text config; your provider/model choice is remembered for next time. If a provider call fails, the result dialog shows the real reason (bad key, rate limit, unreachable endpoint) plus a one-line remedy, instead of a bare "empty response".
+
+Headless/CI use: `silentfrog-cli review <url> [--provider gemini|openai|anthropic|ollama] [--model NAME] [--prompt "..."] [--out findings.json]`.
+
 ### Semrush authority (bring your own key)
 
 Optional and off by default — no extra install needed, the key field works out of the box. To turn it on:
