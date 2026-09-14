@@ -44,7 +44,15 @@ def _payload(url: str, score: int = 60) -> CrawlPayload:
                         "details": "100 words",
                         "recommendation": "Add depth",
                         "key": "x",
-                    }
+                    },
+                    {
+                        "area": "Perf",
+                        "check": "CrUX LCP",
+                        "status": "info",
+                        "details": "Not measured",
+                        "recommendation": "Enable PSI",
+                        "key": "y",
+                    },
                 ],
             },
             "performance": {"summary": {"verdict": "Good"}},
@@ -95,6 +103,9 @@ def test_site_crawl_ai_export_writes_files(qtbot, monkeypatch, tmp_path) -> None
     win._export_ai()
     assert (tmp_path / "crawl_ai.md").exists()
     assert (tmp_path / "crawl_ai.json").exists()
+    # The Site Crawl button passes mode="full": an `info`-status check
+    # (dropped in compact mode) must still show up in the worst-page detail.
+    assert "CrUX LCP" in (tmp_path / "crawl_ai.md").read_text(encoding="utf-8")
 
 
 def test_single_page_ai_export_writes_files(qtbot, monkeypatch, tmp_path) -> None:
@@ -113,4 +124,8 @@ def test_single_page_ai_export_writes_files(qtbot, monkeypatch, tmp_path) -> Non
     win._export_ai()
     assert (tmp_path / "page_ai.md").exists()
     assert (tmp_path / "page_ai.json").exists()
-    assert "https://e.com/page" in (tmp_path / "page_ai.md").read_text(encoding="utf-8")
+    md = (tmp_path / "page_ai.md").read_text(encoding="utf-8")
+    assert "https://e.com/page" in md
+    # The single-page button passes mode="full": an `info`-status check
+    # (dropped in compact mode) must still be present.
+    assert "CrUX LCP" in md

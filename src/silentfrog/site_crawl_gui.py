@@ -1512,13 +1512,13 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         )
         if not file_path:
             return
-        export = export_crawl_for_llm(list(stream_report_results(self._latest_report)))
+        export = export_crawl_for_llm(list(stream_report_results(self._latest_report)), mode="full")
         written = write_llm_export(export, Path(file_path).with_suffix(""), fmt="both")
         names = ", ".join(p.name for p in written)
         QtWidgets.QMessageBox.information(
             self,
             "Export completed",
-            f"Wrote {names}. Paste the .md into a Claude chat for a prioritised fix list.",
+            f"Wrote {names}. Paste the .md into Claude / ChatGPT / Gemini for a prioritised fix list.",
         )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:

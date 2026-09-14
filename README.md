@@ -17,6 +17,7 @@ It lets you quickly:
 | Site Crawl mode for sitemap/branch/URL-list audits | ✅ |
 | Single-page AI / GEO support (AI crawl audit + AI Visibility heuristics) | ✅ |
 | Export results to Excel | ✅ |
+| Export for AI analysis — a self-contained Markdown/JSON evidence dossier (identity, prioritised issues, every check, content, links/images, performance, AI-bot access) to paste into Claude, ChatGPT, or Gemini | ✅ |
 
 ---
 
@@ -238,7 +239,7 @@ $ poetry run python -m silentfrog
 
 `silentfrog-mcp serve` runs a local [Model Context Protocol](https://modelcontextprotocol.io/) server over stdio (JSON-RPC 2.0, newline-delimited) so AI clients such as Claude Desktop or Claude Code can drive Silentfrog audits directly. It exposes three tools:
 
-- `audit_page` — audit one URL and return an LLM-ready Markdown + JSON summary (same formatter as `silentfrog-cli export`).
+- `audit_page` — audit one URL and return an LLM-ready Markdown + JSON evidence dossier (same formatter as `silentfrog-cli export` and the GUI's "Export for AI analysis" buttons — identity/redirects/canonical, every check by area, content, links/images/hreflang/schema, performance, the AI-bot access matrix, and optional integrations when measured).
 - `list_crawls` — list saved Site Crawl runs from local history.
 - `get_crawl_summary` — counts, health score, top hints, and health-score trend for one saved run.
 

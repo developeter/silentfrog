@@ -2,6 +2,37 @@
 
 ## 2.0.0
 
+### Full evidence dossier in "Export for AI analysis"
+
+The AI export dropped almost everything the audit measured — only the
+warning/critical AI-visibility rows survived a compact export, alongside a
+score line, title/description, word count, and a handful of optional
+one-liners. Both "Export for AI analysis" buttons (single page + Site Crawl)
+now write a self-contained Markdown/JSON dossier an AI assistant can act on
+without asking for more context.
+
+#### Changed
+- `src/silentfrog/exporters/llm_export.py` rewritten: the page dossier now
+  covers identity/redirects/canonical/indexability, the GEO score with a
+  per-area breakdown, the prioritised issue list with evidence
+  (`audit_issues.issues_for_payload`), every AI-visibility check by area,
+  content (headings outline, SERP, content quality, text glitches, top
+  keywords, structure/citation/E-E-A-T/SEO-basics), links/images
+  (broken links, missing alt, oversized images, pseudo-links), hreflang/
+  structured data/social, performance (CWV lab + field, heaviest resources,
+  third-party hosts), the AI-bot access matrix + SSR/per-bot render diffs,
+  and optional integrations (GSC, GA4, Semrush, AI SOV, brand mentions,
+  topic embeddings, tech stack, accessibility) when measured. The Site
+  Crawl dossier adds a crawl summary, site-wide hints
+  (`hints.build_hints`), duplicate titles/descriptions, error/redirecting
+  pages, the most common failing checks, site-wide discovery facts, a full
+  page index, and worst-N page detail. An optional signal that was never
+  run is always marked "Not measured (feature off)" — never silently
+  dropped, never presented as a failure (CLAUDE.md §1.5).
+- Both GUI buttons now pass `mode="full"`; the CLI/MCP default stays
+  `"compact"`. The completion dialogs now mention pasting the export into
+  "Claude / ChatGPT / Gemini" rather than only Claude.
+
 ### Built-in Google OAuth app (bring-your-own stays as an override)
 
 Connecting Search Console / Analytics 4 required every user to create their
