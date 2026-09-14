@@ -18,8 +18,10 @@ _macos_only = pytest.mark.skipif(
 )
 
 from tools.source_install import (
+    DEFAULT_EXTRAS,
     RuntimeRequirements,
     _normalize_pep508,
+    _parse_args,
     app_data_dir,
     create_desktop_launcher,
     create_macos_app_bundle,
@@ -29,6 +31,7 @@ from tools.source_install import (
     installer_paths,
     launcher_script_paths,
     load_runtime_requirements,
+    post_install_plan,
     render_desktop_command_launcher,
     render_install_bat,
     render_install_command,
@@ -42,6 +45,7 @@ from tools.source_install import (
     render_uninstall_bat,
     render_uninstall_command,
     render_uninstall_sh,
+    resolve_extras,
     strip_quarantine,
     uninstall_targets,
     validate_python_version,
@@ -63,6 +67,15 @@ dependencies = [
 [project.optional-dependencies]
 pyqt5-backend = [
     "pyqt5 (==5.15.11)",
+]
+geo-render = [
+    "playwright (>=1.43,<2.0)",
+]
+google = [
+    "google-auth-oauthlib (>=1.4,<2)",
+]
+charts = [
+    "pyqtgraph (>=0.13.7,<0.14)",
 ]
 """
 
@@ -142,12 +155,83 @@ def test_load_runtime_requirements_strips_pep621_parens(tmp_path: Path) -> None:
     assert not any("pyqt5" in spec.lower() for spec in requirements.pip_args)
 
 
+def test_load_runtime_requirements_bundles_default_extras(tmp_path: Path) -> None:
+    """Regression: a stock install used to skip every [project.optional-
+    dependencies] extra, leaving the GEO rendering checkboxes and the
+    'Connect Google...' button disabled after a fresh install."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    requirements = load_runtime_requirements(pyproject)
+    assert requirements.extras == DEFAULT_EXTRAS
+    assert "playwright>=1.43,<2.0" in requirements.pip_args
+    assert "google-auth-oauthlib>=1.4,<2" in requirements.pip_args
+    assert "pyqtgraph>=0.13.7,<0.14" in requirements.pip_args
+    # stealth/embeddings stay opt-in, never bundled by default.
+    assert not any("scrapling" in spec.lower() for spec in requirements.pip_args)
+    assert not any("sentence-transformers" in spec.lower() for spec in requirements.pip_args)
+
+
+def test_load_runtime_requirements_extras_none_yields_base_only(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    requirements = load_runtime_requirements(pyproject, extras=())
+    assert requirements.extras == ()
+    assert "pyside6>=6.8,<7.0" in requirements.pip_args
+    assert not any("playwright" in spec.lower() for spec in requirements.pip_args)
+    assert not any("google-auth-oauthlib" in spec.lower() for spec in requirements.pip_args)
+    assert not any("pyqtgraph" in spec.lower() for spec in requirements.pip_args)
+
+
+def test_load_runtime_requirements_rejects_unknown_extra(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Unknown extra 'bogus'") as exc_info:
+        load_runtime_requirements(pyproject, extras=("bogus",))
+    message = str(exc_info.value)
+    for name in ("geo-render", "google", "charts", "pyqt5-backend"):
+        assert name in message
+
+
 def test_install_plan_pulls_from_pyproject(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(_FAKE_PYPROJECT, encoding="utf-8")
     plan = install_plan(tmp_path, "python3", "Darwin")
     assert "pyside6>=6.8,<7.0" in plan[2]
     assert "numpy>=2.2.6,<3.0.0" in plan[2]
     assert not any("pyqt5" in arg.lower() for arg in plan[2])
+    # Default bundle: install_plan()'s indices/shape are unchanged (see
+    # test_install_plan_targets_local_venv) but the pip install command now
+    # carries the default extras' specs too.
+    assert "playwright>=1.43,<2.0" in plan[2]
+
+
+def test_post_install_plan_runs_chromium_only_when_geo_render_selected(tmp_path: Path) -> None:
+    with_geo_render = RuntimeRequirements(pip_args=(), extras=("geo-render",))
+    steps = post_install_plan(tmp_path, with_geo_render, "Darwin")
+    assert len(steps) == 1
+    assert steps[0] == [
+        str(tmp_path / ".venv" / "bin" / "python"),
+        "-m",
+        "playwright",
+        "install",
+        "chromium",
+    ]
+
+    without_geo_render = RuntimeRequirements(pip_args=(), extras=("google", "charts"))
+    assert post_install_plan(tmp_path, without_geo_render, "Darwin") == []
+
+
+def test_parse_args_extras_accepts_none_and_comma_list() -> None:
+    assert _parse_args(["--extras", "none"]).extras == "none"
+    assert _parse_args(["--extras", "geo-render,google"]).extras == "geo-render,google"
+    assert _parse_args([]).extras is None
+
+
+def test_resolve_extras() -> None:
+    assert resolve_extras(None) == DEFAULT_EXTRAS
+    assert resolve_extras("none") == ()
+    assert resolve_extras("None") == ()
+    assert resolve_extras("geo-render, google") == ("geo-render", "google")
+    assert resolve_extras("stealth") == ("stealth",)
 
 
 def test_load_runtime_requirements_rejects_missing_pyproject(tmp_path: Path) -> None:

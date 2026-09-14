@@ -33,6 +33,13 @@ MACOS_PYTHON_CANDIDATES = (
 )
 NON_MACOS_PYTHON_CANDIDATES = ("python3.14", "python3.13", "python3.12", "python3")
 
+# Desktop extras bundled by a stock install so a fresh venv doesn't leave the
+# GEO rendering checkboxes, "Connect Google..." button, and crawl charts
+# greyed out (the reinstall regression this PR fixes). `stealth` and
+# `embeddings` stay opt-in only: stealth pulls curl_cffi/scrapling, and
+# embeddings drags the ~2 GB torch stack that most users never enable.
+DEFAULT_EXTRAS: tuple[str, ...] = ("geo-render", "google", "charts")
+
 
 @dataclass(frozen=True)
 class InstallerPaths:
@@ -45,6 +52,7 @@ class InstallerPaths:
 @dataclass(frozen=True)
 class RuntimeRequirements:
     pip_args: tuple[str, ...]
+    extras: tuple[str, ...] = ()
 
 
 def _normalize_pep508(spec: str) -> str:
@@ -56,7 +64,23 @@ def _normalize_pep508(spec: str) -> str:
     return f"{name}{version}"
 
 
-def load_runtime_requirements(pyproject: Path) -> RuntimeRequirements:
+def _extra_specs(project: Mapping[str, object], extras: tuple[str, ...], pyproject: Path) -> list[str]:
+    """Resolve each named extra to its normalized pip specs. Raises with the
+    valid extra names (from this pyproject.toml, not just DEFAULT_EXTRAS) so
+    a typo or a renamed extra fails loudly instead of silently installing
+    the base set."""
+    raw_available = project.get("optional-dependencies")
+    available = raw_available if isinstance(raw_available, dict) else {}
+    specs: list[str] = []
+    for name in extras:
+        if name not in available:
+            valid = ", ".join(sorted(available)) or "(no extras defined)"
+            raise RuntimeError(f"Unknown extra {name!r} in {pyproject}. Valid extras: {valid}")
+        specs.extend(_normalize_pep508(str(spec)) for spec in available[name])
+    return specs
+
+
+def load_runtime_requirements(pyproject: Path, extras: tuple[str, ...] = DEFAULT_EXTRAS) -> RuntimeRequirements:
     if not pyproject.is_file():
         raise RuntimeError(f"pyproject.toml not found at {pyproject}")
     with pyproject.open("rb") as fh:
@@ -67,8 +91,21 @@ def load_runtime_requirements(pyproject: Path) -> RuntimeRequirements:
     raw_deps = project.get("dependencies")
     if not isinstance(raw_deps, list):
         raise RuntimeError(f"pyproject.toml has no [project].dependencies list: {pyproject}")
-    normalized = tuple(_normalize_pep508(str(spec)) for spec in raw_deps)
-    return RuntimeRequirements(pip_args=normalized)
+    normalized = [_normalize_pep508(str(spec)) for spec in raw_deps]
+    normalized.extend(_extra_specs(project, extras, pyproject))
+    return RuntimeRequirements(pip_args=tuple(normalized), extras=extras)
+
+
+def resolve_extras(raw: str | None) -> tuple[str, ...]:
+    """Turn the --extras CLI value into an extras tuple: omitted keeps the
+    default desktop bundle, 'none' means base-only, otherwise a
+    comma-separated list of extra names (e.g. to add 'stealth')."""
+    if raw is None:
+        return DEFAULT_EXTRAS
+    stripped = raw.strip()
+    if stripped.lower() == "none":
+        return ()
+    return tuple(part.strip() for part in stripped.split(",") if part.strip())
 
 
 def is_windows(system_name: str | None = None) -> bool:
@@ -235,6 +272,19 @@ def install_plan(
             "import importlib.resources as r; p = r.files('silentfrog').joinpath('assets/icon.png'); assert p.is_file(), p",
         ],
     ]
+
+
+def post_install_plan(root: Path, requirements: RuntimeRequirements, system_name: str | None = None) -> list[list[str]]:
+    """Best-effort steps that run after install_plan()'s fail-hard commands.
+    Currently just the Chromium download Playwright needs for the GEO
+    rendering checks (SSR parity, per-bot SSR, JS-rendered links,
+    accessibility audit) when geo-render was selected. Kept out of
+    install_plan() and run separately so a blocked/slow browser download
+    (proxies, disk space, offline CI) never fails the install itself."""
+    if "geo-render" not in requirements.extras:
+        return []
+    paths = installer_paths(root, system_name)
+    return [[str(paths.python), "-m", "playwright", "install", "chromium"]]
 
 
 def render_run_bat() -> str:
@@ -735,6 +785,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "updater. Set by the bootstrap script; omit for dev clones."
         ),
     )
+    parser.add_argument(
+        "--extras",
+        default=None,
+        help=(
+            "Comma-separated optional extras to bundle "
+            f"(default: {','.join(DEFAULT_EXTRAS)}). Use 'none' for a "
+            "base-only install, or add e.g. 'stealth' or 'embeddings' to "
+            "the list to opt into those heavier extras."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -751,8 +811,10 @@ def main(argv: list[str] | None = None) -> int:
         print("[install] pyproject.toml not found. Run this script from the project root copy.")
         return 1
 
+    extras = resolve_extras(args.extras)
+    print(f"[install] Optional extras: {', '.join(extras) if extras else 'none'}")
     try:
-        requirements = load_runtime_requirements(root / "pyproject.toml")
+        requirements = load_runtime_requirements(root / "pyproject.toml", extras=extras)
     except RuntimeError as exc:
         print(f"[install] {exc}")
         return 1
@@ -782,6 +844,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[install] Command failed with exit code {exc.returncode}.")
         return exc.returncode or 1
 
+    _run_chromium_post_step(root, requirements, paths)
     _post_install_macos_helpers(root, paths.python)
     if args.revision:
         _persist_revision(root, args.revision)
@@ -791,6 +854,19 @@ def main(argv: list[str] | None = None) -> int:
     if launcher_path is not None:
         print(f"[install] Desktop launcher created: {launcher_path}")
     return 0
+
+
+def _run_chromium_post_step(root: Path, requirements: RuntimeRequirements, paths: InstallerPaths) -> None:
+    for command in post_install_plan(root, requirements):
+        try:
+            _run(command, root)
+        except subprocess.CalledProcessError:
+            print("[install] Chromium download for GEO rendering checks failed (network, proxy, or disk space).")
+            print(
+                "[install] Rendering-based GEO checks (SSR parity, per-bot SSR, JS-rendered links, "
+                "accessibility audit) stay disabled until you run:"
+            )
+            print(f"[install]   {paths.python} -m playwright install chromium")
 
 
 REVISION_FILE_NAME = ".silentfrog_revision"

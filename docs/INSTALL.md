@@ -107,7 +107,7 @@ Use this path if a packaged release is not yet available for your platform, or i
 4. The installer:
    - finds your Python (tries 3.14, then 3.13, then 3.12 — including Homebrew and python.org framework paths);
    - creates a local `.venv` inside the repo;
-   - installs Silentfrog from binary wheels;
+   - installs Silentfrog from binary wheels, bundling the `geo-render` (+ a best-effort `playwright install chromium`), `google`, and `charts` extras by default;
    - on python.org Python: auto-runs `Install Certificates.command` so HTTPS fetches work later;
    - places a `Silentfrog.command` launcher on your Desktop.
 
@@ -139,13 +139,22 @@ Use this path if a packaged release is not yet available for your platform, or i
 4. The installer:
    - validates that Python is 3.12, 3.13, or 3.14;
    - creates a local `.venv` inside the repo;
-   - installs Silentfrog from binary wheels;
+   - installs Silentfrog from binary wheels, bundling the `geo-render` (+ a best-effort `playwright install chromium`), `google`, and `charts` extras by default;
    - creates `Silentfrog.lnk` on your Desktop.
 
 5. Launch Silentfrog any of three ways:
    - Double-click `Silentfrog.lnk` on your Desktop.
    - From the repo: `run_silentfrog.bat`
    - From the repo: `.venv\Scripts\silentfrog.exe`
+
+### Choosing optional extras
+
+Pass `--extras` to `install_silentfrog.py` to change the bundle: a
+comma-separated list of extra names, or `none` for a base-only install.
+`stealth` and `embeddings` are never bundled by default (heavier: WAF
+evasion and a local torch-based embedding model, respectively) — add them
+by name if you want them, e.g. `--extras geo-render,google,charts,stealth`.
+An unknown name stops the installer with the list of valid extras.
 
 ### Reinstalling / wiping the local .venv
 

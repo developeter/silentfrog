@@ -104,7 +104,11 @@ The installer will:
 
 - create a local `.venv`
 - upgrade `pip`, `setuptools`, `wheel`, and `poetry-core`
-- preinstall runtime dependencies from binary wheels
+- preinstall runtime dependencies from binary wheels, **bundling the
+  `geo-render` (+ a best-effort Chromium download), `google`, and `charts`
+  extras by default** so GEO rendering checks, "Connect Google…", and crawl
+  charts work right after install instead of needing a manual `pip install
+  silentfrog[...]` afterwards
 - install Silentfrog into that `.venv` without compiling dependency source packages
 - refresh the launcher scripts
 - default the GUI runtime to `QT_API=pyside6`
@@ -129,6 +133,25 @@ py install_silentfrog.py
 ```
 
 If Python is missing, too old, too new, or dependency wheels are not available for your OS/CPU, the installer stops with a clear message instead of trying to compile desktop dependencies from source.
+
+#### Choosing which optional extras to install
+
+By default `install_silentfrog.py` bundles the `geo-render`, `google`, and
+`charts` extras (and best-effort downloads the Chromium browser
+`geo-render` needs). Override this with `--extras`:
+
+```bash
+# Base install only, no optional extras
+python install_silentfrog.py --extras none
+
+# Default bundle plus the heavier stealth fetcher
+python install_silentfrog.py --extras geo-render,google,charts,stealth
+```
+
+`stealth` (WAF-evasion fetching) and `embeddings` (local topic-embedding
+model, ~2 GB with its torch dependency) always stay opt-in — add them by
+name if you want them. An unknown extra name stops the installer with a
+message listing the valid ones.
 
 ### Launch after install
 
@@ -385,7 +408,7 @@ Silentfrog never ships or requests a shared Google client — you connect your o
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create (or reuse) a project, enable the **Search Console API** and **Google Analytics Data API**, and create an **OAuth client ID** of type **Desktop app**.
 2. Download that client's `client_secret.json`.
-3. In Silentfrog, open **Settings** and click **Connect Google…** (enabled once the `silentfrog[google]` extra is installed).
+3. In Silentfrog, open **Settings** and click **Connect Google…** (the source installer bundles the `silentfrog[google]` extra by default; if it's still disabled, run `pip install silentfrog[google]` in your `.venv`).
 4. Browse to your `client_secret.json`, then click **Connect…** next to Search Console and/or Analytics 4 — each opens your system browser for a normal Google sign-in (RFC 8252 loopback flow; no embedded webview). Tokens are stored in the OS keychain via `keyring`.
 5. Pick your property: the Search Console combo is editable (Search Console property strings must match exactly, e.g. `sc-domain:example.com` vs `https://example.com/`) and can be filled from **Refresh** (lists your verified sites), or typed by hand. Enter the GA4 property ID as free text.
 6. Tick **"Use Google data in audits"** to actually pull real GSC impressions/clicks and GA4 engagement into audits — it starts unchecked, matching the app's default-off policy.
@@ -450,9 +473,16 @@ The `Accessibility` tab (axe-core, WCAG 2.1/2.2) is opt-in: enable
 group. It
 renders the page with headless Chromium and reports keyboard, contrast,
 ARIA, and labeling violations, so it needs the `silentfrog[geo-render]`
-extra (`playwright install chromium`) and a **Deep** audit profile —
-disabled with an explanatory tooltip when Playwright isn't installed.
-Results also feed the recap and the site-wide Excel export.
+extra (bundled by default by the source installer, including a
+best-effort `playwright install chromium`; run that command yourself in
+your `.venv` if the checkbox is still disabled) and a **Deep** audit
+profile — disabled with an explanatory tooltip when Playwright isn't
+installed. This and the other three rendering-based GEO checks (SSR
+parity, per-bot SSR, JS-rendered links) only run under **Deep**; ticking
+one in the Site Crawl settings dialog while a lighter profile is selected
+switches the profile to Deep for you, and lowering it again afterwards
+shows a note that the ticked checks will be skipped. Results also feed
+the recap and the site-wide Excel export.
 
 ### Site Crawl mode
 
@@ -485,7 +515,7 @@ Recent v2.0 work hardened large-site crawling:
 - **Audit profiles:** a **Lightweight / Standard / Deep** selector gates per-page *network* cost (extra HTTP probes, rendering, integrations) — local HTML parsing always runs. Site crawls default to **Standard**, single-page audits use **Deep**, and very large URL lists auto-suggest **Lightweight**.
 - **Resume:** a crawl that is cancelled or interrupted can resume and re-run only the unfinished URLs (the SQLite frontier tracks per-URL state).
 - **Results table:** sorting, filtering, and paging run in SQL against the store, so the GUI stays responsive on large runs.
-- **Overview charts (optional):** with the optional `silentfrog[charts]` extra (PyQtGraph) installed, the results screen shows small HTTP-status, indexability, and GEO-score distribution charts once a crawl completes; without the extra the same figures render as a compact text summary. Chart data comes from read-only store aggregates, so it never re-materialises the crawl in RAM.
+- **Overview charts (optional):** with the `silentfrog[charts]` extra (PyQtGraph, bundled by default by the source installer) installed, the results screen shows small HTTP-status, indexability, and GEO-score distribution charts once a crawl completes; without the extra the same figures render as a compact text summary. Chart data comes from read-only store aggregates, so it never re-materialises the crawl in RAM.
 - **Link graph:** the **Link graph** button visualises the crawl tree (nodes coloured by GEO Score, edges from the page that first linked to each URL, orphan pages flagged). Large graphs are sampled to the most-central nodes; scroll to zoom, drag to pan, and use **Fit all** / **Reset zoom**.
 - **Topic map:** the **Topic map** button (`content_clusters.py`) plots crawled pages as a content-cluster scatter — one dot per page, colour by topic cluster, position from stored topic-embedding vectors. Needs the opt-in "Topic embeddings (local model)" crawl setting, which requires the `silentfrog[embeddings]` extra (downloads a small sentence-transformers model locally on first use; no network calls for page content).
 - **Map redirects:** the **Map redirects** button (`redirect_mapping.py`) is a site-migration helper — it suggests old→new URL redirects by matching pages that vanished or went 404/410 since the previous crawl against this crawl's indexable pages (topic-embedding similarity when both crawls have one, text/path matching otherwise), and exports the suggestions as a CSV you can feed straight into the Massive Redirect Check.

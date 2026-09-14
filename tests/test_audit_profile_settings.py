@@ -123,6 +123,78 @@ def test_single_page_audit_is_deep_with_full_coverage(qtbot) -> None:
     assert deep.link_probe_cap == 0  # unbounded link probing, like today
 
 
+def test_settings_dialog_render_check_switches_profile_to_deep(qtbot, monkeypatch) -> None:
+    # Regression: ticking a rendering GEO check under Standard used to do
+    # nothing visible even though the crawl silently skips it (H4) — the
+    # dialog now switches to Deep and explains why.
+    monkeypatch.setattr("silentfrog.settings_dialog._playwright_available", lambda: True)
+    options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, profile=AuditProfile.STANDARD)
+    dialog = CrawlSettingsDialog(options, show_profile=True)
+    qtbot.addWidget(dialog)
+
+    assert dialog.lbl_render_profile_note.isHidden()
+    dialog.chk_ssr_parity.setChecked(True)
+
+    assert dialog.profile_combo.currentData() == AuditProfile.DEEP.value
+    assert not dialog.lbl_render_profile_note.isHidden()
+    assert "profile set to Deep" in dialog.lbl_render_profile_note.text()
+
+
+def test_settings_dialog_lowering_profile_shows_skip_warning(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr("silentfrog.settings_dialog._playwright_available", lambda: True)
+    options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, profile=AuditProfile.STANDARD)
+    dialog = CrawlSettingsDialog(options, show_profile=True)
+    qtbot.addWidget(dialog)
+    dialog.chk_ssr_parity.setChecked(True)  # auto-switches to Deep, per the test above
+
+    dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData(AuditProfile.STANDARD.value))
+
+    assert not dialog.lbl_render_profile_note.isHidden()
+    assert dialog.lbl_render_profile_note.text() == "Rendering checks are skipped under the Standard profile."
+    # No auto-untick: the user's choice still flows out of options().
+    assert dialog.options().ssr_parity_check is True
+
+
+def test_settings_dialog_render_note_hidden_when_nothing_ticked_or_deep(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr("silentfrog.settings_dialog._playwright_available", lambda: True)
+    options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, profile=AuditProfile.STANDARD)
+    dialog = CrawlSettingsDialog(options, show_profile=True)
+    qtbot.addWidget(dialog)
+    dialog.chk_ssr_parity.setChecked(True)
+    assert not dialog.lbl_render_profile_note.isHidden()
+
+    dialog.chk_ssr_parity.setChecked(False)
+    assert dialog.lbl_render_profile_note.isHidden()
+
+    dialog.chk_ssr_parity.setChecked(True)  # back on Deep already, no note needed
+    assert dialog.lbl_render_profile_note.isHidden()
+
+
+def test_settings_dialog_render_note_hidden_for_single_page_dialog(qtbot, monkeypatch) -> None:
+    # show_profile=False dialogs stay DEEP and hide the profile selector, so
+    # the note must never appear even with a render check ticked.
+    monkeypatch.setattr("silentfrog.settings_dialog._playwright_available", lambda: True)
+    dialog = CrawlSettingsDialog(CrawlOptions.default(), show_profile=False)
+    qtbot.addWidget(dialog)
+    dialog.chk_ssr_parity.setChecked(True)
+    assert dialog.lbl_render_profile_note.isHidden()
+
+
+def test_settings_dialog_restores_warning_for_stored_render_flag_under_standard(qtbot, monkeypatch) -> None:
+    # _initialize_options must reflect stored settings without replaying the
+    # user-facing auto-switch-to-Deep action.
+    monkeypatch.setattr("silentfrog.settings_dialog._playwright_available", lambda: True)
+    options = CrawlOptions.from_ui(
+        gentle_mode=False, max_parallel=4, profile=AuditProfile.STANDARD, ssr_parity_check=True
+    )
+    dialog = CrawlSettingsDialog(options, show_profile=True)
+    qtbot.addWidget(dialog)
+
+    assert dialog.profile_combo.currentData() == AuditProfile.STANDARD.value  # not auto-switched
+    assert not dialog.lbl_render_profile_note.isHidden()
+    assert dialog.lbl_render_profile_note.text() == "Rendering checks are skipped under the Standard profile."
+
+
 def test_settings_dialog_scrolls_and_keeps_buttons_onscreen(qtbot) -> None:
     # B1: a tall settings dialog must scroll its body and never push the
     # OK/Cancel/Help row below the taskbar.

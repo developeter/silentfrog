@@ -14,6 +14,13 @@ _PROFILE_CHOICES = (
     (AuditProfile.DEEP, "Deep — full probing, rendering, integrations"),
 )
 
+# The four GEO checks that only actually run when the crawl policy renders
+# the page (H4: DEEP only) — used to drive the "needs Deep" note below.
+_RENDER_PROFILE_LABELS: dict[str, str] = {
+    AuditProfile.LIGHTWEIGHT.value: "Lightweight",
+    AuditProfile.STANDARD.value: "Standard",
+}
+
 # v3 G3 Stage 2 — engine id -> field label for the "AI share of voice" group.
 _SOV_ENGINES: tuple[tuple[str, str], ...] = (
     ("openai", "ChatGPT (OpenAI) key"),
@@ -92,6 +99,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         # The audit-profile selector is shown for site crawls only; single-page
         # audits stay DEEP (H4), so their dialog hides it and preserves the profile.
         self._show_profile = show_profile
+        # Suppresses the render/profile note's live handlers while
+        # _initialize_options() applies stored settings, so restoring a
+        # saved non-Deep profile + a checked render flag shows the warning
+        # note rather than replaying the user-facing auto-switch-to-Deep.
+        self._initializing_options = False
         theme = self._configure_dialog()
         outer = QtWidgets.QVBoxLayout(self)
         # B1: the four setting groups scroll inside a viewport so a tall dialog
@@ -118,65 +130,65 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._applying_preset = False
         self._initialize_options(options)
 
+    def _add_geo_render_checkbox(
+        self, geo_layout: QtWidgets.QFormLayout, label: str, tooltip: str
+    ) -> QtWidgets.QCheckBox:
+        """One of the four Playwright-gated GEO checks: same checkbox/tooltip/
+        disabled-state pattern, extracted so _build_geo_group stays under the
+        per-function line cap."""
+        chk = QtWidgets.QCheckBox(label)
+        chk.setToolTip(tooltip)
+        if not _playwright_available():
+            chk.setEnabled(False)
+            chk.setToolTip(
+                chk.toolTip() + "\n\nPlaywright is not installed: enable by running "
+                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
+            )
+        geo_layout.addRow(chk)
+        return chk
+
     def _build_geo_group(self) -> QtWidgets.QGroupBox:
         geo_box = QtWidgets.QGroupBox("GEO checks")
         geo_layout = QtWidgets.QFormLayout(geo_box)
-        self.chk_ssr_parity = QtWidgets.QCheckBox("Run SSR parity check (requires Playwright)")
-        self.chk_ssr_parity.setToolTip(
+        self.chk_ssr_parity = self._add_geo_render_checkbox(
+            geo_layout,
+            "Run SSR parity check (requires Playwright)",
             "Optional. Compares the server-rendered DOM with the post-JS DOM via headless Chromium. "
             "Install with: pip install silentfrog[geo-render] && playwright install chromium. "
             "When disabled or when Playwright is missing, the AI Visibility row reports 'not measured' "
-            "and the GEO Score is not affected."
+            "and the GEO Score is not affected.",
         )
-        if not _playwright_available():
-            self.chk_ssr_parity.setEnabled(False)
-            self.chk_ssr_parity.setToolTip(
-                self.chk_ssr_parity.toolTip() + "\n\nPlaywright is not installed: enable by running "
-                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
-            )
-        geo_layout.addRow(self.chk_ssr_parity)
-        self.chk_bot_render = QtWidgets.QCheckBox("Per-bot SSR rendering (render as each AI bot)")
-        self.chk_bot_render.setToolTip(
+        self.chk_bot_render = self._add_geo_render_checkbox(
+            geo_layout,
+            "Per-bot SSR rendering (render as each AI bot)",
             "Optional. Renders the page once per audited AI/search bot user-agent (19 bots) and "
             "compares the rendered DOMs — surfaces WAF blocks, cloaking, and UA-dependent content in "
             "the Bot Matrix SSR column. Slow (one render per bot per page); off by default. Requires "
-            "Playwright and a Deep audit profile."
+            "Playwright and a Deep audit profile.",
         )
-        if not _playwright_available():
-            self.chk_bot_render.setEnabled(False)
-            self.chk_bot_render.setToolTip(
-                self.chk_bot_render.toolTip() + "\n\nPlaywright is not installed: enable by running "
-                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
-            )
-        geo_layout.addRow(self.chk_bot_render)
-        self.chk_render_js = QtWidgets.QCheckBox("Crawl JavaScript-rendered links (SPA sites)")
-        self.chk_render_js.setToolTip(
+        self.chk_render_js = self._add_geo_render_checkbox(
+            geo_layout,
+            "Crawl JavaScript-rendered links (SPA sites)",
             "Optional. Renders each page with headless Chromium and follows links found in the "
             "JS-rendered DOM as well as the raw HTML — needed to crawl React/Vue/Angular route "
             "graphs that inject their navigation. Slow (one render per page); off by default. "
-            "Requires Playwright and a Deep audit profile."
+            "Requires Playwright and a Deep audit profile.",
         )
-        if not _playwright_available():
-            self.chk_render_js.setEnabled(False)
-            self.chk_render_js.setToolTip(
-                self.chk_render_js.toolTip() + "\n\nPlaywright is not installed: enable by running "
-                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
-            )
-        geo_layout.addRow(self.chk_render_js)
-        self.chk_accessibility_audit = QtWidgets.QCheckBox("Accessibility audit (axe-core, WCAG)")
-        self.chk_accessibility_audit.setToolTip(
+        self.chk_accessibility_audit = self._add_geo_render_checkbox(
+            geo_layout,
+            "Accessibility audit (axe-core, WCAG)",
             "Optional. Runs the Deque axe-core WCAG engine against the rendered page — surfaces "
             "keyboard, contrast, ARIA and labeling violations. Results feed the recap and a per-page "
             "Accessibility tab. Slow (one render per page); off by default. Requires Playwright and a "
-            "Deep audit profile."
+            "Deep audit profile.",
         )
-        if not _playwright_available():
-            self.chk_accessibility_audit.setEnabled(False)
-            self.chk_accessibility_audit.setToolTip(
-                self.chk_accessibility_audit.toolTip() + "\n\nPlaywright is not installed: enable by running "
-                "`pip install silentfrog[geo-render]` and `playwright install chromium`."
-            )
-        geo_layout.addRow(self.chk_accessibility_audit)
+        # H4: these four checks only run under the Deep profile. Hidden until
+        # a render check is ticked under a non-Deep profile; see
+        # _refresh_render_profile_note / _on_render_checkbox_toggled.
+        self.lbl_render_profile_note = QtWidgets.QLabel("")
+        self.lbl_render_profile_note.setWordWrap(True)
+        self.lbl_render_profile_note.hide()
+        geo_layout.addRow(self.lbl_render_profile_note)
         self.chk_tech_stack = QtWidgets.QCheckBox("Detect tech stack (Wappalyzer-style)")
         self.chk_tech_stack.setToolTip(
             "Optional. Identifies the CMS, frameworks, analytics, CDN and server from the page's "
@@ -479,8 +491,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.btn_preset_standard.toggled.connect(lambda checked: checked and self._apply_preset("standard"))
         self.btn_preset_gentle.toggled.connect(lambda checked: checked and self._apply_preset("gentle"))
         self.btn_preset_custom.toggled.connect(lambda checked: checked and self._sync_state())
+        for chk in self._render_checkboxes():
+            chk.toggled.connect(self._on_render_checkbox_toggled)
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_combo_changed)
 
     def _initialize_options(self, options: CrawlOptions) -> None:
+        self._initializing_options = True
         self.chk_gentle.setChecked(options.gentle_mode)
         self.spin_parallel.setValue(options.max_concurrent_per_host or 2)
         if self.chk_ssr_parity.isEnabled():
@@ -503,6 +519,8 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self._initialize_ai_engines()
         self._load_from_options(options)
         self._sync_state()
+        self._initializing_options = False
+        self._refresh_render_profile_note()
         self._apply_sized_geometry()
 
     def _apply_sized_geometry(self) -> None:
@@ -626,6 +644,54 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         _, invalid = parse_header_lines(text)
         state = "invalid" if invalid else "valid"
         self.headers_label.setStyleSheet(styles[state])
+
+    def _render_checkboxes(self) -> tuple[QtWidgets.QCheckBox, ...]:
+        return (self.chk_ssr_parity, self.chk_bot_render, self.chk_render_js, self.chk_accessibility_audit)
+
+    def _is_deep_profile(self) -> bool:
+        return self.profile_combo.currentData() == AuditProfile.DEEP.value
+
+    def _on_render_checkbox_toggled(self, _checked: bool) -> None:
+        if not self._show_profile or self._initializing_options:
+            return
+        if any(chk.isChecked() for chk in self._render_checkboxes()) and not self._is_deep_profile():
+            deep_index = self.profile_combo.findData(AuditProfile.DEEP.value)
+            self.profile_combo.setCurrentIndex(deep_index)
+            self._set_render_profile_note(warn=False)
+            return
+        self._refresh_render_profile_note()
+
+    def _on_profile_combo_changed(self, _index: int) -> None:
+        if not self._show_profile or self._initializing_options:
+            return
+        self._refresh_render_profile_note()
+
+    def _refresh_render_profile_note(self) -> None:
+        """Resting-state note: warn when a render check is ticked under a
+        non-Deep profile, hidden otherwise. The one-off "switched to Deep"
+        acknowledgement is set directly by _on_render_checkbox_toggled, not
+        here, so lowering the profile afterwards replaces it with the warning
+        instead of this method re-showing the acknowledgement text."""
+        if not self._show_profile:
+            return
+        any_checked = any(chk.isChecked() for chk in self._render_checkboxes())
+        if not any_checked or self._is_deep_profile():
+            self.lbl_render_profile_note.hide()
+            return
+        self._set_render_profile_note(warn=True)
+
+    def _set_render_profile_note(self, *, warn: bool) -> None:
+        if warn:
+            profile_name = _RENDER_PROFILE_LABELS.get(self.profile_combo.currentData(), "current")
+            text = f"Rendering checks are skipped under the {profile_name} profile."
+            style = "color:#d32f2f;"  # matches _validate_headers's "invalid" red
+        else:
+            text = "Rendering checks need the Deep profile — profile set to Deep."
+            theme = current_theme(cast(QtWidgets.QApplication | None, QtWidgets.QApplication.instance()))
+            style = f"color:{'#9fa3ab' if theme == 'dark' else '#666'};"  # matches the headers/cookies help text
+        self.lbl_render_profile_note.setText(text)
+        self.lbl_render_profile_note.setStyleSheet(style)
+        self.lbl_render_profile_note.show()
 
     def options(self) -> CrawlOptions:
         header_text = self.txt_headers.toPlainText().strip()

@@ -2,6 +2,33 @@
 
 ## 2.0.0
 
+### Reinstall regression: GEO checks and Connect Google disabled
+
+A reinstalled machine found most GEO checkboxes and the "Connect
+Google…" button greyed out. Root cause: the source installer only ever
+installed `[project].dependencies`, never any `[project.optional-
+dependencies]` extra, so a fresh `.venv` had none of playwright,
+google-auth-oauthlib, or pyqtgraph.
+
+#### Fixed
+- `tools/source_install.py` now bundles the `geo-render`, `google`, and
+  `charts` extras by default (`DEFAULT_EXTRAS`), and best-effort
+  downloads the Chromium browser `geo-render` needs
+  (`post_install_plan`) as a separate, non-fatal post-install step — a
+  blocked/slow download prints the manual `playwright install chromium`
+  command instead of failing the install. `stealth` and `embeddings`
+  stay opt-in (heavier: curl_cffi/scrapling and the torch stack,
+  respectively). New `--extras <list|none>` CLI flag on
+  `install_silentfrog.py` overrides the bundle; an unknown extra name
+  stops the installer with the valid names.
+- **Settings → GEO checks** (Site Crawl only): ticking a rendering
+  check (SSR parity, per-bot SSR, JS-rendered links, accessibility
+  audit) under a non-Deep profile now switches the profile to Deep and
+  explains why, instead of silently doing nothing (H4 already gated
+  these checks on Deep; nothing surfaced that in the dialog). Lowering
+  the profile again afterwards shows a warning that the ticked checks
+  will be skipped, without auto-unticking them.
+
 ### Install / update story
 
 The user-facing install path has shifted from a frozen Nuitka binary
