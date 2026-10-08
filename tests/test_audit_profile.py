@@ -55,10 +55,10 @@ def _install_counting_probes(monkeypatch) -> Counter:
     async def fake_fetch(url, timeout, crawl_options):
         return HttpResponse(body=_SYNTHETIC_HTML, status=200, url=url, headers={}, ttfb_ms=1, total_ms=1), None
 
-    async def fake_parse_robots(url, timeout=5):
+    async def fake_parse_robots(url, timeout=5, options=None):
         return parse_robots("")
 
-    async def fake_link_status(session, url, timeout, options):
+    async def fake_link_status(session, url, timeout, options, *, origin=""):
         counts["link"] += 1
         return 200
 
@@ -66,7 +66,7 @@ def _install_counting_probes(monkeypatch) -> Counter:
         counts["redirect"] += 1
         return [url], "200", 0, False
 
-    async def fake_probe(session, url, timeout, options, *, allow_redirects):
+    async def fake_probe(session, url, timeout, options, *, origin=""):
         counts["probe"] += 1  # canonical + hreflang both route through here
         return _ProbeResponse(200, {})
 
@@ -79,7 +79,7 @@ def _install_counting_probes(monkeypatch) -> Counter:
             counts["resource"] += 1
         return {}, {}
 
-    async def fake_discovery(base_url, robots_map=None, timeout=8, crawl_options=None):
+    async def fake_discovery(base_url, robots_map=None, timeout=8, crawl_options=None, origin=""):
         counts["discovery"] += 1
         return DiscoveryPayload.empty()
 
@@ -88,7 +88,7 @@ def _install_counting_probes(monkeypatch) -> Counter:
     monkeypatch.setattr(seo_crawler, "_link_status", fake_link_status)
     monkeypatch.setattr(seo_crawler, "_trace_redirects", fake_trace)
     monkeypatch.setattr(seo_crawler, "fetch_discovery_files", fake_discovery)
-    monkeypatch.setattr(parsers_meta, "_polite_probe_response", fake_probe)
+    monkeypatch.setattr(parsers_meta, "_probe_following_redirects", fake_probe)
     monkeypatch.setattr(parsers_meta, "_fetch_image_details", fake_img)
     monkeypatch.setattr(perf_metrics, "_measure_remote_resources", fake_resources)
     return counts
@@ -179,7 +179,7 @@ async def test_lightweight_skips_probes_observable_in_payload(monkeypatch) -> No
 async def test_discovery_fetched_once_per_origin_within_scope(monkeypatch) -> None:
     calls: Counter = Counter()
 
-    async def fake_uncached(site_root, robots_map, timeout, crawl_options):
+    async def fake_uncached(site_root, robots_map, timeout, crawl_options, origin=""):
         calls[site_root] += 1
         await asyncio.sleep(0)  # let a concurrent same-origin caller interleave
         return DiscoveryPayload.empty()
@@ -200,7 +200,7 @@ async def test_discovery_fetched_once_per_origin_within_scope(monkeypatch) -> No
 async def test_discovery_not_cached_without_scope(monkeypatch) -> None:
     calls: Counter = Counter()
 
-    async def fake_uncached(site_root, robots_map, timeout, crawl_options):
+    async def fake_uncached(site_root, robots_map, timeout, crawl_options, origin=""):
         calls[site_root] += 1
         return DiscoveryPayload.empty()
 
@@ -227,7 +227,7 @@ async def test_discovery_degrades_to_empty_on_session_error(monkeypatch) -> None
 async def test_discovery_cache_does_not_poison_origin_on_failure(monkeypatch) -> None:
     # If a fetch fails under an active scope, the cache must degrade to empty for
     # that origin — never store the exception and re-raise it for every later page.
-    async def raising_fetch(site_root, robots_map, timeout, crawl_options):
+    async def raising_fetch(site_root, robots_map, timeout, crawl_options, origin=""):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(discovery_files, "_fetch_discovery_uncached", raising_fetch)

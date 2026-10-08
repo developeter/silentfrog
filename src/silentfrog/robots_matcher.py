@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from functools import partial
 from urllib.parse import urlparse
 
+from .crawl_http import _request_headers
+from .crawl_options import DEFAULT_USER_AGENT, CrawlOptions
 from .http_client import fetch_page
 from .robots_simulator import parse_robots
 
@@ -43,12 +47,24 @@ def _host_of(url: str) -> str:
     return urlparse(url).netloc.lower()
 
 
-async def fetch_robots_matcher(url: str, user_agent: str, timeout: int = 10) -> RobotsMatcher:
-    """Fetch + parse robots.txt for the host of ``url``. Never raises."""
+async def fetch_robots_matcher(
+    url: str,
+    user_agent: str,
+    timeout: int = 10,
+    *,
+    options: CrawlOptions | None = None,
+    origin: str = "",
+) -> RobotsMatcher:
+    """Fetch + parse robots.txt for the host of ``url``. Never raises.
+
+    Requests carry the configured ``user_agent`` and, only when ``url`` is on
+    the audited ``origin``, the user's custom headers / Cookie (so a
+    cookie-gated robots.txt is honoured without leaking them elsewhere)."""
     robots_url = _robots_url(url)
     if not robots_url:
         return RobotsMatcher(user_agent, "")
-    resp = await fetch_page(robots_url, timeout)
+    opts = replace(options or CrawlOptions.default(), user_agent=user_agent or DEFAULT_USER_AGENT)
+    resp = await fetch_page(robots_url, timeout, headers=_request_headers(opts, origin=origin, target=robots_url))
     text = resp.body if resp.status and resp.status < 400 else ""
     return RobotsMatcher(user_agent, text)
 
@@ -64,10 +80,13 @@ class RobotsCache:
         user_agent: str,
         timeout: int = 10,
         fetcher: _FetcherFn | None = None,
+        *,
+        options: CrawlOptions | None = None,
+        origin: str = "",
     ) -> None:
         self._ua = user_agent
         self._timeout = timeout
-        self._fetcher: _FetcherFn = fetcher or fetch_robots_matcher
+        self._fetcher: _FetcherFn = fetcher or partial(fetch_robots_matcher, options=options, origin=origin)
         self._cache: dict[str, RobotsMatcher] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 

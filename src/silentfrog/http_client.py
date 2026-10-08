@@ -67,9 +67,9 @@ async def head_status(session: ClientSession, url: str, timeout: int) -> int:
         return 0
 
 
-async def fetch_text(url: str, timeout: int = 5) -> Optional[str]:
+async def fetch_text(url: str, timeout: int = 5, headers: Optional[dict[str, str]] = None) -> Optional[str]:
     try:
-        async with open_crawl_session() as session:
+        async with open_crawl_session(headers=headers) as session:
             async with session.get(url, timeout=ClientTimeout(total=timeout)) as response:
                 return await response.text()
     except Exception:

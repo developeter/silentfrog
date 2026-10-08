@@ -67,15 +67,56 @@ async def _throttle_host(host: str, options: CrawlOptions):
         yield
 
 
-def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
-    base = {
+def _base_headers(options: CrawlOptions) -> dict[str, str]:
+    """Identification headers that are safe to send to any host."""
+    return {
         "User-Agent": options.user_agent,
         "Accept": _ACCEPT_DEFAULT,
         "Accept-Language": _ACCEPT_LANGUAGE_DEFAULT,
     }
-    if not options.extra_headers:
-        return base
-    return {**base, **options.extra_headers}
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_of(url: str) -> str:
+    """Canonical ``scheme://host:port`` of ``url`` ("" when unparseable).
+
+    Same-origin is deliberately exact: a sibling subdomain, a different port
+    or an http/https switch is a *different* origin, so the user's Cookie /
+    Authorization / custom headers are not forwarded to it (D1)."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        scheme = parsed.scheme.lower()
+        port = parsed.port or _DEFAULT_PORTS.get(scheme, 0)
+    except ValueError:
+        return ""
+    if not scheme or not host:
+        return ""
+    return f"{scheme}://{host}:{port}"
+
+
+def _scoped_extra_headers(options: CrawlOptions, origin: str, target: str) -> dict[str, str]:
+    """The user's custom headers / Cookie, but only for ``target`` on the
+    audited ``origin``. Fails closed: an empty or foreign origin gets none."""
+    target_origin = _origin_of(target)
+    if not options.extra_headers or not target_origin or target_origin != _origin_of(origin):
+        return {}
+    return dict(options.extra_headers)
+
+
+def _request_headers(options: CrawlOptions, *, origin: str, target: str) -> dict[str, str]:
+    """Full header set for one request to ``target``: identification headers
+    plus the custom ones only when ``target`` is on the audited ``origin``."""
+    return {**_base_headers(options), **_scoped_extra_headers(options, origin, target)}
+
+
+def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
+    """Base + custom headers for fetching the audited page itself. Never use
+    this for a session that probes arbitrary link targets; use
+    :func:`_base_headers` plus :func:`_scoped_extra_headers` per request."""
+    return {**_base_headers(options), **options.extra_headers}
 
 
 async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
@@ -141,13 +182,16 @@ def _human_duration(seconds: int) -> str:
     return " ".join(parts)
 
 
-async def _link_status(session: ClientSession, url: str, timeout: int, options: CrawlOptions) -> int:
+async def _link_status(
+    session: ClientSession, url: str, timeout: int, options: CrawlOptions, *, origin: str = ""
+) -> int:
     response = await _polite_probe_response(
         session,
         url,
         timeout,
         options,
         allow_redirects=False,
+        origin=origin,
     )
     return response.status
 
@@ -159,11 +203,16 @@ async def _polite_probe_response(
     options: CrawlOptions,
     *,
     allow_redirects: bool,
+    origin: str = "",
 ) -> _ProbeResponse:
+    """One polite probe. The session only carries identification headers; the
+    user's custom headers are added here, per request, and only when ``url``
+    is on the audited ``origin`` (D1)."""
     host = _host_key(url)
+    extra = _scoped_extra_headers(options, origin, url)
     async with _throttle_host(host, options):
         await _apply_host_delay(host, options)
-        return await _probe_response(session, url, timeout, options, allow_redirects=allow_redirects)
+        return await _probe_response(session, url, timeout, options, allow_redirects=allow_redirects, extra=extra)
 
 
 async def _apply_host_delay(host: str, options: CrawlOptions) -> None:
@@ -192,11 +241,12 @@ async def _probe_response(
     options: CrawlOptions,
     *,
     allow_redirects: bool,
+    extra: dict[str, str],
 ) -> _ProbeResponse:
     attempts = 2 if options.gentle_mode else 1
     response = _ProbeResponse(0, {})
     for attempt in range(attempts):
-        response = await _probe_attempt(session, url, timeout, allow_redirects=allow_redirects)
+        response = await _probe_attempt(session, url, timeout, allow_redirects=allow_redirects, extra=extra)
         should_retry = response.status in _BACKOFF_STATUSES and attempt < attempts - 1
         if not should_retry:
             break
@@ -210,6 +260,7 @@ async def _probe_attempt(
     timeout: int,
     *,
     allow_redirects: bool,
+    extra: dict[str, str],
 ) -> _ProbeResponse:
     response = await _request_probe_response(
         session,
@@ -217,6 +268,7 @@ async def _probe_attempt(
         url,
         timeout,
         allow_redirects=allow_redirects,
+        extra=extra,
     )
     if response.status not in _PROBE_GET_FALLBACK_STATUSES:
         return response
@@ -226,6 +278,7 @@ async def _probe_attempt(
         url,
         timeout,
         allow_redirects=allow_redirects,
+        extra=extra,
     )
     if fallback.status:
         return fallback
@@ -241,11 +294,13 @@ async def _request_probe_response(
     timeout: int,
     *,
     allow_redirects: bool,
+    extra: dict[str, str],
 ) -> _ProbeResponse:
     try:
         request = session.head if method == "HEAD" else session.get
         async with request(
             url,
+            headers=extra or None,
             allow_redirects=allow_redirects,
             timeout=ClientTimeout(total=timeout),
         ) as response:
@@ -254,10 +309,13 @@ async def _request_probe_response(
         return _ProbeResponse(0, {}, f"error {exc.__class__.__name__}")
 
 
-async def _fetch_robots(url: str, timeout: int = 5) -> str | None:
+async def _fetch_robots(url: str, timeout: int = 5, options: CrawlOptions | None = None) -> str | None:
+    """Fetch the robots.txt of ``url``'s own origin with the configured UA and
+    (same-origin) custom headers, so a cookie-gated robots.txt is seen."""
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    return await fetch_text(robots_url, timeout)
+    headers = _request_headers(options or CrawlOptions.default(), origin=url, target=robots_url)
+    return await fetch_text(robots_url, timeout, headers=headers)
 
 
 class _RobotsTextCache:
@@ -296,7 +354,7 @@ def robots_fetch_scope() -> Iterator[None]:
         _active_robots_cache.reset(token)
 
 
-async def _parse_robots(url: str, timeout: int = 5) -> RobotsRules:
+async def _parse_robots(url: str, timeout: int = 5, options: CrawlOptions | None = None) -> RobotsRules:
     """Fetch + parse robots.txt for ``url`` into the single live engine (H3).
 
     Replaces the v1.x line-loop parser (which reset the group on every
@@ -306,9 +364,9 @@ async def _parse_robots(url: str, timeout: int = 5) -> RobotsRules:
     origin = f"{parsed.scheme}://{parsed.netloc}"
     cache = _active_robots_cache.get()
     if cache is None:
-        txt = await _fetch_robots(url, timeout)
+        txt = await _fetch_robots(url, timeout, options)
     else:
-        txt = await cache.get(origin, lambda: _fetch_robots(url, timeout))
+        txt = await cache.get(origin, lambda: _fetch_robots(url, timeout, options))
     return parse_robots(txt or "")
 
 
@@ -329,6 +387,32 @@ def _is_redirect_loop(hop_urls: list[str], next_url: str) -> bool:
     return next_url in hop_urls
 
 
+_MAX_PROBE_REDIRECTS = 10
+
+
+async def _probe_following_redirects(
+    session: ClientSession,
+    url: str,
+    timeout: int,
+    options: CrawlOptions,
+    *,
+    origin: str,
+) -> _ProbeResponse:
+    """Probe ``url`` and follow redirects one hop at a time so every hop is
+    re-scoped: the user's headers go only to hops on the audited ``origin``
+    and a redirect to a third party drops them (D1)."""
+    current = url
+    for _ in range(_MAX_PROBE_REDIRECTS + 1):
+        response = await _polite_probe_response(
+            session, current, timeout, options, allow_redirects=False, origin=origin
+        )
+        next_url = _redirect_target(current, response)
+        if next_url is None:
+            return response
+        current = next_url
+    return _ProbeResponse(0, {}, "error TooManyRedirects")
+
+
 async def _trace_redirects(
     url: str,
     timeout: int = 8,
@@ -338,8 +422,8 @@ async def _trace_redirects(
     hop_urls: list[str] = [url]
     active_options = options or CrawlOptions.default()
     try:
-        headers = _headers_from_options(active_options)
-        async with open_crawl_session(headers=headers) as session:
+        origin = _origin_of(url)
+        async with open_crawl_session(headers=_base_headers(active_options)) as session:
             current_url = url
             for _ in range(max_hops):
                 response = await _polite_probe_response(
@@ -348,6 +432,7 @@ async def _trace_redirects(
                     timeout,
                     active_options,
                     allow_redirects=False,
+                    origin=origin,
                 )
                 next_url = _redirect_target(current_url, response)
                 if next_url is None:

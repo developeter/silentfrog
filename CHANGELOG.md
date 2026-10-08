@@ -2,6 +2,32 @@
 
 ## 2.0.0
 
+### Security: custom headers and cookies no longer reach third-party sites
+
+The Cookie, Authorization and custom headers typed into Crawl settings were
+attached to the whole probing session, so every link-status, canonical,
+hreflang and redirect probe sent them to whatever site the page linked to, and
+a redirect off-site carried them along. They are now sent only to the origin
+being audited.
+
+#### Fixed
+- Custom headers / Cookie are added per request and only when the target's
+  origin (scheme + host + port, exact) equals the audited page's origin. A
+  sibling subdomain, another port, or an http/https switch is a different
+  origin and gets none. Sessions otherwise carry only User-Agent / Accept /
+  Accept-Language.
+- Canonical and hreflang probes follow redirects one hop at a time so a
+  redirect to another origin drops the headers; the redirect trace re-scopes
+  every hop; the shared transport also strips every non-identification
+  request header on any cross-origin redirect (aiohttp alone only drops
+  Cookie / Authorization, so a custom `X-Api-Key` used to survive the hop).
+- robots.txt `Sitemap:` and sitemap-index entries on a third-party origin are
+  fetched without the credentials; discovery files do the same.
+- robots.txt fetches (single page, site crawl spider gate, crawl-delay) now
+  send the configured User-Agent and the origin-scoped headers instead of
+  aiohttp's default User-Agent and nothing else, so a cookie-gated
+  `Disallow:` is honoured.
+
 ### Installer feedback: window stays open, clear summary, CRLF `.bat`
 
 Double-clicking `install_silentfrog.bat` opened a console that downloaded

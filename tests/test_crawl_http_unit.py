@@ -185,7 +185,7 @@ async def test_parse_robots_fetched_once_per_origin_in_scope(monkeypatch) -> Non
     # mirrors that same per-origin single-flight cache for robots.txt.
     calls: Counter = Counter()
 
-    async def fake_fetch_robots(url: str, timeout: int = 5) -> str | None:
+    async def fake_fetch_robots(url: str, timeout: int = 5, options=None) -> str | None:
         calls[url] += 1
         await asyncio.sleep(0)  # let a concurrent same-origin caller interleave
         return "User-agent: *\nDisallow:"
@@ -205,7 +205,7 @@ async def test_parse_robots_fetched_once_per_origin_in_scope(monkeypatch) -> Non
 async def test_parse_robots_not_cached_without_scope(monkeypatch) -> None:
     calls: Counter = Counter()
 
-    async def fake_fetch_robots(url: str, timeout: int = 5) -> str | None:
+    async def fake_fetch_robots(url: str, timeout: int = 5, options=None) -> str | None:
         calls[url] += 1
         return "User-agent: *\nDisallow:"
 

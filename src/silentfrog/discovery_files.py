@@ -22,7 +22,7 @@ from urllib.parse import urljoin, urlparse
 import aiohttp
 from aiohttp import ClientTimeout
 
-from .crawl_http import _headers_from_options
+from .crawl_http import _base_headers, _scoped_extra_headers
 from .crawl_options import CrawlOptions
 from .crawl_types import AiVisibilityCheck
 from .transport import open_crawl_session
@@ -180,11 +180,14 @@ async def _probe(
     url: str,
     timeout: int,
     parser: str,
+    extra: Mapping[str, str] | None = None,
 ) -> DiscoveryEntry:
     if not url:
         return _empty_entry()
     try:
-        async with session.get(url, timeout=ClientTimeout(total=timeout), allow_redirects=True) as response:
+        async with session.get(
+            url, headers=extra or None, timeout=ClientTimeout(total=timeout), allow_redirects=True
+        ) as response:
             status = int(response.status)
             text = await response.text("utf-8", errors="ignore")
     except Exception:
@@ -291,21 +294,29 @@ async def fetch_discovery_files(
     robots_map: Mapping[str, Any] | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
     crawl_options: CrawlOptions | None = None,
+    origin: str = "",
 ) -> DiscoveryPayload:
     """Probe the four discovery files in parallel.
 
     Returns an empty payload when ``base_url`` is unparseable; never
     raises. All four checks treat absence as INFO (positive when present,
     neutral when missing) — see §1.5 of docs/geo_roadmap.md.
+
+    ``origin`` is the audited origin allowed to receive the user's custom
+    headers / Cookie (defaults to ``base_url``'s own origin); a robots.txt
+    ``Sitemap:`` on any other origin is fetched without them (D1).
     """
     site_root = _site_root(base_url)
     if not site_root:
         return DiscoveryPayload.empty()
     cache = _active_discovery_cache.get()
     if cache is None:
-        return await _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options)
+        return await _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options, origin)
     # Keyed by origin (site_root): fetched once per origin within a crawl scope.
-    return await cache.get(site_root, lambda: _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options))
+    return await cache.get(
+        site_root,
+        lambda: _fetch_discovery_uncached(site_root, robots_map, timeout, crawl_options, origin),
+    )
 
 
 async def _fetch_discovery_uncached(
@@ -313,9 +324,15 @@ async def _fetch_discovery_uncached(
     robots_map: Mapping[str, Any] | None,
     timeout: int,
     crawl_options: CrawlOptions | None,
+    origin: str = "",
 ) -> DiscoveryPayload:
     urls = _discovery_urls(site_root)
-    headers = _headers_from_options(crawl_options or CrawlOptions.default())
+    options = crawl_options or CrawlOptions.default()
+    origin = origin or site_root
+
+    def extra(target: str) -> dict[str, str]:
+        return _scoped_extra_headers(options, origin, target)
+
     sitemap_candidates = _sitemap_urls_from_robots(robots_map or {})
     sitemap_target, sitemap_source = _resolve_sitemap_target(site_root, sitemap_candidates)
 
@@ -323,12 +340,14 @@ async def _fetch_discovery_uncached(
     # session/connector construction is not — degrade the whole origin to empty so
     # a discovery failure never crashes a page audit (and never poisons the cache).
     try:
-        async with open_crawl_session(headers=headers) as session:
+        async with open_crawl_session(headers=_base_headers(options)) as session:
             llms, llms_full, well_known, sitemap_entry = await asyncio.gather(
-                _probe(session, urls["llms_txt"], timeout, parser="llms-txt"),
-                _probe(session, urls["llms_full_txt"], timeout, parser="llms-txt"),
-                _probe(session, urls["well_known_ai_json"], timeout, parser="json"),
-                _sitemap_entry(session, sitemap_target, sitemap_source, sitemap_candidates, timeout),
+                _probe(session, urls["llms_txt"], timeout, "llms-txt", extra(urls["llms_txt"])),
+                _probe(session, urls["llms_full_txt"], timeout, "llms-txt", extra(urls["llms_full_txt"])),
+                _probe(session, urls["well_known_ai_json"], timeout, "json", extra(urls["well_known_ai_json"])),
+                _sitemap_entry(
+                    session, sitemap_target, sitemap_source, sitemap_candidates, timeout, extra(sitemap_target)
+                ),
             )
     except Exception:  # noqa: BLE001 — discovery is best-effort; degrade to empty
         return DiscoveryPayload.empty()
@@ -354,8 +373,9 @@ async def _sitemap_entry(
     source: str,
     robots_candidates: list[str],
     timeout: int,
+    extra: Mapping[str, str],
 ) -> DiscoveryEntry:
-    entry = await _probe(session, target_url, timeout, parser="")
+    entry = await _probe(session, target_url, timeout, "", extra)
     parsed = {"robots_sitemap_count": len(robots_candidates), "robots_sitemap_urls": robots_candidates}
     return DiscoveryEntry(
         url=entry.url,

@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from .crawl_http import _headers_from_options, robots_fetch_scope
+from .crawl_http import _request_headers, robots_fetch_scope
 from .crawl_mode import CrawlMode
 from .crawl_run_repository import CrawlRunRef
 from .crawl_store import CrawlStore, StoredAudit
@@ -123,6 +123,15 @@ async def crawl_site(
         return await _orchestrate_crawl(config, timeout, on_event, cancel_event, store, resume_run_id)
 
 
+def _build_robots_cache(config: SiteCrawlConfig, timeout: int) -> RobotsCache:
+    return RobotsCache(
+        config.crawl_options.user_agent,
+        timeout,
+        options=config.crawl_options,
+        origin=config.base_url,
+    )
+
+
 async def _orchestrate_crawl(
     config: SiteCrawlConfig,
     timeout: int,
@@ -140,7 +149,7 @@ async def _orchestrate_crawl(
     for seed in seeds:
         work_source.admit(seed, "", 0)
     _emit(on_event, "discovered", discovered=work_source.count(), total=work_source.count())
-    robots = RobotsCache(config.crawl_options.user_agent, timeout) if spider.respect_robots else None
+    robots = _build_robots_cache(config, timeout) if spider.respect_robots else None
     ctx = _CrawlContext(
         config=config,
         frontier=frontier,
@@ -565,9 +574,8 @@ async def _discover_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[
 
 
 async def _robots_sitemap_urls(config: SiteCrawlConfig, timeout: int) -> list[str]:
-    response = await fetch_page(
-        _site_url(config, "robots.txt"), timeout=timeout, headers=_headers_from_options(config.crawl_options)
-    )
+    robots_url = _site_url(config, "robots.txt")
+    response = await fetch_page(robots_url, timeout=timeout, headers=_scoped_headers(config, robots_url))
     if response.status >= 400 or not response.body:
         return []
     return _robots_sitemap_directives(response.body)
@@ -586,6 +594,13 @@ def _common_sitemap_urls(config: SiteCrawlConfig) -> list[str]:
     return [_site_url(config, path) for path in _COMMON_SITEMAP_PATHS]
 
 
+def _scoped_headers(config: SiteCrawlConfig, url: str) -> dict[str, str]:
+    """Request headers for ``url``: the user's custom headers / Cookie only when
+    it is on the crawl's own origin. robots.txt and sitemap indexes can name
+    third-party sitemaps, which must not receive credentials (D1)."""
+    return _request_headers(config.crawl_options, origin=config.base_url, target=url)
+
+
 def _site_url(config: SiteCrawlConfig, path: str) -> str:
     parsed = urlparse(config.base_url)
     if not parsed.scheme or not parsed.netloc:
@@ -601,7 +616,7 @@ def _normalize_sitemap_directive(line: str) -> str:
 
 
 async def _fetch_sitemap(url: str, config: SiteCrawlConfig, timeout: int) -> _SitemapItems:
-    response = await fetch_page(url, timeout=timeout, headers=_headers_from_options(config.crawl_options))
+    response = await fetch_page(url, timeout=timeout, headers=_scoped_headers(config, url))
     if response.status >= 400 or not response.body:
         return _SitemapItems(urls=(), sitemaps=())
     return _parse_sitemap(response.body)

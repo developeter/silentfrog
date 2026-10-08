@@ -23,10 +23,12 @@ from .content_quality import extract_content_quality
 from .crawl_http import (
     _BACKOFF_DELAY,
     _BACKOFF_STATUSES,
+    _base_headers,
     _headers_from_options,
     _host_key,
     _image_info,
     _link_status,
+    _origin_of,
     _parse_robots,
     _throttle_host,
     _trace_redirects,
@@ -91,7 +93,7 @@ async def _fetch_analysis_response(
     robots_snapshot: RobotsRules | None = None
     async with _throttle_host(host_key, crawl_options):
         if crawl_options.respect_crawl_delay:
-            robots_snapshot = await _parse_robots(url, timeout=timeout)
+            robots_snapshot = await _parse_robots(url, timeout=timeout, options=crawl_options)
         delay_seconds = robots_snapshot.crawl_delay(crawl_options.user_agent) if robots_snapshot else 0.0
         active_delay = delay_seconds if (crawl_options.gentle_mode and crawl_options.respect_crawl_delay) else 0.0
         crawl_http._HOST_DELAYS[host_key] = active_delay  # adjust host delay used by link-status helper
@@ -157,6 +159,8 @@ async def _resolve_link_rows(
     timeout: int,
     crawl_options: CrawlOptions,
     policy: ProfilePolicy,
+    *,
+    origin: str = "",
 ) -> list[list[str]]:
     # Links are always extracted (local; the frontier needs them). H4 gates only
     # the HTTP status probing: off in LIGHTWEIGHT, bounded in STANDARD, full in DEEP.
@@ -164,9 +168,10 @@ async def _resolve_link_rows(
     if not policy.probe_link_status:
         return links_rows
     to_probe = links_rows if policy.link_probe_cap == 0 else links_rows[: policy.link_probe_cap]
-    headers = _headers_from_options(crawl_options)
-    async with open_crawl_session(headers=headers) as session:
-        coroutines = [_link_status(session, row[0], timeout, crawl_options) for row in to_probe]
+    # Identification headers only on the shared session; the user's custom
+    # headers/Cookie are added per request for same-origin targets (D1).
+    async with open_crawl_session(headers=_base_headers(crawl_options)) as session:
+        coroutines = [_link_status(session, row[0], timeout, crawl_options, origin=origin) for row in to_probe]
         statuses = await asyncio.gather(*coroutines, return_exceptions=True)
     _update_link_statuses(to_probe, statuses)
     return links_rows
@@ -213,7 +218,9 @@ async def _collect_analysis_sections(
     meta_rows = _extract_meta(soup)
     header_rows = _extract_headers(soup)
     image_rows = _extract_images(response.url, soup)
-    link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options, policy)
+    # The credentials belong to the origin the user asked to audit.
+    origin = _origin_of(request_url)
+    link_rows = await _resolve_link_rows(response.url, soup, timeout, crawl_options, policy, origin=origin)
 
     canonical_url, is_self, many_canon, canon_status = await _check_canonical(
         response.url,
@@ -221,6 +228,7 @@ async def _collect_analysis_sections(
         timeout=timeout,
         crawl_options=crawl_options,
         probe=policy.probe_canonical,
+        origin=origin,
     )
     hops, final_status, hop_count, is_loop = await _redirect_chain(
         request_url, response, timeout, crawl_options, policy
@@ -231,9 +239,10 @@ async def _collect_analysis_sections(
         timeout=timeout,
         crawl_options=crawl_options,
         probe=policy.probe_hreflang,
+        origin=origin,
     )
     meta_robots = _meta_robots_value(response.headers, soup)
-    robots_rules = robots_snapshot or await _parse_robots(request_url, timeout=timeout)
+    robots_rules = robots_snapshot or await _parse_robots(request_url, timeout=timeout, options=crawl_options)
     robots_map = robots_rules.directive_map()
     serp_snippet = await _make_serp_snippet(soup, response.url)
     discovery = await fetch_discovery_files(
@@ -241,6 +250,7 @@ async def _collect_analysis_sections(
         robots_map=robots_map,
         timeout=timeout,
         crawl_options=crawl_options,
+        origin=origin,
     )
 
     return {

@@ -315,7 +315,7 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
     async def fake_sleep(duration: float):
         sleep_calls.append(duration)
 
-    async def fake_parse(url: str, timeout: int = 5):
+    async def fake_parse(url: str, timeout: int = 5, options=None):
         # Keyed on the product token "SilentFrog", not the full UA string — the
         # delay must still apply via prefix selection (the H3 crawl-delay fix;
         # the old exact full-UA lookup never matched and silently skipped it).

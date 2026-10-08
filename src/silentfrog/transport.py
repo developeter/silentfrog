@@ -146,9 +146,29 @@ async def _on_request_start(_session: object, _ctx: object, _params: object) -> 
         counter.count += 1
 
 
+# Identification headers that may follow a redirect to another origin. Every
+# other request header (Cookie, Authorization, the user's custom headers) is
+# credential-bearing and is dropped on a cross-origin hop (D1). aiohttp itself
+# only drops Authorization/Cookie, so a custom ``X-Api-Key`` would otherwise leak.
+_PORTABLE_HEADERS = frozenset({"user-agent", "accept", "accept-language", "accept-encoding"})
+
+
+async def _on_request_redirect(_session: object, _ctx: object, params: aiohttp.TraceRequestRedirectParams) -> None:
+    try:
+        location = params.response.headers.get("Location", "")
+        target = params.url.join(type(params.url)(location))
+        if target.origin() == params.url.origin():
+            return
+    except Exception:  # noqa: BLE001 - an unreadable hop is treated as foreign (fail closed)
+        pass
+    for name in {key for key in params.headers if key.lower() not in _PORTABLE_HEADERS}:
+        params.headers.popall(name, None)
+
+
 def _counting_trace() -> aiohttp.TraceConfig:
     trace = aiohttp.TraceConfig()
     trace.on_request_start.append(_on_request_start)
+    trace.on_request_redirect.append(_on_request_redirect)
     return trace
 
 

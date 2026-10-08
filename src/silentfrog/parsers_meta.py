@@ -11,7 +11,7 @@ import bs4
 from aiohttp import ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 from bs4 import BeautifulSoup
 
-from .crawl_http import _headers_from_options, _polite_probe_response
+from .crawl_http import _base_headers, _probe_following_redirects
 from .crawl_options import CrawlOptions
 from .crawler_utils import _attr, normalize_text, safe_attr
 from .image_diagnostics import INFERRED_SIZES_PREFIX, format_hint_for_mime, responsive_label
@@ -649,6 +649,7 @@ async def _check_canonical(
     crawl_options: CrawlOptions | None = None,
     *,
     probe: bool = True,
+    origin: str = "",
 ) -> tuple[str, bool, bool, str]:
     # The canonical tag is parsed locally in every profile (H4); ``probe`` gates
     # only the extra HTTP request that resolves the canonical target's status.
@@ -664,14 +665,8 @@ async def _check_canonical(
     status = ""
     if canonical_url and probe:
         options = crawl_options or CrawlOptions.default()
-        async with open_crawl_session(headers=_headers_from_options(options)) as sess:
-            response = await _polite_probe_response(
-                sess,
-                canonical_url,
-                timeout,
-                options,
-                allow_redirects=True,
-            )
+        async with open_crawl_session(headers=_base_headers(options)) as sess:
+            response = await _probe_following_redirects(sess, canonical_url, timeout, options, origin=origin)
             status = str(response.status)
 
     return canonical_url, is_self, has_multiple, status
@@ -687,6 +682,7 @@ async def _extract_hreflang(
     crawl_options: CrawlOptions | None = None,
     *,
     probe: bool = True,
+    origin: str = "",
 ) -> list[list[str]]:
     # hreflang tags are parsed locally in every profile (H4); ``probe`` gates the
     # per-alternate HTTP status check (parse-only profiles report status "-").
@@ -700,7 +696,7 @@ async def _extract_hreflang(
         rels[lang_val.lower()] = urljoin(page_url, href_val)
 
     if probe:
-        rows = await _probe_hreflang_rows(rels, timeout, crawl_options)
+        rows = await _probe_hreflang_rows(rels, timeout, crawl_options, origin)
     else:
         rows = [[lang, href, "-", "Yes" if _HREFLANG_RE.match(lang) else "No", ""] for lang, href in rels.items()]
 
@@ -712,13 +708,13 @@ async def _extract_hreflang(
 
 
 async def _probe_hreflang_rows(
-    rels: dict[str, str], timeout: int, crawl_options: CrawlOptions | None
+    rels: dict[str, str], timeout: int, crawl_options: CrawlOptions | None, origin: str = ""
 ) -> list[list[str]]:
     rows: list[list[str]] = []
     options = crawl_options or CrawlOptions.default()
-    async with open_crawl_session(headers=_headers_from_options(options)) as sess:
+    async with open_crawl_session(headers=_base_headers(options)) as sess:
         for lang, href in rels.items():
-            response = await _polite_probe_response(sess, href, timeout, options, allow_redirects=True)
+            response = await _probe_following_redirects(sess, href, timeout, options, origin=origin)
             rows.append([lang, href, str(response.status), "Yes" if _HREFLANG_RE.match(lang) else "No", ""])
     return rows
 
