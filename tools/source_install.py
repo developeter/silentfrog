@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import enum
 import json
 import os
 import platform
@@ -491,6 +492,32 @@ def windows_shortcut_command(root: Path, shortcut_path: Path) -> list[str]:
     return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
 
 
+_BAT_DONE_HINTS = {
+    "install": "You can close this window and start Silentfrog from the Desktop shortcut.",
+    "uninstall": "You can close this window.",
+}
+
+
+def _bat_footer_lines(noun: str, rc: str, indent: str = "") -> list[str]:
+    """Footer shared by the install/uninstall .bat files: report the outcome,
+    keep the window open (double-click would otherwise close it before the
+    user can read anything), then exit with the preserved exit code.
+    ``SILENTFROG_NO_PAUSE`` / ``CI`` skip the pause so automation never hangs.
+    """
+    lines = [
+        "echo.",
+        f'if "{rc}"=="0" (',
+        f"  echo Silentfrog {noun} finished. {_BAT_DONE_HINTS[noun]}",
+        ") else (",
+        f"  echo Silentfrog {noun} FAILED ^(exit code {rc}^). Scroll up for the [{noun}] error above.",
+        ")",
+        "if not defined SILENTFROG_NO_PAUSE if not defined CI pause",
+        "popd",
+        f"exit /b {rc}",
+    ]
+    return [indent + line for line in lines]
+
+
 def render_install_bat() -> str:
     return (
         "\n".join(
@@ -504,7 +531,8 @@ def render_install_bat() -> str:
                 ") else (",
                 "  python install_silentfrog.py %*",
                 ")",
-                "popd",
+                'set "SF_RC=%errorlevel%"',
+                *_bat_footer_lines("install", "%SF_RC%"),
             ]
         )
         + "\n"
@@ -637,19 +665,27 @@ def render_uninstall_command() -> str:
 
 
 def render_uninstall_bat() -> str:
+    # cmd re-reads a running batch file from disk, and a deleted one makes it
+    # print "batch file cannot be found" and return 1 whatever the Python exit
+    # code was. So the uninstaller is told to leave this file in place
+    # (--keep-launcher); the footer then reports the real exit code. The body
+    # stays one parenthesised block (parsed once) with delayed expansion.
     return (
         "\n".join(
             [
                 "@echo off",
-                "setlocal",
+                "setlocal EnableDelayedExpansion",
                 "pushd %~dp0",
-                "where py >nul 2>nul",
-                "if %errorlevel%==0 (",
-                "  py -3 -m tools.source_uninstall %*",
-                ") else (",
-                "  python -m tools.source_uninstall %*",
+                "(",
+                "  where py >nul 2>nul",
+                "  if !errorlevel!==0 (",
+                "    py -3 -m tools.source_uninstall --keep-launcher uninstall_silentfrog.bat %*",
+                "  ) else (",
+                "    python -m tools.source_uninstall --keep-launcher uninstall_silentfrog.bat %*",
+                "  )",
+                '  set "SF_RC=!errorlevel!"',
+                *_bat_footer_lines("uninstall", "!SF_RC!", indent="  "),
                 ")",
-                "popd",
             ]
         )
         + "\n"
@@ -698,8 +734,14 @@ def _shell_candidate_loop(candidates: tuple[str, ...]) -> str:
     return f"  for candidate in {' '.join(candidates)}; do"
 
 
+def _launcher_newline(path: Path) -> str:
+    """cmd.exe batch files need CRLF (label/goto parsing is unreliable with
+    LF); shell and .command launchers must stay LF."""
+    return "\r\n" if path.suffix.lower() == ".bat" else "\n"
+
+
 def _write_file(path: Path, content: str, executable: bool = False) -> None:
-    path.write_text(content, encoding="utf-8", newline="\n")
+    path.write_text(content, encoding="utf-8", newline=_launcher_newline(path))
     if executable:
         current = path.stat().st_mode
         path.chmod(current | S_IXUSR | S_IXGRP | S_IXOTH)
@@ -798,26 +840,120 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+class ChromiumStatus(enum.Enum):
+    """Outcome of the best-effort Chromium download, reported in the summary."""
+
+    OK = "ok"
+    FAILED = "failed"
+    NOT_REQUESTED = "not requested"
+
+
+@dataclass(frozen=True)
+class InstallSummary:
+    version: str
+    venv_dir: Path
+    python: Path
+    extras: tuple[str, ...]
+    chromium: ChromiumStatus
+    launcher: Path | None
+    run_hint: str
+
+
+# One human label per install_plan() command, in plan order (kept in sync by
+# test_step_labels_cover_install_plan).
+_STEP_LABELS: tuple[str, ...] = (
+    "creating .venv",
+    "upgrading pip",
+    "installing dependencies - this can take a few minutes",
+    "installing Silentfrog",
+    "verifying assets",
+)
+
+
+def step_label(index: int, total: int) -> str:
+    """Progress line for the 1-based install step ``index`` of ``total``."""
+    label = _STEP_LABELS[index - 1] if 0 < index <= len(_STEP_LABELS) else "running command"
+    return f"[install] Step {index}/{total}: {label}"
+
+
+def _chromium_line(summary: InstallSummary) -> str:
+    remedy = f"FAILED - run: {summary.python} -m playwright install chromium"
+    lines = {
+        ChromiumStatus.OK: "OK",
+        ChromiumStatus.FAILED: remedy,
+        ChromiumStatus.NOT_REQUESTED: "not requested",
+    }
+    return f"Chromium for GEO rendering checks: {lines[summary.chromium]}"
+
+
+def render_install_summary(summary: InstallSummary) -> list[str]:
+    """Final block printed by main(); pure so it is unit-testable."""
+    launcher = str(summary.launcher) if summary.launcher is not None else "not created"
+    body = [
+        f"Silentfrog {summary.version} installed in {summary.venv_dir}",
+        f"Optional extras: {', '.join(summary.extras) if summary.extras else 'none'}",
+        _chromium_line(summary),
+        f"Desktop launcher: {launcher}",
+        f"Start Silentfrog from the Desktop launcher or with: {summary.run_hint}",
+    ]
+    banner = "==================== Install complete ===================="
+    return [f"[install] {line}" for line in (banner, *body)]
+
+
+def _fail(reason: str, code: int = 1) -> int:
+    print(f"[install] Install FAILED: {reason}")
+    return code
+
+
+def _run_step(command: list[str], root: Path) -> None:
+    try:
+        _run(command, root)
+    except subprocess.CalledProcessError:
+        if _is_dependency_wheel_preflight(command):
+            _print_dependency_wheel_failure()
+        raise
+
+
+def _run_install_plan(root: Path, plan: list[list[str]]) -> None:
+    for index, command in enumerate(plan, start=1):
+        print(step_label(index, len(plan)))
+        _run_step(command, root)
+
+
+def _install_launchers(root: Path) -> Path | None:
+    write_launchers(root)
+    try:
+        return create_desktop_launcher(root)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"[install] Desktop launcher not created: {exc}")
+        return None
+
+
+def _prepare_install(args: argparse.Namespace) -> tuple[Path, tuple[str, ...], RuntimeRequirements] | int:
     version_error = validate_python_version((sys.version_info.major, sys.version_info.minor), platform.system())
     if version_error:
         print(f"[install] {version_error}")
-        print("[install] Install Python 3.12, 3.13, or 3.14, then run this command again.")
-        return 1
+        return _fail("install Python 3.12, 3.13, or 3.14, then run this command again.")
 
     root = Path(__file__).resolve().parents[1]
     if not (root / "pyproject.toml").exists():
-        print("[install] pyproject.toml not found. Run this script from the project root copy.")
-        return 1
+        return _fail("pyproject.toml not found. Run this script from the project root copy.")
 
     extras = resolve_extras(args.extras)
     print(f"[install] Optional extras: {', '.join(extras) if extras else 'none'}")
     try:
         requirements = load_runtime_requirements(root / "pyproject.toml", extras=extras)
     except RuntimeError as exc:
-        print(f"[install] {exc}")
-        return 1
+        return _fail(str(exc))
+    return root, extras, requirements
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    prepared = _prepare_install(args)
+    if isinstance(prepared, int):
+        return prepared
+    root, extras, requirements = prepared
 
     paths = installer_paths(root)
     if args.recreate_venv and paths.venv_dir.exists():
@@ -827,46 +963,41 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(paths.venv_dir)
 
     try:
-        for command in install_plan(root, sys.executable, requirements=requirements):
-            try:
-                _run(command, root)
-            except subprocess.CalledProcessError:
-                if _is_dependency_wheel_preflight(command):
-                    _print_dependency_wheel_failure()
-                raise
-        write_launchers(root)
-        try:
-            launcher_path = create_desktop_launcher(root)
-        except (OSError, subprocess.CalledProcessError) as exc:
-            launcher_path = None
-            print(f"[install] Desktop launcher not created: {exc}")
+        _run_install_plan(root, install_plan(root, sys.executable, requirements=requirements))
+        launcher_path = _install_launchers(root)
     except subprocess.CalledProcessError as exc:
-        print(f"[install] Command failed with exit code {exc.returncode}.")
-        return exc.returncode or 1
+        return _fail(f"command exited with code {exc.returncode}.", exc.returncode or 1)
 
-    _run_chromium_post_step(root, requirements, paths)
+    chromium = _run_chromium_post_step(root, requirements, paths)
     _post_install_macos_helpers(root, paths.python)
     if args.revision:
         _persist_revision(root, args.revision)
-    run_hint = "run_silentfrog.bat" if is_windows() else "./run_silentfrog.sh"
-    print("[install] Silentfrog installed successfully.")
-    print(f"[install] Start the app with: {run_hint}")
-    if launcher_path is not None:
-        print(f"[install] Desktop launcher created: {launcher_path}")
+    summary = InstallSummary(
+        version=project_version(root / "pyproject.toml"),
+        venv_dir=paths.venv_dir,
+        python=paths.python,
+        extras=extras,
+        chromium=chromium,
+        launcher=launcher_path,
+        run_hint="run_silentfrog.bat" if is_windows() else "./run_silentfrog.sh",
+    )
+    print("\n".join(render_install_summary(summary)))
     return 0
 
 
-def _run_chromium_post_step(root: Path, requirements: RuntimeRequirements, paths: InstallerPaths) -> None:
-    for command in post_install_plan(root, requirements):
+def _run_chromium_post_step(root: Path, requirements: RuntimeRequirements, paths: InstallerPaths) -> ChromiumStatus:
+    plan = post_install_plan(root, requirements)
+    if not plan:
+        return ChromiumStatus.NOT_REQUESTED
+    print("[install] Downloading Chromium for GEO rendering checks - this can take a few minutes")
+    for command in plan:
         try:
             _run(command, root)
         except subprocess.CalledProcessError:
             print("[install] Chromium download for GEO rendering checks failed (network, proxy, or disk space).")
-            print(
-                "[install] Rendering-based GEO checks (SSR parity, per-bot SSR, JS-rendered links, "
-                "accessibility audit) stay disabled until you run:"
-            )
-            print(f"[install]   {paths.python} -m playwright install chromium")
+            print("[install] The install itself is fine; the exact command to retry is shown in the summary below.")
+            return ChromiumStatus.FAILED
+    return ChromiumStatus.OK
 
 
 REVISION_FILE_NAME = ".silentfrog_revision"

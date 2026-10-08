@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,11 +18,17 @@ _macos_only = pytest.mark.skipif(
     reason="macOS-only path / permission / bundle semantics",
 )
 
+import tools.source_install as source_install
 from tools.source_install import (
     DEFAULT_EXTRAS,
+    ChromiumStatus,
+    InstallSummary,
     RuntimeRequirements,
     _normalize_pep508,
     _parse_args,
+    _run_chromium_post_step,
+    _run_install_plan,
+    _write_file,
     app_data_dir,
     create_desktop_launcher,
     create_macos_app_bundle,
@@ -36,6 +43,7 @@ from tools.source_install import (
     render_install_bat,
     render_install_command,
     render_install_sh,
+    render_install_summary,
     render_macos_app_info_plist,
     render_macos_app_launcher,
     render_reinstall_command,
@@ -46,6 +54,7 @@ from tools.source_install import (
     render_uninstall_command,
     render_uninstall_sh,
     resolve_extras,
+    step_label,
     strip_quarantine,
     uninstall_targets,
     validate_python_version,
@@ -599,3 +608,214 @@ def test_create_desktop_launcher_invokes_powershell_on_windows(tmp_path: Path, m
     # Shortcut now targets the venv gui-script wrapper, not the .bat.
     assert "silentfrog.exe" in joined
     assert "run_silentfrog.bat" not in joined
+
+
+# --- Installer feedback: .bat footer, CRLF launchers, summary, step labels ---
+
+
+@pytest.mark.parametrize(
+    "render,noun,rc_ref",
+    [(render_install_bat, "install", "%SF_RC%"), (render_uninstall_bat, "uninstall", "!SF_RC!")],
+)
+def test_bat_footer_keeps_window_open_and_preserves_exit_code(render, noun: str, rc_ref: str) -> None:
+    """Double-click used to flash a console and vanish; the footer must say
+    whether it worked, wait for a key, and still hand the real code back."""
+    lines = [line.strip() for line in render().splitlines()]
+    guard = "if not defined SILENTFROG_NO_PAUSE if not defined CI pause"
+    assert guard in lines
+    assert f"exit /b {rc_ref}" in lines
+    assert f"echo Silentfrog {noun} FAILED ^(exit code {rc_ref}^). Scroll up for the [{noun}] error above." in lines
+    assert any(line.startswith(f"echo Silentfrog {noun} finished.") for line in lines)
+    # Ordering: pause, then popd, then the preserved exit code last.
+    assert lines.index(guard) < lines.index("popd") < lines.index(f"exit /b {rc_ref}")
+
+
+def test_install_bat_captures_exit_code_right_after_python_call() -> None:
+    rendered = render_install_bat()
+    call_end = rendered.index("  python install_silentfrog.py %*")
+    assert rendered.index('set "SF_RC=%errorlevel%"') > call_end
+    assert "finished. You can close this window and start Silentfrog from the Desktop shortcut." in rendered
+
+
+def test_uninstall_bat_runs_whole_body_in_one_block_because_it_deletes_itself() -> None:
+    rendered = render_uninstall_bat()
+    lines = rendered.splitlines()
+    assert "setlocal EnableDelayedExpansion" in lines
+    assert lines[3] == "(" and lines[-1] == ")"
+    assert "py -3 -m tools.source_uninstall --keep-launcher uninstall_silentfrog.bat %*" in rendered
+    assert "python -m tools.source_uninstall --keep-launcher uninstall_silentfrog.bat %*" in rendered
+
+
+def test_run_bat_stays_detached_and_gets_no_install_footer() -> None:
+    run_bat = render_run_bat()
+    assert "SILENTFROG_NO_PAUSE" not in run_bat
+    assert "SF_RC" not in run_bat
+    venv_branch = run_bat.partition("poetry run silentfrog")[0]
+    assert "pause" not in venv_branch
+    assert 'start "" "%LAUNCHER%"' in run_bat
+
+
+def test_write_file_uses_crlf_for_bat_and_lf_for_shell_launchers(tmp_path: Path) -> None:
+    for name in ("a.bat", "b.sh", "c.command"):
+        _write_file(tmp_path / name, "one\ntwo\n")
+    assert (tmp_path / "a.bat").read_bytes() == b"one\r\ntwo\r\n"
+    assert (tmp_path / "b.sh").read_bytes() == b"one\ntwo\n"
+    assert (tmp_path / "c.command").read_bytes() == b"one\ntwo\n"
+
+
+def test_write_launchers_writes_crlf_bat_and_lf_everything_else(tmp_path: Path) -> None:
+    write_launchers(tmp_path)
+    for path in sorted(tmp_path.iterdir()):
+        data = path.read_bytes()
+        if path.suffix == ".bat":
+            assert data.count(b"\n") == data.count(b"\r\n") > 0, path.name
+        else:
+            assert b"\r" not in data, path.name
+
+
+def test_gitattributes_pins_bat_to_crlf() -> None:
+    attrs = (Path(__file__).resolve().parents[1] / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "*.bat text eol=crlf" in attrs
+    assert "*.sh text eol=lf" in attrs
+
+
+def _summary(**overrides) -> InstallSummary:
+    fields = {
+        "version": "2.0.0",
+        "venv_dir": Path("C:/sf/.venv"),
+        "python": Path("C:/sf/.venv/Scripts/python.exe"),
+        "extras": ("geo-render", "google", "charts"),
+        "chromium": ChromiumStatus.OK,
+        "launcher": Path("C:/Users/me/Desktop/Silentfrog.lnk"),
+        "run_hint": "run_silentfrog.bat",
+    }
+    fields.update(overrides)
+    return InstallSummary(**fields)
+
+
+def test_render_install_summary_full_success_block() -> None:
+    lines = render_install_summary(_summary())
+    assert all(line.startswith("[install] ") for line in lines)
+    assert "Install complete" in lines[0]
+    text = "\n".join(lines)
+    assert "Silentfrog 2.0.0 installed in" in text
+    assert "Optional extras: geo-render, google, charts" in text
+    assert "Chromium for GEO rendering checks: OK" in text
+    assert "Desktop launcher: " in text and "Silentfrog.lnk" in text
+    assert lines[-1].endswith("or with: run_silentfrog.bat")
+
+
+def test_render_install_summary_chromium_failed_carries_remedy_command() -> None:
+    text = "\n".join(render_install_summary(_summary(chromium=ChromiumStatus.FAILED)))
+    assert "Chromium for GEO rendering checks: FAILED - run: " in text
+    assert "python.exe -m playwright install chromium" in text
+
+
+def test_render_install_summary_chromium_not_requested_and_no_extras() -> None:
+    text = "\n".join(render_install_summary(_summary(chromium=ChromiumStatus.NOT_REQUESTED, extras=())))
+    assert "Chromium for GEO rendering checks: not requested" in text
+    assert "Optional extras: none" in text
+
+
+def test_render_install_summary_launcher_absent() -> None:
+    text = "\n".join(render_install_summary(_summary(launcher=None)))
+    assert "Desktop launcher: not created" in text
+
+
+def test_step_labels_cover_every_install_plan_command(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    plan = install_plan(tmp_path, "python")
+    assert len(source_install._STEP_LABELS) == len(plan)
+    assert step_label(1, 5) == "[install] Step 1/5: creating .venv"
+    assert step_label(99, 100) == "[install] Step 99/100: running command"
+
+
+def _record_runs(monkeypatch: pytest.MonkeyPatch, fail_at: int | None = None) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(command, cwd) -> None:
+        calls.append(list(command))
+        if fail_at is not None and len(calls) == fail_at:
+            raise subprocess.CalledProcessError(7, list(command))
+
+    monkeypatch.setattr(source_install, "_run", fake_run)
+    return calls
+
+
+def test_run_install_plan_prints_step_labels_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(_FAKE_PYPROJECT, encoding="utf-8")
+    plan = install_plan(tmp_path, "python")
+    calls = _record_runs(monkeypatch)
+
+    _run_install_plan(tmp_path, plan)
+
+    assert calls == plan
+    labels = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[install] Step")]
+    assert labels == [
+        "[install] Step 1/5: creating .venv",
+        "[install] Step 2/5: upgrading pip",
+        "[install] Step 3/5: installing dependencies - this can take a few minutes",
+        "[install] Step 4/5: installing Silentfrog",
+        "[install] Step 5/5: verifying assets",
+    ]
+
+
+def _requirements(extras: tuple[str, ...]) -> RuntimeRequirements:
+    return RuntimeRequirements(pip_args=(), extras=extras)
+
+
+def test_run_chromium_post_step_returns_typed_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = installer_paths(tmp_path)
+    calls = _record_runs(monkeypatch)
+    assert _run_chromium_post_step(tmp_path, _requirements(()), paths) is ChromiumStatus.NOT_REQUESTED
+    assert calls == []
+    assert _run_chromium_post_step(tmp_path, _requirements(("geo-render",)), paths) is ChromiumStatus.OK
+    assert calls[0][-3:] == ["playwright", "install", "chromium"]
+    _record_runs(monkeypatch, fail_at=1)
+    assert _run_chromium_post_step(tmp_path, _requirements(("geo-render",)), paths) is ChromiumStatus.FAILED
+
+
+def _stub_main_side_effects(monkeypatch: pytest.MonkeyPatch, launcher: Path | None) -> None:
+    monkeypatch.setattr(source_install, "_install_launchers", lambda root: launcher)
+    monkeypatch.setattr(source_install, "_post_install_macos_helpers", lambda root, python: None)
+
+
+def test_main_ends_with_summary_block_and_chromium_failure_stays_non_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    total = len(source_install._STEP_LABELS)
+    _record_runs(monkeypatch, fail_at=total + 1)  # first post-install command = Chromium
+    _stub_main_side_effects(monkeypatch, tmp_path / "Silentfrog.lnk")
+
+    assert source_install.main([]) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    banner = next(i for i, line in enumerate(out) if "Install complete" in line)
+    repo_paths = installer_paths(Path(source_install.__file__).resolve().parents[1])
+    expected = InstallSummary(
+        version=source_install.project_version(),
+        venv_dir=repo_paths.venv_dir,
+        python=repo_paths.python,
+        extras=DEFAULT_EXTRAS,
+        chromium=ChromiumStatus.FAILED,
+        launcher=tmp_path / "Silentfrog.lnk",
+        run_hint="run_silentfrog.bat" if source_install.is_windows() else "./run_silentfrog.sh",
+    )
+    assert out[banner:] == render_install_summary(expected)
+    assert any(f"Step {total}/{total}" in line for line in out[:banner])
+    assert "Install FAILED" not in "\n".join(out)
+
+
+def test_main_fail_hard_step_prints_reason_and_returns_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _record_runs(monkeypatch, fail_at=2)
+    _stub_main_side_effects(monkeypatch, None)
+
+    assert source_install.main([]) == 7
+
+    out = capsys.readouterr().out
+    assert "[install] Install FAILED: command exited with code 7." in out
+    assert "Install complete" not in out

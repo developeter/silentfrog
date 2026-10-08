@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,16 +26,24 @@ def _remove_path(path: Path) -> bool:
 
 
 def run_uninstall(
-    targets: UninstallTargets, current_script: Path | None = None, purge: bool = False
+    targets: UninstallTargets,
+    current_script: Path | None = None,
+    purge: bool = False,
+    keep: Iterable[Path] = (),
 ) -> UninstallOutcome:
+    """Remove the venv, launchers and shortcuts.
+
+    ``keep`` lists extra files to leave on disk: a wrapper that is still
+    executing (cmd re-reads a running ``.bat`` from disk, so deleting it
+    would lose its exit code).
+    """
     removed: list[Path] = []
     skipped: list[Path] = []
+    protected = {path.resolve() for path in keep}
+    if current_script is not None:
+        protected.add(current_script.resolve())
     candidates: list[Path] = [targets.venv_dir, targets.desktop_lnk, targets.desktop_command]
-    candidates.extend(
-        path
-        for path in targets.launcher_scripts
-        if current_script is None or path.resolve() != current_script.resolve()
-    )
+    candidates.extend(path for path in targets.launcher_scripts if path.resolve() not in protected)
     if purge:
         candidates.append(targets.user_data_dir)
     for path in candidates:
@@ -50,6 +59,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--purge", action="store_true", help="Also delete local crawl history under the user data directory"
     )
+    parser.add_argument(
+        "--keep-launcher",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Leave this launcher file (relative to the repo root) in place; used by the running uninstall .bat",
+    )
     return parser.parse_args(argv)
 
 
@@ -57,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     targets = uninstall_targets(root)
-    outcome = run_uninstall(targets, current_script=Path(__file__), purge=args.purge)
+    keep = [root / name for name in args.keep_launcher]
+    outcome = run_uninstall(targets, current_script=Path(__file__), purge=args.purge, keep=keep)
     for path in outcome.removed:
         print(f"[uninstall] removed {path}")
     for path in outcome.skipped:

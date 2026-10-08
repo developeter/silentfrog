@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tools import source_uninstall
 from tools.source_install import UninstallTargets
 from tools.source_uninstall import run_uninstall
 
@@ -73,6 +74,28 @@ def test_uninstall_skips_current_script(tmp_path: Path) -> None:
     assert current not in outcome.removed
     for other in (targets.launcher_scripts[0], targets.launcher_scripts[1]):
         assert not other.exists()
+
+
+def test_uninstall_keeps_launchers_listed_in_keep(tmp_path: Path) -> None:
+    """The running uninstall .bat must survive: cmd loses its exit code if the
+    batch file disappears underneath it."""
+    targets = _make_targets(tmp_path)
+    kept = targets.launcher_scripts[2]
+    outcome = run_uninstall(targets, purge=False, keep=[kept])
+    assert kept.exists()
+    assert kept not in outcome.removed
+    assert not targets.launcher_scripts[0].exists()
+
+
+def test_main_keep_launcher_flag_leaves_named_file(tmp_path: Path, monkeypatch) -> None:
+    targets = _make_targets(tmp_path)
+    monkeypatch.setattr(source_uninstall, "uninstall_targets", lambda root: targets)
+    kept_name = targets.launcher_scripts[2].name
+    # main() derives the repo root from __file__; point the flag at targets.root.
+    monkeypatch.setattr(source_uninstall, "__file__", str(targets.root / "tools" / "source_uninstall.py"))
+    assert source_uninstall.main(["--keep-launcher", kept_name]) == 0
+    assert (targets.root / kept_name).exists()
+    assert not targets.launcher_scripts[0].exists()
 
 
 def test_uninstall_outcome_is_idempotent(tmp_path: Path) -> None:

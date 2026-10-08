@@ -2,6 +2,35 @@
 
 ## 2.0.0
 
+### Installer feedback: window stays open, clear summary, CRLF `.bat`
+
+Double-clicking `install_silentfrog.bat` opened a console that downloaded
+packages and then vanished, so there was no way to tell whether the install
+worked or whether the Chromium download had failed.
+
+#### Changed
+- `install_silentfrog.bat` / `uninstall_silentfrog.bat` keep the exit code,
+  print a final success or `FAILED (exit code N)` line, and `pause` so the
+  window stays open, then exit with the preserved code. `SILENTFROG_NO_PAUSE`
+  or `CI` skips the pause so automation never hangs. `run_silentfrog.bat` is
+  unchanged (it still launches detached).
+- `tools/source_install.py` prints a `Step N/M: ...` label before each install
+  command and ends with one summary block (version, venv, extras, Chromium
+  `OK` / `FAILED - run: <python> -m playwright install chromium` / `not
+  requested`, Desktop launcher path). Fail-hard errors end with
+  `Install FAILED: <reason>`. `render_install_summary()` is the pure helper;
+  `_run_chromium_post_step()` now returns a `ChromiumStatus`.
+
+#### Fixed
+- Launchers written with `*.bat` are now CRLF (cmd.exe parses labels and
+  `goto` unreliably with LF) and `.gitattributes` pins `*.bat text eol=crlf`,
+  so an install no longer leaves the three `.bat` files showing as modified
+  with an empty diff under `core.autocrlf=true`.
+- `uninstall_silentfrog.bat` now passes `--keep-launcher uninstall_silentfrog.bat`
+  to the uninstaller, so the running batch file is no longer deleted underneath
+  cmd (which printed "batch file cannot be found" and returned exit code 1
+  even after a successful uninstall). The real exit code is preserved.
+
 ### AI review: Gemini free tier, provider picker, real error reasons
 
 The "AI review" button silently picked local Ollama when nothing else was

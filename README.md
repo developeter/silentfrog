@@ -184,6 +184,11 @@ install_silentfrog.bat
 ./install_silentfrog.sh
 ```
 
+On Windows the `install_silentfrog.bat` window stays open when it finishes,
+with a summary of what was installed (extras, Chromium download result,
+Desktop launcher) or the failure to scroll back to. Set `SILENTFROG_NO_PAUSE=1`
+(or run under `CI`) to skip the final pause in automation.
+
 For Intel Macs using Homebrew, install a supported interpreter with:
 
 ```bash

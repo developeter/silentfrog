@@ -142,6 +142,12 @@ Use this path if a packaged release is not yet available for your platform, or i
    - installs Silentfrog from binary wheels, bundling the `geo-render` (+ a best-effort `playwright install chromium`), `google`, and `charts` extras by default;
    - creates `Silentfrog.lnk` on your Desktop.
 
+   When `install_silentfrog.bat` finishes, its window stays open and ends with an
+   "Install complete" summary (extras, Chromium download result, Desktop
+   launcher) or a failure message to scroll back from. Set
+   `SILENTFROG_NO_PAUSE=1` (or run under `CI`) to skip the final pause in
+   automation.
+
 5. Launch Silentfrog any of three ways:
    - Double-click `Silentfrog.lnk` on your Desktop.
    - From the repo: `run_silentfrog.bat`
