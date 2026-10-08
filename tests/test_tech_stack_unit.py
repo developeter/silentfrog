@@ -97,15 +97,18 @@ def test_settings_dialog_tech_stack_toggle(qtbot) -> None:
     assert dialog.options().tech_stack_detection is True
 
 
-def test_settings_dialog_accessibility_audit_toggle_disabled_without_playwright(qtbot) -> None:
+def test_settings_dialog_accessibility_audit_toggle_disabled_without_playwright(qtbot, monkeypatch) -> None:
     # v3 G4 Stage 2 — the checkbox exists but is gated on Playwright, same
     # idiom as chk_render_js/chk_bot_render. The dev venv has no Playwright,
     # so it must be disabled and options() must stay False even after a
     # forced setChecked(True) — mirrors the `isEnabled() and isChecked()`
     # guard in CrawlSettingsDialog.options().
+    from silentfrog import settings_dialog
     from silentfrog.crawl_options import CrawlOptions
     from silentfrog.settings_dialog import CrawlSettingsDialog
 
+    # Hermetic: the venv may legitimately have the geo-render extra installed.
+    monkeypatch.setattr(settings_dialog, "_playwright_available", lambda: False)
     dialog = CrawlSettingsDialog(CrawlOptions.default())
     qtbot.addWidget(dialog)
     assert hasattr(dialog, "chk_accessibility_audit")

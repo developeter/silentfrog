@@ -5,6 +5,7 @@ from pathlib import Path
 
 from qtpy import QtCore, QtWidgets
 
+from silentfrog import charts
 from silentfrog.audit_issues import IssueCategory, IssueSeverity  # type: ignore[reportMissingImports]
 from silentfrog.crawl_history import (  # type: ignore[reportMissingImports]
     CrawlHistoryIssue,
@@ -71,7 +72,10 @@ def test_history_dialog_lists_runs_and_shows_previous_diff(qtbot, tmp_path: Path
     assert "- 1 fixed issues" in dialog.details.toPlainText()
 
 
-def test_history_dialog_shows_trends_for_two_runs_of_same_scope(qtbot, tmp_path: Path) -> None:
+def test_history_dialog_shows_trends_for_two_runs_of_same_scope(qtbot, tmp_path: Path, monkeypatch) -> None:
+    # Hermetic: force the plain-text chart fallback even when the charts extra
+    # (pyqtgraph) is installed, since the assertions read QLabel text.
+    monkeypatch.setattr(charts, "pg", None)
     dialog = CrawlHistoryDialog(_store_with_runs(tmp_path))
     qtbot.addWidget(dialog)
 
