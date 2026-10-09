@@ -146,9 +146,9 @@ See the milestone table above and the per-task plans under
 `.claude/plans/` for full detail. Summary:
 
 - **V6** Custom extraction (`custom_extraction.py`, sandboxed
-  CSS/XPath/regex, ≤10 rules). Rules are configured in Settings and the
-  results reach the LLM export; the promised dedicated Site Crawl tab
-  was NOT built (nice-to-have, see v2_0_release_roadmap.md §8).
+  CSS/XPath/regex, ≤10 rules). Rules are configured in Settings; results
+  show in Trust > Tech & extraction (Single Page and the Site Crawl
+  per-page detail), the Excel exports and the LLM export.
 - **V7** GSC+GA4 (`integrations/google/`, RFC 8252 OAuth, `keyring`,
   8 checks, "Top GEO opportunities" widget). Extra `google`.
 - **V8** Crawl diff (`crawl_diff.py`, new Diff tab, feeds LLM export).
@@ -166,7 +166,7 @@ See the milestone table above and the per-task plans under
 - **V14** Lighthouse + Rich Results API (`integrations/google/`, 6
   checks). Extra `google`.
 - **V15** Tech stack detection (`tech_stack.py`, vendored
-  wappalyzer.json, new tab, 3 checks).
+  wappalyzer.json; results in Trust > Tech & extraction).
 - **V16** Robots simulator + hreflang depth (`robots_simulator.py`,
   `hreflang_validator.py`, 3 checks). Robots-simulator surface done —
   v2.0 R1: `robots_sim_dialog.py`, launched from Settings → Advanced;

@@ -5,6 +5,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 # PR-0/E0: tests must exercise the working tree under src/, not a stale
 # non-editable copy installed in .venv/site-packages. Prepend src/ so
 # `import silentfrog` resolves here — which also lets `--cov=src/silentfrog`
@@ -27,3 +29,15 @@ if str(_TESTS_DIR) not in sys.path:
 os.environ.setdefault("QT_API", "pyside6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("SILENTFROG_DATA_DIR", tempfile.mkdtemp(prefix="silentfrog-tests-"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_crawl_prefs(tmp_path, monkeypatch):
+    """Windows opens read the persisted Crawl-settings ticks. Point that seam at
+    a per-test ini so no test reads or writes the developer's real QSettings."""
+    from qtpy import QtCore
+
+    from silentfrog import crawl_prefs
+
+    ini = str(tmp_path / "crawl_prefs.ini")
+    monkeypatch.setattr(crawl_prefs, "app_settings", lambda: QtCore.QSettings(ini, QtCore.QSettings.Format.IniFormat))

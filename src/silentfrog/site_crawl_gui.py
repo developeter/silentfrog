@@ -18,7 +18,14 @@ from .charts import bin_scores, make_distribution_chart
 from .crawl_diff import diff_reports, diff_to_markdown
 from .crawl_history import CrawlHistoryStore, format_history_status, save_report_and_diff
 from .crawl_mode import CrawlMode
-from .crawl_options import AuditProfile, CrawlOptions, auto_suggest_profile
+from .crawl_options import (
+    AuditProfile,
+    CrawlOptions,
+    active_checks_tooltip,
+    auto_suggest_profile,
+    crawl_settings_summary,
+)
+from .crawl_prefs import load_opt_in_options, load_site_profile, save_opt_in_options, save_site_profile
 from .crawl_run_repository import (
     CrawlRowQuery,
     CrawlRunRef,
@@ -68,6 +75,7 @@ from .tabs import (
     SchemaTab,
     SerpTab,
     SocialTab,
+    TechExtractionTab,
 )
 from .theme import current_theme, left_align_tab_bar, status_brushes, window_icon
 from .workers import run_image_analysis, run_site_crawl
@@ -381,7 +389,10 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.setWindowTitle("Silentfrog - Site Crawl")
         self.setWindowIcon(window_icon())
         # H4: site crawls default to STANDARD (gated). Single-page audits stay DEEP.
-        self._crawl_options = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
+        self._crawl_options = self._initial_crawl_options()
+        # What the current/last-opened run was configured with (results page label,
+        # stored in history). "" until a run starts or a saved scan is opened.
+        self._run_settings_summary = ""
         self._active_cancel: threading.Event | None = None
         # Tracks "a background crawl thread is genuinely in flight", independent
         # of the UI-only _set_running toggle that _open_stored_run also calls
@@ -459,7 +470,30 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         row.addWidget(self.lbl_eta)
         return row
 
-    def _build_history_label(self) -> QtWidgets.QLabel:
+    @staticmethod
+    def _initial_crawl_options() -> CrawlOptions:
+        """Defaults overlaid with the persisted opt-in ticks and profile; nothing
+        stored (or a corrupt store) is exactly the STANDARD, gentle default."""
+        base = CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
+        loaded = load_opt_in_options(base)
+        return replace(loaded, profile=load_site_profile(base.profile))
+
+    def _build_history_label(self) -> QtWidgets.QWidget:
+        box = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        column.addWidget(self._build_run_settings_label())
+        column.addWidget(self._build_history_text_label())
+        return box
+
+    def _build_run_settings_label(self) -> QtWidgets.QLabel:
+        self.lbl_run_settings = QtWidgets.QLabel("Settings: -")
+        self.lbl_run_settings.setWordWrap(True)
+        self.lbl_run_settings.setToolTip("The crawl settings (profile and ticked checks) this run used.")
+        return self.lbl_run_settings
+
+    def _build_history_text_label(self) -> QtWidgets.QLabel:
         self.lbl_history = QtWidgets.QLabel("History: no completed crawl yet.")
         self.lbl_history.setWordWrap(True)
         self.lbl_history.setToolTip("Local crawl history diff against the previous run for the same host.")
@@ -631,6 +665,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self._configure_table_header()
         self.table.doubleClicked.connect(self._open_result_detail)
+        self.table.setToolTip(
+            "Double-click a row for the full per-page audit (AI/GEO, accessibility, tech stack, extraction...)."
+        )
         return self.table
 
     def _configure_table_header(self) -> None:
@@ -645,6 +682,9 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self.btn_settings = QtWidgets.QPushButton("Crawl settings...")
         self.btn_history_setup = QtWidgets.QPushButton("View past scans")
         self.lbl_speed = QtWidgets.QLabel()
+        # The active-checks line can be long; clip it (full list in the tooltip)
+        # instead of forcing the window wider.
+        self.lbl_speed.setMinimumWidth(0)
         row.addWidget(self.btn_start)
         row.addWidget(self.btn_settings)
         row.addWidget(self.btn_history_setup)
@@ -870,6 +910,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         self._charts_strip.setVisible(False)  # re-hide until this run's charts populate
         self.btn_stop.setToolTip("Request cancellation. Active requests finish before the crawl fully stops.")
         self.lbl_history.setText("History: waiting for completed crawl...")
+        self._run_settings_summary = crawl_settings_summary(config.crawl_options)
+        self.lbl_run_settings.setText(f"Settings: {self._run_settings_summary}")
         self._reset_eta_tracking()
         self._show_results()
         self.lbl_discovery.setText("Discovering URLs from sitemap sources...")
@@ -1101,7 +1143,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
 
     def _update_history_from_report(self, report: SiteCrawlReport) -> None:
         try:
-            run, diff = save_report_and_diff(self._history_store, report)
+            run, diff = save_report_and_diff(self._history_store, report, settings_summary=self._run_settings_summary)
         except Exception as exc:  # noqa: BLE001
             self.lbl_history.setText(f"History: unavailable ({exc})")
             return
@@ -1130,6 +1172,8 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         dialog = CrawlSettingsDialog(self._crawl_options, self, show_profile=True)
         if dialog.exec() == QtWidgets.QDialog.Accepted:
             self._crawl_options = dialog.options()
+            save_opt_in_options(self._crawl_options)
+            save_site_profile(self._crawl_options.profile)
             self._update_speed_label()
 
     def _open_history_browser(self) -> None:
@@ -1167,16 +1211,17 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         summary = self._report_summary(report)
         self.lbl_discovery.setText(f"{summary} (opened from history: {history_run.created_at})")
         self.lbl_history.setText(f"History: viewing saved scan {history_run.run_id}")
+        self._run_settings_summary = history_run.settings_summary
+        shown = history_run.settings_summary or "not recorded for this saved scan"
+        self.lbl_run_settings.setText(f"Settings: {shown}")
         self.lbl_eta.setText("ETA: -")
         self.progress.setFormat("Loaded from history")
         self.progress.setValue(100)
 
     def _update_speed_label(self) -> None:
-        mode = "Gentle" if self._crawl_options.gentle_mode else "Standard"
-        profile = self._effective_options().profile.value.capitalize()
-        self.lbl_speed.setText(
-            f"{mode} crawl, max {self._crawl_options.max_concurrent_per_host}/host · {profile} profile"
-        )
+        effective = self._effective_options()
+        self.lbl_speed.setText(crawl_settings_summary(effective))
+        self.lbl_speed.setToolTip(active_checks_tooltip(effective))
 
     def _reset_eta_tracking(self) -> None:
         self._discovered_total = 0
@@ -1659,6 +1704,7 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
             ("Performance", PerformanceTab(), data.get("performance", {})),
             ("Structured data", SchemaTab(), data.get("schema", {})),
             ("Accessibility", AccessibilityTab(), data.get("accessibility", {})),
+            ("Tech & extraction", TechExtractionTab(), data),
         ]
         entries: list[TabEntry] = []
         for label, tab, value in single_value_specs:

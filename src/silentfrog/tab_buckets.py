@@ -44,7 +44,7 @@ BUCKET_ORDER: tuple[BucketSpec, ...] = (
         ("Meta tag", "Header H1-H6", "Images", "Content quality", "Keywords"),
     ),
     BucketSpec("speed", "Speed", ("Performance",)),
-    BucketSpec("trust", "Trust", ("Structured data", "Social", "SERP", "Accessibility")),
+    BucketSpec("trust", "Trust", ("Structured data", "Social", "SERP", "Accessibility", "Tech & extraction")),
     BucketSpec("ai_geo", "AI/GEO", ("Bot Matrix", "AI Visibility")),
 )
 

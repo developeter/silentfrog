@@ -770,6 +770,11 @@ def _page_json(payload: Any, url: str, mode: str) -> dict[str, Any]:
         "render": dict(payload.render),
         "bot_render": dict(payload.bot_render),
         "custom_extraction": dict(payload.custom_extraction),
+        "tech_stack": dict(payload.tech_stack),
+        "accessibility": dict(payload.accessibility),
+        "lighthouse": dict(payload.lighthouse),
+        "rich_results": dict(payload.rich_results),
+        "integrations": {attr: dict(getattr(payload, attr)) for attr, _ in _INTEGRATION_SECTIONS},
     }
 
 

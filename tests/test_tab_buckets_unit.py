@@ -33,6 +33,7 @@ ALL_LEAVES = [
     "Performance",
     "SERP",
     "Accessibility",
+    "Tech & extraction",
 ]
 
 

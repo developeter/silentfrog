@@ -477,3 +477,34 @@ def test_export_page_analysis_writes_ai_visibility_placeholder_when_empty(tmp_pa
         assert sheet["D10"].value == "Run an analysis to populate this sheet."
     finally:
         workbook.close()
+
+
+def test_export_page_analysis_writes_tech_and_extraction_sheet(tmp_path: Path) -> None:
+    # PR-F1: tech stack + custom extraction used to have no Excel home.
+    base = _sample_payload().to_mapping()
+    enabled = CrawlPayload.from_raw(
+        {
+            **base,
+            "tech_stack": {"by_category": {"CMS": ["WordPress"]}},
+            "custom_extraction": {"Price": "42.00 EUR", "Sku": ""},
+        }
+    )
+    on_file, off_file = tmp_path / "on.xlsx", tmp_path / "off.xlsx"
+    export_page_analysis(enabled, on_file)
+    export_page_analysis(CrawlPayload.from_raw(base), off_file)
+
+    workbook = load_workbook(on_file)
+    try:
+        rows = [[cell.value for cell in row] for row in workbook["Tech & extraction"].iter_rows()]
+    finally:
+        workbook.close()
+    assert rows[0] == ["Section", "Name", "Value"]
+    assert ["Tech stack", "CMS", "WordPress"] in rows
+    assert ["Custom extraction", "Price", "42.00 EUR"] in rows
+    assert ["Custom extraction", "Sku", "(no match)"] in rows
+
+    workbook = load_workbook(off_file)
+    try:
+        assert "Not enabled" in str(workbook["Tech & extraction"]["C2"].value)
+    finally:
+        workbook.close()

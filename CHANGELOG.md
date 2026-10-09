@@ -2,6 +2,32 @@
 
 ## 2.0.0
 
+### Crawl settings are remembered, and their results are visible
+
+Ticked checks used to reset every time a Single Page or Site Crawl window was
+opened, the label next to "Crawl settings..." said "Standard crawl" with
+everything ticked, and two checks (tech stack, custom extraction) had no result
+view at all.
+
+#### Changed
+- The opt-in ticks (SSR parity, per-bot SSR, JS links, accessibility, tech
+  stack, custom extraction rules, embeddings, stealth, gentle mode and its
+  parallelism) persist across restarts and are shared by both windows. The Site
+  Crawl profile is remembered separately; Single Page stays Deep. A tick whose
+  optional extra is no longer installed loads unticked. Insecure TLS,
+  private-network access, custom headers and cookies are never stored. Nothing
+  stored means today's all-off defaults.
+- The label next to "Crawl settings..." (and the Site Crawl results page and
+  saved-scan history) now lists the active checks, and marks render checks
+  "(skipped: needs Deep)" when the profile will not run them. "max N/host" only
+  shows while gentle mode is on.
+- New **Trust > Tech & extraction** tab (Single Page and the Site Crawl
+  per-page detail) plus "Tech & extraction" Excel sheets. The AI-export page
+  JSON now also carries `tech_stack`, `accessibility`, `lighthouse`,
+  `rich_results` and `integrations`.
+- The Site Crawl results table has a tooltip pointing at the double-click
+  per-page audit.
+
 ### Security: custom headers and cookies no longer reach third-party sites
 
 The Cookie, Authorization and custom headers typed into Crawl settings were
@@ -454,8 +480,8 @@ Reachability fixes):
 - **V5** LLM-friendly export (`exporters/llm_export.py`) — compact
   Markdown + JSON with a self-describing prompt preamble.
 - **V6** Custom CSS/XPath/regex extraction (`custom_extraction.py`,
-  sandboxed, ≤10 rules) — rules configure via Settings and results
-  reach the LLM export; no dedicated results tab was built.
+  sandboxed, ≤10 rules) — rules configure via Settings; results show in
+  Trust > Tech & extraction, the Excel exports and the AI export.
 - **V7** GSC + GA4 integration (`integrations/google/`, system-browser
   OAuth, `keyring`) — see Reachability fixes above for the connect UI.
 - **V8** Crawl comparison / diff view (`crawl_diff.py`), new Diff tab.
@@ -471,7 +497,8 @@ Reachability fixes):
 - **V14** Lighthouse + Rich Results API checks
   (`integrations/google/`).
 - **V15** Tech-stack detection (`tech_stack.py`, vendored
-  wappalyzer.json), new tab.
+  wappalyzer.json) — opt-in; results show in Trust > Tech & extraction,
+  the Excel exports and the AI export.
 - **V16** Robots.txt simulator + hreflang depth
   (`robots_simulator.py`, `hreflang_validator.py`) — see Reachability
   fixes above for the simulator dialog.

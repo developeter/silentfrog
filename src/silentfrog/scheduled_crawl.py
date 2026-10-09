@@ -32,6 +32,7 @@ from .crawl_history import (
     format_history_status,
     save_report_and_diff,
 )
+from .crawl_options import crawl_settings_summary
 from .crawl_store import CrawlStore
 from .hints import Hint, build_hints
 from .site_crawl_types import SiteCrawlConfig, SiteCrawlReport
@@ -101,7 +102,7 @@ async def run_scheduled_crawl(
     finally:
         store.close()
     history = history_store or CrawlHistoryStore()
-    run, diff = save_report_and_diff(history, report)
+    run, diff = save_report_and_diff(history, report, settings_summary=crawl_settings_summary(config.crawl_options))
     _prune_cli_crawls(root)
     return report, run, diff
 

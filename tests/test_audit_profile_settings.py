@@ -10,8 +10,12 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from qtpy import QtWidgets
 
+from silentfrog import crawl_prefs
 from silentfrog.crawl_options import AuditProfile, CrawlOptions, ProfilePolicy, auto_suggest_profile
 from silentfrog.settings_dialog import CrawlSettingsDialog
 from silentfrog.site_crawl_gui import SiteCrawlWindow
@@ -212,3 +216,175 @@ def test_settings_dialog_scrolls_and_keeps_buttons_onscreen(qtbot) -> None:
     button_box = dialog.findChild(QtWidgets.QDialogButtonBox)
     assert button_box is not None
     assert button_box.parentWidget() is dialog
+
+
+# --- PR-F1: opt-in ticks persist across sessions, shared by both windows -------
+
+
+@pytest.fixture
+def _extras(monkeypatch):
+    """Hermetic w.r.t. installed extras: every optional extra reads as present."""
+    for probe in ("_playwright_available", "_embeddings_available", "_scrapling_available"):
+        monkeypatch.setattr(f"silentfrog.settings_dialog.{probe}", lambda: True)
+
+
+def _accept_with(monkeypatch, tick) -> None:
+    """Drive the real Crawl-settings dialog: apply ``tick(dialog)`` then accept."""
+
+    def _exec(self) -> int:
+        tick(self)
+        return QtWidgets.QDialog.Accepted
+
+    monkeypatch.setattr(CrawlSettingsDialog, "exec", _exec)
+
+
+def _tick_secrets_and_checks(dialog: CrawlSettingsDialog) -> None:
+    dialog.chk_ssr_parity.setChecked(True)
+    dialog.chk_tech_stack.setChecked(True)
+    dialog.chk_allow_insecure_tls.setChecked(True)
+    dialog.chk_allow_private_network.setChecked(True)
+    dialog.edit_cookies.setText("session=topsecret")
+    dialog.txt_headers.setPlainText("X-Api-Key: topsecret")
+
+
+def test_ticks_made_in_single_page_reach_a_new_site_crawl_window(qtbot, monkeypatch, _extras) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    _accept_with(monkeypatch, _tick_secrets_and_checks)
+    page._open_crawl_settings()
+
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    assert site._crawl_options.ssr_parity_check is True
+    assert site._crawl_options.tech_stack_detection is True
+    assert site._crawl_options.profile is AuditProfile.STANDARD  # Site Crawl keeps its own profile
+    # Posture and credentials never survive into a new window...
+    assert site._crawl_options.allow_insecure_tls is False
+    assert site._crawl_options.allow_private_network is False
+    assert site._crawl_options.extra_headers == {}
+    again = WebpageSeoWindow()
+    qtbot.addWidget(again)
+    assert again._crawl_options.ssr_parity_check is True
+    assert again._crawl_options.profile is AuditProfile.DEEP
+    # ...and none of it is in the stored blob at all.
+    stored = json.dumps(crawl_prefs.app_settings().value(crawl_prefs.OPT_IN_KEY))
+    assert "topsecret" not in stored and "tls" not in stored.lower() and "private" not in stored.lower()
+
+
+def test_site_profile_is_remembered_separately_and_single_page_stays_deep(qtbot, monkeypatch, _extras) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    _accept_with(
+        monkeypatch,
+        lambda dialog: dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData("lightweight")),
+    )
+    site._open_crawl_settings()
+
+    reopened = SiteCrawlWindow()
+    qtbot.addWidget(reopened)
+    assert reopened._crawl_options.profile is AuditProfile.LIGHTWEIGHT
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    assert page._crawl_options.profile is AuditProfile.DEEP
+
+
+def test_empty_store_keeps_todays_defaults(qtbot) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    assert page._crawl_options == CrawlOptions.default()
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    assert site._crawl_options == CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
+
+
+def test_corrupt_store_falls_back_to_defaults(qtbot) -> None:
+    settings = crawl_prefs.app_settings()
+    settings.setValue(crawl_prefs.OPT_IN_KEY, "{not json")
+    settings.setValue(crawl_prefs.SITE_PROFILE_KEY, "bogus")
+    settings.sync()
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    assert site._crawl_options == CrawlOptions.from_ui(gentle_mode=True, max_parallel=2, profile=AuditProfile.STANDARD)
+
+
+def test_stored_tick_for_a_missing_extra_loads_unticked(qtbot, monkeypatch) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    crawl_prefs.save_opt_in_options(
+        CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, topic_embeddings=True, tech_stack_detection=True)
+    )
+    monkeypatch.setattr("silentfrog.settings_dialog._embeddings_available", lambda: False)
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    assert page._crawl_options.topic_embeddings is False
+    assert page._crawl_options.tech_stack_detection is True
+
+
+# --- PR-F1: the label shows which checks will actually run ---------------------
+
+
+def test_single_page_label_lists_active_checks(qtbot, monkeypatch, _extras) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    assert "no optional checks" in page.lbl_settings_state.text()
+    _accept_with(monkeypatch, _tick_secrets_and_checks)
+    page._open_crawl_settings()
+    text = page.lbl_settings_state.text()
+    assert "SSR parity" in text and "Tech stack" in text
+    assert "skipped" not in text  # Single Page is always Deep
+    assert "SSR parity" in page.lbl_settings_state.toolTip()
+
+
+def test_site_label_marks_render_checks_skipped_under_standard(qtbot, monkeypatch, _extras) -> None:
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+
+    def _tick(dialog: CrawlSettingsDialog) -> None:
+        dialog.chk_ssr_parity.setChecked(True)
+        dialog.chk_tech_stack.setChecked(True)
+        dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData("standard"))
+
+    _accept_with(monkeypatch, _tick)
+    site._open_crawl_settings()
+    assert site._crawl_options.profile is AuditProfile.STANDARD
+    text = site.lbl_speed.text()
+    assert "SSR parity (skipped: needs Deep)" in text
+    assert "Tech stack" in text and "Standard profile" in text
+
+
+def test_site_label_drops_host_cap_when_gentle_is_off(qtbot) -> None:
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    assert "max 2/host" in site.lbl_speed.text()
+    site._crawl_options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=8, profile=AuditProfile.STANDARD)
+    site._update_speed_label()
+    assert "/host" not in site.lbl_speed.text()
+
+
+def test_untouched_single_page_save_keeps_site_crawl_gentle(qtbot) -> None:
+    crawl_prefs.save_opt_in_options(CrawlOptions.default())
+    site = SiteCrawlWindow()
+    qtbot.addWidget(site)
+    assert site._crawl_options.gentle_mode is True
+    assert site._crawl_options.max_concurrent_per_host == 2
+
+
+def test_unusable_stored_custom_extraction_does_not_stop_windows_opening(qtbot) -> None:
+    from silentfrog.seo_gui import WebpageSeoWindow
+
+    settings = crawl_prefs.app_settings()
+    settings.setValue(crawl_prefs.OPT_IN_KEY, '{"custom_extraction": 5}')
+    settings.sync()
+    base = CrawlOptions.default()
+    assert crawl_prefs.load_opt_in_options(base) == base
+    page = WebpageSeoWindow()
+    qtbot.addWidget(page)
+    assert page._crawl_options == CrawlOptions.default()

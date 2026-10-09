@@ -15,7 +15,8 @@ from qtpy import QtCore, QtGui, QtWidgets
 from .ai_visibility import recompute_with_lighthouse
 from .audit_issues import AuditIssue, issues_for_payload
 from .audit_recap import AuditRecapWidget
-from .crawl_options import CrawlOptions
+from .crawl_options import CrawlOptions, active_checks_tooltip, crawl_settings_summary
+from .crawl_prefs import load_opt_in_options, save_opt_in_options
 from .crawl_types import CrawlPayload
 from .exporters import export_page_analysis, export_page_for_llm, write_llm_export
 from .settings_dialog import CrawlSettingsDialog
@@ -39,6 +40,7 @@ from .tabs import (
     SchemaTab,
     SerpTab,
     SocialTab,
+    TechExtractionTab,
 )
 from .theme import left_align_tab_bar, window_icon
 from .workers import run_crawl, run_image_analysis, run_lighthouse
@@ -149,7 +151,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.setWindowIcon(window_icon())
         self._latest_payload: CrawlPayload | None = None
         self._dimmed_buttons: list[QtWidgets.QPushButton] = []
-        self._crawl_options: CrawlOptions = CrawlOptions.default()
+        # Opt-in ticks persist across sessions (shared with Site Crawl); a missing
+        # or corrupt store is exactly today's all-off defaults.
+        self._crawl_options: CrawlOptions = load_opt_in_options(CrawlOptions.default())
 
         self._build_ui()
         self._apply_initial_window_size()
@@ -275,6 +279,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.performance_tab = PerformanceTab()
         self.serp_tab = SerpTab()
         self.accessibility_tab = AccessibilityTab()
+        self.tech_extraction_tab = TechExtractionTab()
         # v2.0 V19-A1: the flat tabs are regrouped into 5 user-goal buckets
         # (+ a top-level Recap/Overview). The tab instances and their
         # .update()/signal wiring are unchanged; only the nesting changes.
@@ -298,6 +303,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             TabEntry("Performance", self.performance_tab),
             TabEntry("SERP", self.serp_tab),
             TabEntry("Accessibility", self.accessibility_tab),
+            TabEntry("Tech & extraction", self.tech_extraction_tab),
         )
         self._bucketed = build_bucketed_tabs(self.tabs, entries)
 
@@ -351,6 +357,9 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         font.setPointSizeF(font.pointSizeF() - 1)
         self.lbl_settings_state.setFont(font)
         self.lbl_settings_state.setStyleSheet("color:#6b6b6b;")
+        # The active-checks line can be long; let it clip (full list in the
+        # tooltip) instead of forcing the window wider.
+        self.lbl_settings_state.setMinimumWidth(0)
         controls.addWidget(self.lbl_settings_state)
         controls.addStretch()
         return controls
@@ -523,16 +532,14 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         dialog = CrawlSettingsDialog(self._crawl_options, self)
         if dialog.exec() == QtWidgets.QDialog.Accepted:
             self._crawl_options = dialog.options()
+            save_opt_in_options(self._crawl_options)
             self._update_settings_label()
 
     def _update_settings_label(self) -> None:
-        if self._crawl_options.gentle_mode:
-            state = "Gentle crawl"
-        elif self._crawl_options.extra_headers:
-            state = "Custom crawl"
-        else:
-            state = "Standard crawl"
-        self.lbl_settings_state.setText(state)
+        # Single Page is always DEEP, so the profile is omitted from the line.
+        opts = self._crawl_options
+        self.lbl_settings_state.setText(crawl_settings_summary(opts, show_profile=False))
+        self.lbl_settings_state.setToolTip(active_checks_tooltip(opts))
 
     def _populate_tables(self, data: dict[str, Any]) -> None:
         if self._handle_image_update(data):
@@ -568,6 +575,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
         self.ai_visibility_tab.update({})
         self.performance_tab.update({})
         self.accessibility_tab.update({})
+        self.tech_extraction_tab.update({})
         self.schema_tab.update({})
         self.serp_tab.update({}, {})
         self.recap_tab.reset()
@@ -699,6 +707,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             (self.ai_visibility_tab.update, data.get("ai_visibility", {})),
             (self.performance_tab.update, data.get("performance", {})),
             (self.accessibility_tab.update, data.get("accessibility", {})),
+            (self.tech_extraction_tab.update, data),
             (self.schema_tab.update, data.get("schema", {})),
             (self.social_tab.update, data.get("social", {})),
         ]

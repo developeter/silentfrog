@@ -14,6 +14,8 @@ from ..crawl_types import CrawlPayload
 from ..image_diagnostics import IMAGE_HEADERS, normalize_image_rows
 from ..indexability import build_indexability_rows
 from ..site_crawl_types import SITE_CRAWL_HEADERS, SiteCrawlReport, SiteCrawlResult
+from ..tech_extraction_view import SHEET_HEADERS as _TECH_HEADERS
+from ..tech_extraction_view import sheet_rows as _tech_sheet_rows
 from .action_workbook import write_site_crawl_action_sheets
 
 _PayloadRows = list[tuple[str, CrawlPayload]]
@@ -105,6 +107,7 @@ def _write_detail_sheets(
         ("Performance detail", _performance_headers(), _performance_detail_rows(rows)),
         ("SERP detail", ["Page URL", "Section", "Field", "Value"], _serp_detail_rows(rows)),
         ("Social detail", _social_headers(), _social_detail_rows(rows)),
+        ("Tech & extraction detail", ["Page URL", *_TECH_HEADERS], _tech_detail_rows(rows)),
     ]
     for name, headers, detail_rows in detail_specs:
         _write_rows(workbook, name, headers, detail_rows or [_empty_row(headers)], formats)
@@ -490,6 +493,12 @@ def _eligibility_row(url: str, item) -> list[object]:
         item.eligibility,
         _join(item.missing_fields),
         _join(item.warnings),
+    ]
+
+
+def _tech_detail_rows(rows: _PayloadRows) -> list[list[str]]:
+    return [
+        [url, *row] for url, payload in rows for row in _tech_sheet_rows(payload.tech_stack, payload.custom_extraction)
     ]
 
 

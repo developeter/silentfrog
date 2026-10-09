@@ -24,6 +24,7 @@ from ..image_diagnostics import (
     normalize_image_rows,
 )
 from ..indexability import build_indexability_rows
+from ..tech_extraction_view import SHEET_HEADERS, sheet_rows
 from .action_workbook import write_page_action_sheets
 
 Formatter = Callable[[int, int, str], xlsxwriter.format.Format | None]
@@ -1128,6 +1129,12 @@ def _write_keywords_sheet(workbook: xlsxwriter.Workbook, payload: CrawlPayload) 
     )
 
 
+def _write_tech_extraction_sheet(workbook: xlsxwriter.Workbook, payload: CrawlPayload) -> None:
+    rows = sheet_rows(payload.tech_stack, payload.custom_extraction)
+    placeholder = ["-", "-", "Not enabled — tick it in Crawl settings"]
+    _write_sheet(workbook, "Tech & extraction", SHEET_HEADERS, rows or [placeholder])
+
+
 def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1154,6 +1161,7 @@ def export_page_analysis(payload: CrawlPayload, file_path: Path) -> None:
             lambda: _write_content_quality_sheet(workbook, formats, payload),
             lambda: _write_serp_sheets(workbook, formats, payload),
             lambda: _write_keywords_sheet(workbook, payload),
+            lambda: _write_tech_extraction_sheet(workbook, payload),
         )
         for writer in writers:
             writer()

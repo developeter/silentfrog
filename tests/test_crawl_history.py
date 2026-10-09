@@ -248,3 +248,21 @@ def test_diff_runs_reports_new_fixed_recurring_worsened_and_health_trend() -> No
     assert [issue.url for issue in diff.worsened_issues] == ["https://example.com/worse"]
     assert diff.trend == "regressed"
     assert "1 new, 1 fixed, 1 worsened, 2 recurring" in format_history_status(current, diff)
+
+
+def test_settings_summary_roundtrips_and_old_history_files_load_without_it(tmp_path: Path) -> None:
+    # PR-F1: add-only field. A history file written before it existed (no
+    # "settings_summary" key) must still load, with an empty summary.
+    import json
+
+    store = CrawlHistoryStore(tmp_path)
+    run = CrawlHistoryRun.from_dict(
+        {"run_id": "r1", "created_at": "2026-01-01T00:00:00Z", "scope_key": "e.com", "settings_summary": "S"}
+    )
+    store.save_run(run)
+    assert store.load_runs("e.com")[0].settings_summary == "S"
+
+    legacy = json.loads((tmp_path / "r1.json").read_text(encoding="utf-8"))
+    del legacy["settings_summary"]
+    (tmp_path / "r1.json").write_text(json.dumps(legacy), encoding="utf-8")
+    assert store.load_runs("e.com")[0].settings_summary == ""

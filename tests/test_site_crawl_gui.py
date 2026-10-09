@@ -444,6 +444,8 @@ def test_row_detail_uses_cached_payload(qtbot) -> None:
     ]:
         assert detail._bucketed.contains(label)
     assert detail.btn_img_dl.text() == "Analyze images"
+    # PR-F1: tech stack / custom extraction have an on-screen home in the detail view.
+    assert detail._bucketed.contains("Tech & extraction")
 
 
 def test_site_crawl_detail_recap_navigates_to_bucketed_tab(qtbot) -> None:
@@ -1458,3 +1460,79 @@ def test_stream_redirect_page_refs_bounds_the_scan(monkeypatch, qtbot) -> None:
 
     assert len(refs) == site_crawl_gui._REDIRECT_MAP_MAX_SCANNED
     assert repo.consumed == site_crawl_gui._REDIRECT_MAP_MAX_SCANNED
+
+
+# --- PR-F1: the results page shows the settings the run used -------------------
+
+
+def test_results_page_label_and_history_record_the_run_settings(monkeypatch, qtbot, tmp_path: Path) -> None:
+    result = SiteCrawlResult.from_payload("https://example.com/page", _payload())
+    report = SiteCrawlReport.from_results([result], discovered_count=1)
+
+    def fake_run_site_crawl(config, timeout, on_progress, on_success, on_error, store_path=None):
+        on_success(report)
+        return threading.Thread(), threading.Event()
+
+    monkeypatch.setattr("silentfrog.site_crawl_gui.run_site_crawl", fake_run_site_crawl)
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    win._history_store = CrawlHistoryStore(tmp_path)
+    win._crawl_options = replace(win._crawl_options, ssr_parity_check=True, tech_stack_detection=True)
+    win.base_url.setText("https://example.com")
+    win.url_list.setPlainText("https://example.com/page")
+
+    win._start_crawl()
+
+    assert win.stack.currentWidget() is win.results_page
+    assert not win.lbl_run_settings.isHidden()
+    shown = win.lbl_run_settings.text()
+    assert "Tech stack" in shown and "SSR parity (skipped: needs Deep)" in shown
+    assert win._history_store.load_runs()[0].settings_summary in shown
+
+
+def test_opening_a_saved_scan_shows_its_recorded_settings_or_says_none(qtbot, tmp_path: Path) -> None:
+    from silentfrog.crawl_history import build_history_run
+
+    db = tmp_path / "crawl_saved.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("e.com", "https://e.com/", "spider")
+    store.save_audit(run_id, StoredAudit(url="https://e.com/a", http_status="200", indexability="Indexable", title="A"))
+    store.finish_run(run_id)
+    store.close()
+    report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id), discovered_count=1, crawled_count=1, skipped_count=0, failed_count=0
+    )
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+
+    win._open_stored_run(build_history_run(report, settings_summary="Standard crawl · Tech stack"))
+    assert win.lbl_run_settings.text() == "Settings: Standard crawl · Tech stack"
+    win._open_stored_run(build_history_run(report))  # a pre-F1 history file records nothing
+    assert "not recorded" in win.lbl_run_settings.text()
+
+
+def test_results_table_explains_the_double_click_detail(qtbot) -> None:
+    win = SiteCrawlWindow()
+    qtbot.addWidget(win)
+    assert "Double-click a row" in win.table.toolTip()
+
+
+def test_site_detail_dialog_shows_tech_stack_and_extraction(qtbot) -> None:
+    from silentfrog.tabs import TechExtractionTab
+
+    payload = CrawlPayload.from_raw(
+        {
+            **_payload().to_mapping(),
+            "tech_stack": {"by_category": {"CMS": ["WordPress"]}},
+            "custom_extraction": {"Price": "42.00 EUR"},
+        }
+    )
+    dialog = SiteCrawlDetailDialog(payload, "https://example.com/page")
+    qtbot.addWidget(dialog)
+
+    tab = dialog.findChildren(TechExtractionTab)[0]
+    tech = tab.tech_table.view.model()
+    extraction = tab.extraction_table.view.model()
+    assert [tech.index(0, c).data() for c in (0, 1)] == ["CMS", "WordPress"]
+    assert [extraction.index(0, c).data() for c in (0, 1)] == ["Price", "42.00 EUR"]
+    dialog.close()

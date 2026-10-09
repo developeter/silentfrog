@@ -43,6 +43,7 @@ from silentfrog.tabs import (  # type: ignore[reportMissingImports]
     SchemaTab,
     SerpTab,
     SocialTab,
+    TechExtractionTab,
 )
 from silentfrog.theme import apply_theme  # type: ignore[reportMissingImports]
 
@@ -579,6 +580,7 @@ def test_seo_window_groups_tabs_into_buckets(qtbot):
         "Performance",
         "SERP",
         "Accessibility",
+        "Tech & extraction",
     ]
     leaves = [
         win.tabs.widget(i).tabText(j) for i in range(1, win.tabs.count()) for j in range(win.tabs.widget(i).count())
@@ -2097,3 +2099,55 @@ def test_clear_results_resets_tabs(qtbot):
     assert _row_count(win.links_tab.view) == 0
     assert win.btn_export.isEnabled() is False
     assert win.recap_tab.health_text().startswith("<b>Ready</b>")
+
+
+# --- PR-F1: Trust > Tech & extraction -------------------------------------------
+
+_PRODUCT_HTML = '<meta name="generator" content="WordPress 6.4"><span class="price">42.00 EUR</span>'
+
+
+def _tech_extraction_data() -> dict[str, Any]:
+    """A page's tech/extraction groups produced by the real collectors."""
+    from silentfrog.custom_extraction import extract, parse_rules_text
+    from silentfrog.tech_stack import detect_tech
+
+    data = _sample_payload().to_mapping()
+    data["tech_stack"] = detect_tech(_PRODUCT_HTML, {}, [], "WordPress 6.4").to_dict()
+    data["custom_extraction"] = extract(_PRODUCT_HTML, parse_rules_text("Price | css | span.price"))
+    return data
+
+
+def _table_cells(table) -> list[list[str]]:
+    model = table.view.model()
+    assert model is not None
+    return [[str(model.index(r, c).data()) for c in range(model.columnCount())] for r in range(model.rowCount())]
+
+
+def test_tech_extraction_tab_states(qtbot) -> None:
+    tab = TechExtractionTab()
+    qtbot.addWidget(tab)
+    tab.update({})
+    assert "Not enabled" in _table_cells(tab.tech_table)[0][1]
+    assert "tick it in Crawl settings" in _table_cells(tab.extraction_table)[0][1]
+
+    tab.update({"tech_stack": {"by_category": {}}, "custom_extraction": {"Price": ""}})
+    assert _table_cells(tab.tech_table) == [["-", "None detected"]]
+    assert _table_cells(tab.extraction_table) == [["Price", "(no match)"]]
+
+    tab.update(_tech_extraction_data())
+    assert ["CMS", "WordPress"] in _table_cells(tab.tech_table)
+    assert _table_cells(tab.extraction_table) == [["Price", "42.00 EUR"]]
+
+
+def test_single_page_window_shows_tech_stack_and_extraction(qtbot) -> None:
+    win = WebpageSeoWindow()
+    qtbot.addWidget(win)
+    assert win._bucketed.contains("Tech & extraction")
+    assert "Not enabled" in _table_cells(win.tech_extraction_tab.tech_table)[0][1]
+
+    win._populate_tables(_tech_extraction_data())
+    assert ["CMS", "WordPress"] in _table_cells(win.tech_extraction_tab.tech_table)
+    assert _table_cells(win.tech_extraction_tab.extraction_table) == [["Price", "42.00 EUR"]]
+
+    win._clear_results()
+    assert "Not enabled" in _table_cells(win.tech_extraction_tab.tech_table)[0][1]

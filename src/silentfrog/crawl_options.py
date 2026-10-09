@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Any
 
 from .custom_extraction import CustomExtractionConfig, parse_rules_text
 
@@ -244,11 +246,152 @@ def parse_header_lines(text: str) -> tuple[dict[str, str], bool]:
     return headers, invalid
 
 
+# --- Persisted opt-in ticks (QSettings seam lives in crawl_prefs.py) ---------
+#
+# Only the opt-in feature choices survive a restart. Security posture
+# (allow_insecure_tls / allow_private_network) and credentials (extra_headers,
+# including Cookie) are deliberately NOT part of the stored shape: they must be
+# re-entered per session so a stale override or token can never ride along.
+
+# Crawl speed (gentle mode / per-host cap) is deliberately NOT stored: the two
+# windows have different defaults (Site Crawl is gentle), so sharing it would let
+# an untouched Single Page "OK" silently remove Site Crawl's politeness.
+_OPT_IN_BOOL_FIELDS: tuple[str, ...] = (
+    "ssr_parity_check",
+    "bot_render",
+    "render_js",
+    "accessibility_audit",
+    "tech_stack_detection",
+    "topic_embeddings",
+    "use_stealth",
+)
+# Flag -> the optional extra it needs. A stored tick for a flag whose extra is
+# no longer installed loads as False (the Settings checkbox would be disabled).
+_FLAG_EXTRA: dict[str, str] = {
+    "ssr_parity_check": "playwright",
+    "bot_render": "playwright",
+    "render_js": "playwright",
+    "accessibility_audit": "playwright",
+    "topic_embeddings": "embeddings",
+    "use_stealth": "stealth",
+}
+_CUSTOM_RULES_KEY = "custom_extraction"
+
+
+def opt_in_to_dict(opts: CrawlOptions) -> dict[str, Any]:
+    """JSON-native snapshot of the opt-in ticks (never TLS/SSRF overrides or
+    headers/cookies — see the module note above)."""
+    data: dict[str, Any] = {name: bool(getattr(opts, name)) for name in _OPT_IN_BOOL_FIELDS}
+    data[_CUSTOM_RULES_KEY] = opts.custom_extraction.to_dict()
+    return data
+
+
+def _stored_flags(data: Mapping[str, Any], base: CrawlOptions, installed: Collection[str]) -> dict[str, Any]:
+    changes: dict[str, Any] = {}
+    for name in _OPT_IN_BOOL_FIELDS:
+        stored = data.get(name)
+        value = stored if isinstance(stored, bool) else getattr(base, name)
+        needed = _FLAG_EXTRA.get(name)
+        changes[name] = bool(value) and (needed is None or needed in installed)
+    return changes
+
+
+def opt_in_from_dict(data: object, base: CrawlOptions, *, installed: Collection[str]) -> CrawlOptions:
+    """Apply stored opt-in ticks onto ``base``. Anything missing, mistyped or
+    unusable (corrupt store, extra not installed) keeps ``base``'s value, so an
+    empty store reproduces today's defaults exactly. ``installed`` names the
+    optional extras importable right now: ``playwright`` / ``embeddings`` /
+    ``stealth``. Credentials, TLS/SSRF overrides and the profile are never read
+    from the store."""
+    if not isinstance(data, Mapping):
+        return base
+    changes = _stored_flags(data, base, installed)
+    rules = data.get(_CUSTOM_RULES_KEY)
+    if isinstance(rules, (Mapping, list)):
+        changes[_CUSTOM_RULES_KEY] = CustomExtractionConfig.from_raw(rules)
+    return replace(base, **changes)
+
+
+# --- "What will actually run" summary -----------------------------------------
+
+# (options attribute, label template, needs a rendering profile). ``{n}`` is the
+# count for list-like attributes; booleans contribute 1 when ticked.
+_SUMMARY_ROWS: tuple[tuple[str, str, bool], ...] = (
+    ("ssr_parity_check", "SSR parity", True),
+    ("bot_render", "Per-bot SSR", True),
+    ("render_js", "JS links", True),
+    ("accessibility_audit", "Accessibility", True),
+    ("tech_stack_detection", "Tech stack", False),
+    ("custom_extraction", "Custom rules ({n})", False),
+    ("topic_embeddings", "Embeddings", False),
+    ("use_stealth", "Stealth", False),
+    ("allow_insecure_tls", "Insecure TLS", False),
+    ("allow_private_network", "Private network", False),
+    ("extra_headers", "{n} custom header(s)", False),
+)
+_SKIPPED_SUFFIX = " (skipped: needs Deep)"
+
+
+def _active_count(value: object) -> int:
+    if isinstance(value, CustomExtractionConfig):
+        return len(value.rules)
+    if isinstance(value, bool):
+        return int(value)
+    return len(value) if isinstance(value, Mapping) else 0
+
+
+def active_checks_summary(opts: CrawlOptions) -> list[str]:
+    """Human labels for every opt-in check / posture override that is ticked.
+    Render-dependent checks are suffixed when the profile will not render them,
+    so the label never claims a check that the profile silently drops."""
+    renders = ProfilePolicy.for_profile(opts.profile).render
+    labels: list[str] = []
+    for attr, template, needs_render in _SUMMARY_ROWS:
+        count = _active_count(getattr(opts, attr))
+        if not count:
+            continue
+        suffix = _SKIPPED_SUFFIX if needs_render and not renders else ""
+        labels.append(template.format(n=count) + suffix)
+    return labels
+
+
+def active_checks_tooltip(opts: CrawlOptions) -> str:
+    """Tooltip form of the summary: one active check per line."""
+    checks = active_checks_summary(opts)
+    if not checks:
+        return "No optional checks ticked. Open Crawl settings... to enable some."
+    bullets = "\n".join(f"- {label}" for label in checks)
+    return f"Active checks:\n{bullets}"
+
+
+def crawl_mode_label(opts: CrawlOptions) -> str:
+    """Pacing description; ``max N/host`` only matters while gentle mode is on."""
+    if opts.gentle_mode:
+        return f"Gentle crawl, max {opts.max_concurrent_per_host}/host"
+    return "Custom crawl" if opts.extra_headers else "Standard crawl"
+
+
+def crawl_settings_summary(opts: CrawlOptions, *, show_profile: bool = True) -> str:
+    """One line: pacing, (optional) profile, then the active checks."""
+    parts = [crawl_mode_label(opts)]
+    if show_profile:
+        parts.append(f"{opts.profile.value.capitalize()} profile")
+    checks = active_checks_summary(opts)
+    parts.append(", ".join(checks) if checks else "no optional checks")
+    return " · ".join(parts)
+
+
 __all__ = [
     "AuditProfile",
     "CrawlOptions",
     "DEFAULT_USER_AGENT",
     "ProfilePolicy",
+    "active_checks_summary",
+    "active_checks_tooltip",
     "auto_suggest_profile",
+    "crawl_mode_label",
+    "crawl_settings_summary",
+    "opt_in_from_dict",
+    "opt_in_to_dict",
     "parse_header_lines",
 ]

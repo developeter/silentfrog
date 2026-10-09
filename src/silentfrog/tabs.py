@@ -50,6 +50,7 @@ from .perf_metrics import (
     performance_summary_tooltip,
     performance_third_party_hosts_tooltip,
 )
+from .tech_extraction_view import extraction_rows, tech_rows
 from .theme import current_theme
 
 _AI_CRAWL_HEADERS = [
@@ -463,6 +464,44 @@ class AccessibilityTab(TableTab):
         payload = data if isinstance(data, Mapping) else {}
         self.set_model(AccessibilityModel(_ACCESSIBILITY_HEADERS, _accessibility_rows(payload)))
         _set_header_modes(_header(self.view), (3, QtWidgets.QHeaderView.Stretch))
+
+
+_TECH_NOT_ENABLED = "Not enabled — tick it in Crawl settings"
+_TECH_NONE_FOUND = "None detected"
+
+
+def _tech_rows(data: Mapping[str, Any]) -> list[list[str]]:
+    rows = tech_rows(data.get("tech_stack"))
+    if rows is None:
+        return [["-", _TECH_NOT_ENABLED]]
+    return rows or [["-", _TECH_NONE_FOUND]]
+
+
+def _extraction_rows(data: Mapping[str, Any]) -> list[list[str]]:
+    return extraction_rows(data.get("custom_extraction")) or [["-", _TECH_NOT_ENABLED]]
+
+
+class TechExtractionTab(QtWidgets.QWidget):
+    """Tech-stack detection (V15) and custom extraction rules (V6): both ran
+    in the engine but had no on-screen result before this tab."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.tech_table = TableTab()
+        self.extraction_table = TableTab()
+        for caption, table in (("Tech stack", self.tech_table), ("Custom extraction", self.extraction_table)):
+            layout.addWidget(QtWidgets.QLabel(caption))
+            layout.addWidget(table, 1)
+        self.update({})
+
+    def update(self, data: object) -> None:  # type: ignore[override]
+        payload = data if isinstance(data, Mapping) else {}
+        self.tech_table.set_model(GenericModel(["Category", "Technologies"], _tech_rows(payload)))
+        self.extraction_table.set_model(GenericModel(["Rule", "Value"], _extraction_rows(payload)))
+        for table in (self.tech_table, self.extraction_table):
+            _set_header_modes(_header(table.view), (1, QtWidgets.QHeaderView.Stretch))
 
 
 class BotMatrixTab(TableTab):
@@ -1678,6 +1717,7 @@ class SerpTab(QtWidgets.QWidget):
 __all__ = [
     "TableTab",
     "AccessibilityTab",
+    "TechExtractionTab",
     "MetaTab",
     "HeadersTab",
     "ImagesTab",

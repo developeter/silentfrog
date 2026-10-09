@@ -590,3 +590,22 @@ def test_apply_size_cap_truncates_and_marks() -> None:
     assert "truncated" in capped
     untouched = "short document"
     assert _apply_size_cap(untouched) == untouched
+
+
+def test_page_json_carries_tech_accessibility_lighthouse_rich_results_and_integrations() -> None:
+    # PR-F1: these groups were rendered in the Markdown only; the JSON dropped them.
+    payload = _minimal_payload("https://e.com/p", 80, _CHECKS)
+    object.__setattr__(payload, "tech_stack", {"by_category": {"CMS": ["WordPress"]}})
+    object.__setattr__(payload, "accessibility", {"measured": True, "violations": [], "counts": {}})
+    object.__setattr__(payload, "lighthouse", {"performance": 90})
+    object.__setattr__(payload, "rich_results", {"eligible": ["Product"]})
+    object.__setattr__(payload, "semrush", {"measured": True, "rank": 5})
+
+    data = export_page_for_llm(payload, "https://e.com/p").json_data
+
+    assert data["tech_stack"] == {"by_category": {"CMS": ["WordPress"]}}
+    assert data["accessibility"]["measured"] is True
+    assert data["lighthouse"] == {"performance": 90}
+    assert data["rich_results"] == {"eligible": ["Product"]}
+    assert data["integrations"]["semrush"] == {"measured": True, "rank": 5}
+    assert set(data["integrations"]) == {"gsc", "ga4", "semrush", "ai_sov", "brand_mentions", "topic_embeddings"}

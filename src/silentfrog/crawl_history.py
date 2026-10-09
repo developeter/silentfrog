@@ -104,6 +104,9 @@ class CrawlHistoryRun:
     db_path: str = ""
     store_run_id: str = ""
     base_url: str = ""
+    # Add-only: one-line summary of the crawl settings (profile + ticked checks)
+    # the run used. Pre-existing history files have none and load as "".
+    settings_summary: str = ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> CrawlHistoryRun:
@@ -120,6 +123,7 @@ class CrawlHistoryRun:
             db_path=str(value.get("db_path", "")),
             store_run_id=str(value.get("store_run_id", "")),
             base_url=str(value.get("base_url", "")),
+            settings_summary=str(value.get("settings_summary", "")),
         )
 
     @property
@@ -155,6 +159,7 @@ class CrawlHistoryRun:
             "db_path": self.db_path,
             "store_run_id": self.store_run_id,
             "base_url": self.base_url,
+            "settings_summary": self.settings_summary,
         }
 
 
@@ -216,6 +221,7 @@ def build_history_run(
     *,
     created_at: str | None = None,
     scope_key: str | None = None,
+    settings_summary: str = "",
 ) -> CrawlHistoryRun:
     timestamp = created_at or _utc_timestamp()
     scope = scope_key or _scope_from_report(report)
@@ -233,6 +239,7 @@ def build_history_run(
         db_path=str(run_ref.db_path) if run_ref is not None else "",
         store_run_id=run_ref.run_id if run_ref is not None else "",
         base_url=report.base_url,
+        settings_summary=settings_summary,
     )
 
 
@@ -257,8 +264,10 @@ def diff_runs(previous: CrawlHistoryRun, current: CrawlHistoryRun) -> CrawlHisto
 def save_report_and_diff(
     store: CrawlHistoryStore,
     report: SiteCrawlReport,
+    *,
+    settings_summary: str = "",
 ) -> tuple[CrawlHistoryRun, CrawlHistoryDiff | None]:
-    current = build_history_run(report)
+    current = build_history_run(report, settings_summary=settings_summary)
     previous = store.latest_run(current.scope_key)
     store.save_run(current)
     return current, diff_runs(previous, current) if previous else None

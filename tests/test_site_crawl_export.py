@@ -244,6 +244,7 @@ def test_export_site_crawl_report_creates_summary_and_issue_sheets(tmp_path: Pat
             "Performance detail",
             "SERP detail",
             "Social detail",
+            "Tech & extraction detail",
         ]
         assert workbook["Read me - Legend"]["B4"].value == "Only blockers or high-confidence damage."
         assert workbook["Executive summary"]["A2"].value == "Report type"
@@ -328,3 +329,42 @@ def test_export_site_crawl_report_streams_payload_sheets_from_run_repository(tmp
 
 def _column_values(sheet, column: str) -> list[object]:
     return [cell.value for cell in sheet[column] if cell.value]
+
+
+def test_site_export_has_tech_and_extraction_detail_from_the_run_stream(tmp_path: Path) -> None:
+    # PR-F1: values must come through the run-repository stream (the report
+    # itself carries no payloads), one row per page and rule/category.
+    url = "https://example.com/product"
+    payload = CrawlPayload.from_raw(
+        {
+            **_payload(url).to_mapping(),
+            "tech_stack": {"by_category": {"CMS": ["WordPress"]}},
+            "custom_extraction": {"Price": "42.00"},
+        }
+    )
+    db = tmp_path / "crawl.db"
+    store = CrawlStore(db)
+    run_id = store.start_run("example.com", "https://example.com/", "list")
+    store.save_audit(run_id, StoredAudit(url=url, http_status="200", payload=payload.to_mapping()))
+    store.finish_run(run_id)
+    store.close()
+    report = SiteCrawlReport.from_run(
+        CrawlRunRef(db, run_id),
+        discovered_count=1,
+        crawled_count=1,
+        skipped_count=0,
+        failed_count=0,
+        base_url="https://example.com/",
+    )
+    out = tmp_path / "site.xlsx"
+
+    export_site_crawl_report(report, out)
+
+    workbook = load_workbook(out)
+    try:
+        rows = [[cell.value for cell in row] for row in workbook["Tech & extraction detail"].iter_rows()]
+    finally:
+        workbook.close()
+    assert rows[0] == ["Page URL", "Section", "Name", "Value"]
+    assert [url, "Tech stack", "CMS", "WordPress"] in rows
+    assert [url, "Custom extraction", "Price", "42.00"] in rows

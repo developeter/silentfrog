@@ -380,7 +380,7 @@ Integrations (Google, Semrush, AI providers) are off by default and never run on
 
 ## Settings & optional features
 
-Everything here is **off by default**. Open **Settings** from the gear icon on any window to enable it.
+Everything here is **off by default**. Open **Crawl settings…** inside the Single Page or Site Crawl window to enable it. The checks you tick are remembered across restarts and shared by both windows; insecure TLS, private-network access, custom headers and cookies are never saved. (The gear icon on Home only switches the light/dark theme.)
 
 ### Advanced tools
 
@@ -487,7 +487,7 @@ still present — now nested under the bucket that matches its purpose:
 - **Indexability** — `Indexability`, `Robots`, `Canonical`, `Redirect`, `Hreflang`, `Link`
 - **Content** — `Meta tag`, `Header H1-H6`, `Images`, `Content quality`, `Keywords`
 - **Speed** — `Performance`
-- **Trust** — `Structured data`, `Social`, `SERP`, `Accessibility`
+- **Trust** — `Structured data`, `Social`, `SERP`, `Accessibility`, `Tech & extraction`
 - **AI/GEO** — `Bot Matrix`, `AI Visibility`
 
 The Site Crawl per-page detail view (double-click a result row) uses the same
