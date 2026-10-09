@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import functools
+import types
 import warnings
 from pathlib import Path
 
@@ -311,9 +312,16 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
     crawler._HOST_DELAYS.clear()
     crawler.crawl_http._HOST_NEXT_ALLOWED.clear()
     sleep_calls: list[float] = []
+    # Drive the pacer's clock explicitly: real fetch time must not decide
+    # whether a follow-up probe lands inside the 2 s window (that made the
+    # test flaky under load). Time stands still except when the pacer sleeps.
+    clock = [1000.0]
 
     async def fake_sleep(duration: float):
         sleep_calls.append(duration)
+        clock[0] += duration
+
+    monkeypatch.setattr(crawler.crawl_http, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
 
     async def fake_parse(url: str, timeout: int = 5, options=None):
         # Keyed on the product token "SilentFrog", not the full UA string — the
@@ -340,9 +348,9 @@ async def test_crawl_delay_respected(monkeypatch, aiohttp_server):
     # much real fetch/probe time already elapsed -- unlike a real elapsed-time
     # assertion below, this is deterministic and proves the delay engaged.
     assert crawler._host_key(url) in crawler.crawl_http._HOST_NEXT_ALLOWED
-    # A page audit issues follow-up probes to the same host well inside the
-    # 2s window, so the pacer must actually wait at least once -- an empty
-    # sleep list would mean the delay never engaged for any request.
+    # The clock is frozen between sleeps, so every follow-up probe lands inside
+    # the 2s window and the pacer must wait at least once -- an empty sleep
+    # list would mean the delay never engaged for any request.
     assert sleep_calls, "expected the crawl-delay to pace a follow-up request to the host"
     # Paced against elapsed time, not a flat re-sleep per sub-request: any
     # recorded wait is credited for time already spent on the prior
