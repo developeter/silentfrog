@@ -1,6 +1,6 @@
 # Silentfrog — Handoff
 
-Last updated: 2026-09-10
+Last updated: 2026-10-09
 
 **Start here.** This is the entry point for a new session: what shipped, where
 we are, what's next. Read this first, then the linked sources for depth — the
@@ -75,6 +75,57 @@ verification form is submitted.
 **Before tagging:** reinstall with the app closed (About must show 2.0.0,
 keyring now present); one real crawl against a real site (the audit used
 only local fixtures); a real BYO Google round-trip if BYO stays.
+
+## Addendum 2026-10-09 — pre-tag fixes landed (11 commits), tag still pending
+
+All local on `feature/v2.0` on top of `6a3a005`; **nothing is pushed and
+`v2.0.0` is not tagged**. Every commit passed the full doctor 7/7; the
+HIGH-risk ones were adversarially reviewed (Opus) before commit.
+
+- `643fdd4` **installer bundles the desktop extras** (`geo-render` + Chromium,
+  `google`, `charts`; `--extras none|…` to change; `stealth`/`embeddings` stay
+  opt-in). Root cause of "most GEO checkboxes are greyed out": the source
+  installer never installed any extra. Site Crawl settings now switch to Deep
+  when a rendering check is ticked and warn when the profile is lowered.
+- `42ee2b7` **built-in Google OAuth app** (`integrations/google/app_client.py`,
+  env override `SILENTFROG_GOOGLE_CLIENT_ID/SECRET`), BYO `client_secret.json`
+  still wins when given; "unverified app" guidance in the dialog, README,
+  SECURITY.md, RELEASING.md. **The placeholders are still EMPTY** — paste the
+  Desktop-app client id/secret before tagging (RELEASING.md §1.0).
+- `add2881` **"Export for AI analysis" is a full evidence dossier** (page +
+  crawl), not the old warning-only table.
+- `21236fb` **AI review works without Ollama**: provider picker (Gemini free
+  tier recommended, OpenAI, Anthropic, Ollama), keys in keyring
+  `silentfrog-ai-engines`, real error reasons, `_JobHolder`+QTimer result
+  dialog (`ai_review_dialog.py`), CLI `--provider/--model`.
+- `4112ad5`/`84be8a4` installer window stays open with a summary; `.bat`
+  launchers written CRLF (`*.bat eol=crlf`); uninstaller no longer deletes its
+  running `.bat`; two tests made hermetic w.r.t. installed extras.
+- **Settings reachability audit** (`docs/settings_reachability_audit.md`,
+  37 confirmed defects — user: "ticked everything, see nothing"):
+  `d6163f4` headers/cookies scoped to the audited origin (credential leak to
+  third-party probe targets — D1); `283b798` opt-in checks persisted via
+  QSettings `crawl/opt_in` and shared by both windows (TLS/SSRF opt-outs,
+  headers, cookies, crawl speed are never stored), active-checks label on
+  both windows + results page, `CrawlHistoryRun.settings_summary` (add-only),
+  Trust > Tech & extraction tab + Excel sheets; `8a7a1b9`
+  `AiVisibilityCheck.measured` (add-only, score byte-identical), grey badge
+  for unmeasured groups, axe with `bypass_csp`, SSRF/TLS failure messages
+  name the Settings box; `d15e2de` "Use AI share of voice" checkbox
+  (`integrations/ai_engines/config.py`), Semrush/Google say why they have no
+  data, concurrent paid calls deduped, robots tester + image analysis honour
+  Crawl settings, per-bot render flags WAF blocks, no favicon lookup on
+  private-network audits. Deferred by plan: collecting lab Core Web Vitals.
+- `82999d2` `test_crawl_delay_respected` deflaked (frozen clock); F1 tests
+  revert-proven.
+
+**Operational notes:** the dev `.venv` doubles as Poetry's environment — update
+it with `install_silentfrog.bat` (never the `reinstall`/`--recreate-venv`
+scripts, they drop the dev tools). The app runs the site-packages copy: after
+source edits, `pip install --no-deps --upgrade .` with the app closed.
+**Before tagging:** paste the Google client id/secret; user's manual checks
+(About 2.0.0, Settings, real Site Crawl, Gemini AI review, Google round-trip);
+then tag per `docs/RELEASING.md`.
 
 ## How the roadmaps fit (avoid confusion)
 

@@ -16,7 +16,7 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
 
 **Reply in English.** (AGENTS.md rule; the user has corrected this repeatedly.)
 
-## Status (2026-09-10)
+## Status (2026-10-09)
 
 - **v2.0 roadmap V1..V20: shipped, with two corrections.** Full milestone
   history in `docs/v2_beat_screaming_frog_roadmap.md`; shipped list in
@@ -43,6 +43,16 @@ brand-mention tracking. Three audit surfaces: **single-page**, **Site Crawl**
   fallback; `docs/RELEASING.md` documents the signed-release procedure for
   when a real key exists. **The `v2.0.0` tag and its draft GitHub Release
   are the orchestrator/user's own step, not part of any PR.**
+- **2026-10 pre-tag pass (11 local commits, see `HANDOFF.md` addendum
+  2026-10-09):** installer bundles `geo-render`/`google`/`charts`; built-in
+  Google OAuth app (placeholders EMPTY until the maintainer pastes them);
+  AI-export dossier; AI review with Gemini free tier; settings reachability
+  audit fixed (`docs/settings_reachability_audit.md`): opt-in checks persist
+  via QSettings `crawl/opt_in`, active-checks labels, Tech & extraction tab,
+  `AiVisibilityCheck.measured`, headers/cookies scoped to the audited origin.
+- **Dev venv = app venv.** `.venv` is both Poetry's environment and the
+  installed app: refresh with `install_silentfrog.bat` (NOT `reinstall`/
+  `--recreate-venv`, which drop pytest/ruff/mypy).
 - **In-app auto-update does not work yet** — no key is pinned, so
   `Help → Check for Updates…` refuses closed by design until a maintainer
   generates a minisign keypair and signs a published release (see
