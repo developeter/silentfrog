@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from qtpy import QtWidgets
 
+import silentfrog.update_gui as update_gui
 from silentfrog.gui import HomeWindow  # type: ignore[reportMissingImports]
 from silentfrog.update_gui import (  # type: ignore[reportMissingImports]
     AboutDialog,
@@ -117,40 +120,129 @@ def test_update_dialog_retry_button_restarts_the_check(qtbot, monkeypatch) -> No
     assert calls["count"] == 1
 
 
-def test_about_dialog_shows_version_and_repo_link(qtbot, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "silentfrog.update_gui.read_local_revision",
-        lambda _root: _make_local(sha="cafebabe" + "0" * 32),
-    )
+@pytest.fixture(autouse=True)
+def _fresh_revision_cache(monkeypatch) -> None:
+    # The resolved revision is cached process-wide; keep tests independent.
+    monkeypatch.setattr(update_gui, "_revision_job", None)
+
+
+def _about_text(dlg: AboutDialog) -> str:
+    return " ".join(label.text() for label in dlg.findChildren(QtWidgets.QLabel))
+
+
+def _about(qtbot, monkeypatch, local: LocalRevision) -> AboutDialog:
+    """Build an AboutDialog whose revision lookup runs inline (no thread)."""
+    monkeypatch.setattr(update_gui, "read_local_revision", lambda _root: local)
+    monkeypatch.setattr(update_gui, "_start_daemon", lambda target, *args: target(*args))
     dlg = AboutDialog()
     qtbot.addWidget(dlg)
-    text = " ".join(label.text() for label in dlg.findChildren(__import__("qtpy").QtWidgets.QLabel))
+    return dlg
+
+
+def _capture_daemons(monkeypatch) -> list:
+    started: list = []
+    monkeypatch.setattr(update_gui, "_start_daemon", lambda target, *args: started.append((target, args)))
+    return started
+
+
+def test_about_dialog_shows_version_and_repo_link(qtbot, monkeypatch) -> None:
+    dlg = _about(qtbot, monkeypatch, _make_local(sha="cafebabe" + "0" * 32))
+    text = _about_text(dlg)
     assert "Silentfrog" in text
     assert "cafeb" in text
     assert "developeter/silentfrog" in text
 
 
 def test_about_dialog_shows_branch_when_present(qtbot, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "silentfrog.update_gui.read_local_revision",
-        lambda _root: _make_local(mode=InstallMode.DEVELOPER, branch="feature/v2.0"),
-    )
-    dlg = AboutDialog()
-    qtbot.addWidget(dlg)
-    text = " ".join(label.text() for label in dlg.findChildren(__import__("qtpy").QtWidgets.QLabel))
+    dlg = _about(qtbot, monkeypatch, _make_local(mode=InstallMode.DEVELOPER, branch="feature/v2.0"))
+    text = _about_text(dlg)
     assert "Branch" in text
     assert "feature/v2.0" in text
 
 
 def test_about_dialog_omits_branch_when_empty(qtbot, monkeypatch) -> None:
+    dlg = _about(qtbot, monkeypatch, _make_local(branch=""))
+    assert "Branch" not in _about_text(dlg)
+
+
+def test_about_dialog_never_resolves_revision_on_the_calling_thread(qtbot, monkeypatch) -> None:
+    calls: list[threading.Thread] = []
     monkeypatch.setattr(
-        "silentfrog.update_gui.read_local_revision",
-        lambda _root: _make_local(branch=""),
+        update_gui, "read_local_revision", lambda _root: calls.append(threading.current_thread()) or _make_local()
     )
+    started = _capture_daemons(monkeypatch)
     dlg = AboutDialog()
     qtbot.addWidget(dlg)
-    text = " ".join(label.text() for label in dlg.findChildren(__import__("qtpy").QtWidgets.QLabel))
-    assert "Branch" not in text
+    assert calls == []  # constructing the dialog does not touch git
+    assert len(started) == 1
+    assert "Revision: …" in _about_text(dlg)
+    target, args = started[0]
+    worker = threading.Thread(target=target, args=args)
+    worker.start()
+    worker.join()
+    assert calls == [worker]  # the lookup ran on the daemon, not the UI thread
+
+
+def test_about_dialog_fills_labels_after_holder_completes_and_one_tick(qtbot, monkeypatch) -> None:
+    local = _make_local(sha="1234567" + "0" * 33, mode=InstallMode.DEVELOPER, branch="feature/v2.0")
+    monkeypatch.setattr(update_gui, "read_local_revision", lambda _root: local)
+    started = _capture_daemons(monkeypatch)
+    dlg = AboutDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._poll_timer.isActive()
+    dlg._on_poll_timer()  # worker not finished yet: nothing changes
+    assert "Revision: …" in _about_text(dlg)
+    target, args = started[0]
+    target(*args)
+    dlg._on_poll_timer()
+    text = _about_text(dlg)
+    assert "1234567" in text
+    assert "feature/v2.0" in text
+    assert "Developer" in text
+    assert not dlg._poll_timer.isActive()
+
+
+def test_about_dialog_second_open_uses_cache_and_starts_no_daemon(qtbot, monkeypatch) -> None:
+    first = _about(qtbot, monkeypatch, _make_local(sha="abcdef0" + "0" * 33, branch="dev"))
+    assert "abcdef0" in _about_text(first)
+    started = _capture_daemons(monkeypatch)
+    second = AboutDialog()
+    qtbot.addWidget(second)
+    assert started == []
+    assert "abcdef0" in _about_text(second)  # shown immediately, no timer tick
+    assert not second._poll_timer.isActive()
+
+
+@pytest.mark.parametrize("error", [OSError("unreadable"), RuntimeError("unexpected")])
+def test_about_dialog_failed_lookup_shows_unknown_and_is_retried(qtbot, monkeypatch, error) -> None:
+    def boom(_root):
+        raise error
+
+    monkeypatch.setattr(update_gui, "read_local_revision", boom)
+    monkeypatch.setattr(update_gui, "_start_daemon", lambda target, *args: target(*args))
+    dlg = AboutDialog()
+    qtbot.addWidget(dlg)
+    assert "unknown" in _about_text(dlg)
+    assert not dlg._poll_timer.isActive()
+    started = _capture_daemons(monkeypatch)
+    qtbot.addWidget(AboutDialog())
+    assert len(started) == 1  # a failure is not cached
+
+
+def test_about_dialog_closed_before_completion_ignores_late_result(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(update_gui, "read_local_revision", lambda _root: _make_local(sha="feedbee" + "0" * 33))
+    started = _capture_daemons(monkeypatch)
+    dlg = AboutDialog()
+    qtbot.addWidget(dlg)
+    dlg.done(0)
+    assert not dlg._poll_timer.isActive()
+    assert dlg._job is None
+    target, args = started[0]
+    target(*args)  # the orphaned daemon finishes after the dialog closed
+    qtbot.wait(250)
+    dlg._on_poll_timer()
+    assert "Revision: …" in _about_text(dlg)
+    assert "feedbee" not in _about_text(dlg)
 
 
 def test_home_window_help_menu_lists_check_and_about(qtbot) -> None:

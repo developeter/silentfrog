@@ -2,6 +2,20 @@
 
 ## 2.0.0
 
+### Help > About no longer freezes the app
+
+Opening About ran two `git` commands on the UI thread (about 0.6 s here, seconds
+where antivirus scans each spawn) and, being modal, froze every window while it
+did.
+
+#### Fixed
+- About opens instantly with "..." placeholders; the revision, branch and install
+  mode fill in once a background lookup finishes. The result is cached for the
+  rest of the session, so reopening About costs nothing.
+- The `git` lookups no longer flash a console window when Silentfrog is launched
+  from the Desktop shortcut (windowless `pythonw`), and give up after 5 seconds
+  instead of waiting on a stuck `git`.
+
 ### Crawl settings are remembered, and their results are visible
 
 Ticked checks used to reset every time a Single Page or Site Crawl window was

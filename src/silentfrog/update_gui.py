@@ -2,8 +2,9 @@
 
 Two dialogs:
 
-* :class:`AboutDialog` — static info: version, current revision,
-  install mode, link to the GitHub repo.
+* :class:`AboutDialog` — version, current revision, install mode, link to
+  the GitHub repo. The revision is resolved off the UI thread (see the class
+  docstring).
 * :class:`UpdateDialog` — kicks off a background check on open, then
   renders one of five states (up-to-date, update-available, dev-mode,
   offline, unknown) with the appropriate button set.
@@ -18,10 +19,11 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from qtpy import QtCore
 from qtpy.QtCore import QProcess
@@ -87,24 +89,116 @@ class _UpdateCheckWorker(QtCore.QThread):
         self.finished_check.emit(UpdateCheckResult(status=status, local=local, remote=remote))
 
 
+class _JobHolder:
+    """Plain (non-Qt) box the revision worker writes into — same pattern as
+    ``google_connect_dialog._JobHolder`` (see that module's docstring)."""
+
+    def __init__(self) -> None:
+        self.done = False
+        self.result: LocalRevision | None = None
+
+
+def _start_daemon(target: Callable[..., None], *args: Any) -> None:
+    """Seam over ``threading.Thread`` so tests can stub the threading
+    (mirrors ``google_connect_dialog._start_daemon``)."""
+    threading.Thread(target=target, args=args, daemon=True).start()
+
+
+def _resolve_local_revision() -> LocalRevision:
+    """Seam: the blocking part (two ``git`` spawns in developer mode)."""
+    return read_local_revision(find_repo_root())
+
+
+def _revision_worker(holder: _JobHolder) -> None:
+    # Any failure must still complete the holder, or the dialog would poll
+    # "Revision: …" forever; result None -> "unknown", and it is not cached.
+    try:
+        holder.result = _resolve_local_revision()
+    except Exception:
+        holder.result = None
+    finally:
+        holder.done = True
+
+
+# Process-wide: the revision cannot change while the app runs, so every About
+# click after the first (even one opened while the first lookup is still in
+# flight, or after its dialog was closed) reuses this job instead of spawning
+# git again. Only touched from the UI thread; the worker writes the holder only.
+_revision_job: _JobHolder | None = None
+
+
+def _shared_revision_job() -> _JobHolder:
+    global _revision_job
+    job = _revision_job
+    # A failed lookup (result None) is not cached; the next About retries it.
+    if job is None or (job.done and job.result is None):
+        job = _revision_job = _JobHolder()
+        _start_daemon(_revision_worker, job)
+    return job
+
+
 class AboutDialog(QDialog):
+    """Shows version immediately; revision/branch/mode fill in once resolved.
+
+    Resolving the revision spawns ``git`` (hundreds of ms, seconds under some
+    antivirus), and ``exec()`` is application-modal, so doing it in
+    ``__init__`` froze every window. A daemon thread writes only into a plain
+    ``_JobHolder``; this dialog polls it with its own ``QTimer`` (no
+    ``QMetaObject.invokeMethod`` on a widget, which would be a use-after-free
+    if the dialog closes mid-lookup — see ``google_connect_dialog``).
+    """
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("About Silentfrog")
         layout = QVBoxLayout(self)
-        local = read_local_revision(find_repo_root())
+        self._branch_label = QLabel("Branch: …")
+        self._revision_label = QLabel("Revision: …")
+        self._mode_label = QLabel("Install mode: …")
         layout.addWidget(QLabel(f"<b>Silentfrog</b> {__version__}"))
-        if local.branch:
-            layout.addWidget(QLabel(f"Branch: <code>{local.branch}</code>"))
-        layout.addWidget(QLabel(f"Revision: <code>{_short_sha(local.sha)}</code>"))
-        layout.addWidget(QLabel(f"Install mode: {_INSTALL_MODE_LABELS[local.mode]}"))
+        for label in (self._branch_label, self._revision_label, self._mode_label):
+            layout.addWidget(label)
         link = QLabel(f'<a href="{_REPO_URL}">{_REPO_URL}</a>')
         link.setOpenExternalLinks(True)
         layout.addWidget(link)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.setInterval(100)
+        self._poll_timer.timeout.connect(self._on_poll_timer)
+        self._job: _JobHolder | None = _shared_revision_job()
+        self._on_poll_timer()
+        if self._job is not None:
+            self._poll_timer.start()
         self.adjustSize()
+
+    def _on_poll_timer(self) -> None:
+        job = self._job
+        if job is None or not job.done:
+            return
+        self._poll_timer.stop()
+        self._job = None
+        self._apply_revision(job.result)
+        self.adjustSize()
+
+    def _apply_revision(self, local: LocalRevision | None) -> None:
+        sha = local.sha if local else ""
+        mode = local.mode if local else InstallMode.UNKNOWN
+        branch = local.branch if local else ""
+        self._revision_label.setText(f"Revision: <code>{_short_sha(sha)}</code>")
+        self._mode_label.setText(f"Install mode: {_INSTALL_MODE_LABELS[mode]}")
+        self._branch_label.setText(f"Branch: <code>{branch}</code>")
+        self._branch_label.setVisible(bool(branch))
+        if not branch:
+            self._branch_label.setText("")
+
+    def done(self, result: int) -> None:
+        """Stop polling and drop the holder before teardown: a late worker
+        write then lands in a holder nothing reads, never in a Qt widget."""
+        self._poll_timer.stop()
+        self._job = None
+        super().done(result)
 
 
 class UpdateDialog(QDialog):

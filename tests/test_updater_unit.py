@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Optional
 
 import pytest
 
+from silentfrog import updater  # type: ignore[reportMissingImports]
 from silentfrog.updater import (  # type: ignore[reportMissingImports]
     REVISION_FILE_NAME,
     InstallMode,
@@ -38,7 +40,7 @@ def test_read_local_revision_dev_mode_reads_git_head_and_branch(monkeypatch, tmp
     (tmp_path / ".git").mkdir()
     expected_sha = "abc1234abc1234abc1234abc1234abc1234abc12"
 
-    def fake_run(cmd, cwd, capture_output, text, check):
+    def fake_run(cmd, cwd, capture_output, text, check, **_kw):
         assert cwd == tmp_path
         if cmd == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(cmd, 0, stdout=expected_sha + "\n", stderr="")
@@ -56,7 +58,7 @@ def test_read_local_revision_dev_mode_reads_git_head_and_branch(monkeypatch, tmp
 def test_read_local_revision_dev_mode_detached_head_has_no_branch(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
 
-    def fake_run(cmd, cwd, capture_output, text, check):
+    def fake_run(cmd, cwd, capture_output, text, check, **_kw):
         out = "HEAD\n" if "--abbrev-ref" in cmd else "abc1234\n"
         return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
@@ -198,3 +200,35 @@ async def test_fetch_remote_revision_swallows_network_exception() -> None:
 
     remote = await fetch_remote_revision(session=FakeSession())  # type: ignore[arg-type]
     assert remote is None
+
+
+def _capture_git_run(monkeypatch, raises: BaseException | None = None) -> dict:
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        if raises is not None:
+            raise raises
+        return subprocess.CompletedProcess(cmd, 0, stdout="abc\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return seen
+
+
+def test_git_output_passes_the_no_window_flag(monkeypatch, tmp_path: Path) -> None:
+    # pythonw has no console; spawning git without it flashes one.
+    monkeypatch.setattr(updater, "_CREATE_NO_WINDOW", 0x08000000)
+    seen = _capture_git_run(monkeypatch)
+    assert updater._git_output(tmp_path, "rev-parse", "HEAD") == "abc"
+    assert seen["creationflags"] == 0x08000000
+
+
+@pytest.mark.skipif(os.name != "nt", reason="CREATE_NO_WINDOW is Windows-only")
+def test_no_window_flag_is_create_no_window_on_windows() -> None:
+    assert updater._CREATE_NO_WINDOW == subprocess.CREATE_NO_WINDOW != 0
+
+
+def test_git_output_has_a_timeout_and_returns_empty_when_it_expires(monkeypatch, tmp_path: Path) -> None:
+    seen = _capture_git_run(monkeypatch, raises=subprocess.TimeoutExpired(["git"], 5))
+    assert updater._git_output(tmp_path, "rev-parse", "HEAD") == ""
+    assert 0 < seen["timeout"] <= 10

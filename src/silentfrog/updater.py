@@ -125,6 +125,16 @@ def read_local_revision(repo_root: Path) -> LocalRevision:
     return LocalRevision(sha="", mode=InstallMode.UNKNOWN, repo_root=repo_root)
 
 
+# A wedged git (credential prompt, hung network FS) must not pin a worker
+# thread forever; both callers only need a local ``rev-parse``.
+_GIT_TIMEOUT_SECONDS = 5
+
+# The app is launched from windowless ``pythonw``, where spawning a console
+# program would flash a console window. Output is captured, so nothing needs
+# one. The attribute only exists on Windows; elsewhere 0 is a no-op.
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _git_output(repo_root: Path, *args: str) -> str:
     try:
         result = subprocess.run(
@@ -133,8 +143,10 @@ def _git_output(repo_root: Path, *args: str) -> str:
             capture_output=True,
             text=True,
             check=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            creationflags=_CREATE_NO_WINDOW,
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return ""
     return result.stdout.strip()
 
