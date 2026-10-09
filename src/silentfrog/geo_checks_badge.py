@@ -58,10 +58,7 @@ _GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 _ENABLEMENT_HINTS: dict[str, str] = {
-    "Lab CWV": (
-        "Settings → tick 'Run SSR parity check (requires Playwright)'. The same code path "
-        "drives the 6 Core Web Vitals lab metrics."
-    ),
+    "Lab CWV": ("Not collected yet: Silentfrog does not measure lab Core Web Vitals in this version."),
     "CrUX field": ("Set SILENTFROG_PSI_ENABLE=1; optionally set SILENTFROG_PSI_API_KEY for higher PSI rate."),
     "SSR parity": "Settings → tick 'Run SSR parity check (requires Playwright)'.",
     "AI Citations": ("Set SILENTFROG_AI_CITATIONS_ENABLE=1; for the Brave probe also set SILENTFROG_BRAVE_API_KEY."),

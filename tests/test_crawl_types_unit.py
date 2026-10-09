@@ -302,3 +302,28 @@ def test_property_json_roundtrip_groups_and_urls(
     assert restored == payload
     assert payload.requested_url == ("" if requested is None else requested)
     assert payload.final_url == ("" if final is None else final)
+
+
+def test_ai_visibility_unmeasured_flag_survives_round_trip_without_changing_score() -> None:
+    # PR-F2 (RND-3): raw "info" folds into "good" for the score, but the
+    # not-measured fact must persist through from_raw -> to_mapping -> from_raw.
+    raw = _raw_payload()
+    raw["ai_visibility"] = {
+        "summary": {"verdict": "Strong", "score": 96, "good_count": 2, "warning_count": 1, "critical_count": 0},
+        "checks": [
+            {"area": "Access", "check": "SSR", "status": "info", "key": "access_ssr_parity"},
+            {"area": "Access", "check": "Robots", "status": "good", "key": "access_robots"},
+            {"area": "Access", "check": "Flagged", "status": "good", "measured": False, "key": "x"},
+        ],
+    }
+    payload = CrawlPayload.from_raw(raw)
+    checks = payload.ai_visibility.checks
+    assert [c.status for c in checks] == ["good", "good", "good"]
+    assert [c.measured for c in checks] == [False, True, False]
+    restored = CrawlPayload.from_raw(payload.to_mapping())
+    assert [c.measured for c in restored.ai_visibility.checks] == [False, True, False]
+    assert restored.ai_visibility.summary == payload.ai_visibility.summary
+    assert restored.ai_visibility.summary.score == 96
+    # Old blobs without the key load as measured (add-only).
+    legacy = CrawlPayload.from_raw(_raw_payload())
+    assert all(c.measured for c in legacy.ai_visibility.checks)

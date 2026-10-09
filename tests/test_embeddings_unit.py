@@ -93,6 +93,15 @@ def test_check_emitted_only_when_measured_with_heuristic_threshold() -> None:
     assert drifting.status == "warning"
 
 
+def test_unmeasured_with_reason_emits_info_row_not_silence() -> None:
+    # PR-F2 INT-10: the flag was on but scoring failed -> say why.
+    check = build_topic_embedding_check(TopicEmbeddingsPayload(reason="x"))
+    assert check is not None
+    assert check.status == "info"
+    assert "Not measured: x" in check.details
+    assert check.key == "topic_embedding_coherence"
+
+
 def test_payload_round_trips_json_native() -> None:
     payload = TopicEmbeddingsPayload(measured=True, coherence=0.5, paragraphs_scored=3, model="m")
     assert TopicEmbeddingsPayload.from_raw(payload.to_dict()) == payload

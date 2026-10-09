@@ -92,6 +92,19 @@ def _run_page_script(page: Any, inject_js: str, evaluate_js: str) -> Any:
         return None
 
 
+def _page_kwargs(user_agent: str, inject_js: str) -> dict[str, Any]:
+    """Only pass what is set, so the default path keeps the zero-kwarg
+    ``new_page()`` contract. Script injection needs ``bypass_csp``: a page CSP
+    otherwise blocks the injected axe-core tag and the audit silently yields
+    nothing."""
+    kwargs: dict[str, Any] = {}
+    if user_agent:
+        kwargs["user_agent"] = user_agent
+    if inject_js:
+        kwargs["bypass_csp"] = True
+    return kwargs
+
+
 def _render_with_browser(
     browser: Any,
     url: str,
@@ -102,9 +115,7 @@ def _render_with_browser(
     evaluate_js: str = "",
 ) -> RenderResult:
     try:
-        # v2.0 V10: only pass user_agent when set, so pre-V10 fakes (and the
-        # default-UA path) keep the zero-kwarg new_page() contract.
-        page = browser.new_page(user_agent=user_agent) if user_agent else browser.new_page()
+        page = browser.new_page(**_page_kwargs(user_agent, inject_js))
     except Exception as exc:  # pragma: no cover - real browser failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
     try:

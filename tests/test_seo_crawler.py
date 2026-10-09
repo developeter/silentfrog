@@ -483,7 +483,7 @@ class _CountingFakeBrowser:
     def __init__(self) -> None:
         self.pages_created = 0
 
-    def new_page(self, user_agent: str = "") -> _CountingFakePage:
+    def new_page(self, user_agent: str = "", **kwargs: object) -> _CountingFakePage:
         self.pages_created += 1
         return _CountingFakePage()
 

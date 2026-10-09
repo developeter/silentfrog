@@ -49,13 +49,15 @@ class _FakeBrowser:
         self.pages_created = 0
         self.closed = False
         self.user_agents: list[str] = []
+        self.page_kwargs: list[dict[str, Any]] = []
         self.pages: list[_FakePage] = []
         self._evaluate_result = evaluate_result
         self._evaluate_raises = evaluate_raises
 
-    def new_page(self, user_agent: str = "") -> _FakePage:
+    def new_page(self, user_agent: str = "", **kwargs: Any) -> _FakePage:
         self.pages_created += 1
         self.user_agents.append(user_agent)
+        self.page_kwargs.append(kwargs)
         page = _FakePage(self._html_for(), evaluate_result=self._evaluate_result, evaluate_raises=self._evaluate_raises)
         self.pages.append(page)
         return page
@@ -257,6 +259,8 @@ async def test_render_injects_and_evaluates_script_when_requested() -> None:
     page = manager.browsers[0].pages[0]
     assert page.injected_scripts == ["window.axe = {}"]
     assert page.evaluated == ["axe.run()"]
+    # A page CSP would otherwise block the injected tag (PR-F2 RND-2).
+    assert manager.browsers[0].page_kwargs == [{"bypass_csp": True}]
     pool.close()
 
 
@@ -282,6 +286,7 @@ async def test_render_without_script_args_leaves_page_untouched() -> None:
     page = manager.browsers[0].pages[0]
     assert page.injected_scripts == []
     assert page.evaluated == []
+    assert manager.browsers[0].page_kwargs == [{}]
     pool.close()
 
 

@@ -35,6 +35,8 @@ class FetchResult:
     total_ms: float = 0.0
     backend: str = ""
     error: str = ""
+    # "ssrf" / "tls" when the failure cause is known (see http_client.classify_fetch_error).
+    error_kind: str = ""
 
     def looks_blocked(self, escalate_statuses: frozenset[int] = ESCALATE_STATUSES) -> bool:
         """True when the status suggests a WAF block worth escalating past."""

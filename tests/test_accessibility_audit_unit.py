@@ -208,7 +208,8 @@ async def test_collect_accessibility_degrades_when_script_result_missing() -> No
     options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, accessibility_audit=True)
     policy = ProfilePolicy.for_profile(AuditProfile.DEEP)
     result = await collect_accessibility("https://example.com", options, policy, pool=pool)
-    assert result == {}
+    assert result["measured"] is False
+    assert "did not run" in result["reason"]
 
 
 @pytest.mark.asyncio
@@ -217,7 +218,61 @@ async def test_collect_accessibility_degrades_on_render_error() -> None:
     options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, accessibility_audit=True)
     policy = ProfilePolicy.for_profile(AuditProfile.DEEP)
     result = await collect_accessibility("https://example.com", options, policy, pool=pool)
-    assert result == {}
+    assert result["measured"] is False
+    assert "Timeout" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_collect_accessibility_reports_unreadable_axe_result() -> None:
+    pool = _FakePool(RenderResult(url="https://example.com", rendered_html="<html></html>", script_result="junk"))
+    options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, accessibility_audit=True)
+    policy = ProfilePolicy.for_profile(AuditProfile.DEEP)
+    result = await collect_accessibility("https://example.com", options, policy, pool=pool)
+    assert result == {"measured": False, "reason": "axe-core returned an unreadable result."}
+
+
+@pytest.mark.asyncio
+async def test_axe_runs_on_a_page_that_sends_a_strict_csp() -> None:
+    # PR-F2 RND-2: a real Chromium against a local /csp fixture. Without
+    # bypass_csp the injected axe tag is blocked and the scan silently yields
+    # nothing. Skipped where Playwright/Chromium is not installed.
+    import http.server
+    import threading
+
+    from silentfrog.render_pool import RenderPool, playwright_available
+
+    if not playwright_available():
+        pytest.skip("Playwright not installed")
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = b'<html><head><title>t</title></head><body><img src="x.png"></body></html>'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Security-Policy", "script-src 'self'")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    pool = RenderPool()
+    try:
+        options = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, accessibility_audit=True)
+        policy = ProfilePolicy.for_profile(AuditProfile.DEEP)
+        url = f"http://127.0.0.1:{server.server_port}/csp"
+        result = await collect_accessibility(url, options, policy, pool=pool)
+    finally:
+        pool.close()
+        server.shutdown()
+        server.server_close()
+    if result.get("reason", "").startswith("The page could not be rendered"):
+        pytest.skip(f"Chromium unavailable: {result['reason']}")
+    assert result["measured"] is True, result
+    assert len(result["violations"]) >= 1
 
 
 # --- load_axe_source ----------------------------------------------------------
@@ -227,3 +282,16 @@ def test_load_axe_source_reads_the_vendored_file() -> None:
     source = load_axe_source()
     assert source
     assert "axe" in source.lower()
+
+
+def test_accessibility_tab_shows_the_reason_when_the_scan_could_not_run(qtbot) -> None:
+    from silentfrog.tabs import AccessibilityTab
+
+    tab = AccessibilityTab()
+    qtbot.addWidget(tab)
+    tab.update({"measured": False, "reason": "The axe-core script did not run on the page (blocked or errored)."})
+    model = tab.view.model()
+    assert "did not run on the page" in model.index(0, 3).data()
+    assert "Enable it" not in model.index(0, 3).data()
+    tab.update({})  # never requested: the original hint stays
+    assert "Enable it" in tab.view.model().index(0, 3).data()

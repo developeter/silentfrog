@@ -453,6 +453,9 @@ def _accessibility_row(violation: Mapping[str, Any]) -> list[str]:
 def _accessibility_rows(payload: Mapping[str, Any]) -> list[list[str]]:
     violations = payload.get("violations")
     if not payload.get("measured") or not isinstance(violations, list):
+        reason = str(payload.get("reason") or "").strip()
+        if reason:
+            return [["Info", "-", "-", f"Accessibility audit could not run: {reason}", "-"]]
         return [list(_ACCESSIBILITY_NOT_MEASURED_ROW)]
     if not violations:
         return [list(_ACCESSIBILITY_NO_VIOLATIONS_ROW)]
@@ -722,14 +725,20 @@ def _collect_badge_checks(raw: object, payload: AiVisibilityPayload) -> list[dic
             return [
                 {
                     "key": str(item.get("key", "")),
-                    "status": str(item.get("status", "")).strip().lower(),
+                    "status": _badge_status(
+                        str(item.get("status", "")).strip().lower(), item.get("measured", True) is not False
+                    ),
                 }
                 for item in raw_checks
                 if isinstance(item, dict)
             ]
-    # Fallback: caller passed an AiVisibilityPayload directly. We can't
-    # recover the pre-normalised status; treat everything as measured.
-    return [{"key": c.key or "", "status": c.status or ""} for c in payload.checks]
+    # Fallback: caller passed an AiVisibilityPayload directly; its checks carry
+    # the ``measured`` flag that survives the info -> good normalisation.
+    return [{"key": c.key or "", "status": "info" if c.unmeasured else c.status or ""} for c in payload.checks]
+
+
+def _badge_status(status: str, measured: bool) -> str:
+    return status if measured else "info"
 
 
 class AiVisibilityTab(TableTab):
@@ -821,7 +830,13 @@ class AiVisibilityTab(TableTab):
             f"<b>Critical:</b> {summary.critical_count}"
         )
         rows = [
-            [check.area, check.check, check.status.title(), check.details or "-", check.recommendation or "-"]
+            [
+                check.area,
+                check.check,
+                "Info" if check.unmeasured else check.status.title(),
+                check.details or "-",
+                check.recommendation or "-",
+            ]
             for check in payload.checks
         ]
         check_keys = [check.key or "ai_visibility" for check in payload.checks]

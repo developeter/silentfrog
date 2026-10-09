@@ -384,8 +384,8 @@ Everything here is **off by default**. Open **Crawl settings…** inside the Sin
 
 ### Advanced tools
 
-- **Stealth fetching** (Settings → *Advanced headers* group → "Stealth fetching (evade bot/WAF detection)") — routes requests through `curl_cffi` TLS impersonation and, if that still fails, a stealth headless browser that can solve a Cloudflare Turnstile challenge. Needs the `silentfrog[stealth]` extra; the checkbox is disabled with a tooltip explaining that when the extra isn't installed. Use it only against sites you're authorized to crawl.
-- **Robots.txt simulator** (Settings → *Advanced headers* group → "Test a URL against robots.txt…") — opens a dialog that checks whether a given URL is allowed for a chosen user-agent, either against the live `robots.txt` (fetched through the same guarded, TLS/SSRF-checked path as a crawl) or against pasted robots.txt text.
+- **Stealth fetching** (Crawl settings… → *Advanced headers* group → "Stealth fetching (evade bot/WAF detection)") — routes requests through `curl_cffi` TLS impersonation and, if that still fails, a stealth headless browser that can solve a Cloudflare Turnstile challenge. Needs the `silentfrog[stealth]` extra; the checkbox is disabled with a tooltip explaining that when the extra isn't installed. Use it only against sites you're authorized to crawl.
+- **Robots.txt simulator** (Crawl settings… → *Advanced headers* group → "Test a URL against robots.txt…") — opens a dialog that checks whether a given URL is allowed for a chosen user-agent, either against the live `robots.txt` (fetched through the same guarded, TLS/SSRF-checked path as a crawl) or against pasted robots.txt text.
 
 ### AI citation tracking
 
@@ -396,7 +396,7 @@ export SILENTFROG_AI_CITATIONS_ENABLE=1     # turns the check on at all
 export SILENTFROG_BRAVE_API_KEY=<your key>  # optional: adds the Brave Search fresh-signal probe
 ```
 
-Without `SILENTFROG_AI_CITATIONS_ENABLE=1` the check is skipped entirely (`info`, never a false warning). This is separate from the Settings → *"AI share of voice (BYO keys)"* group, which samples ChatGPT/Perplexity/Gemini directly with your own API keys.
+Without `SILENTFROG_AI_CITATIONS_ENABLE=1` the check is skipped entirely (`info`, never a false warning). This is separate from the Crawl settings… → *"AI share of voice (BYO keys)"* group, which samples ChatGPT/Perplexity/Gemini directly with your own API keys.
 
 ### AI review (on-demand, BYO key)
 
@@ -406,7 +406,7 @@ Click **AI review** after auditing a page to run a custom AI-assisted review ove
 - **OpenAI** / **Anthropic** — bring your own key.
 - **Ollama (local, no key)** — the fallback when nothing else is configured; start it with `ollama serve` (and `ollama pull llama3.2`) first.
 
-A non-empty key is stored in the OS keychain (`silentfrog-ai-engines`, the same keychain entry Settings → *AI share of voice* uses) via `keyring`, never in the repo or plain-text config; your provider/model choice is remembered for next time. If a provider call fails, the result dialog shows the real reason (bad key, rate limit, unreachable endpoint) plus a one-line remedy, instead of a bare "empty response".
+A non-empty key is stored in the OS keychain (`silentfrog-ai-engines`, the same keychain entry Crawl settings… → *AI share of voice* uses) via `keyring`, never in the repo or plain-text config; your provider/model choice is remembered for next time. If a provider call fails, the result dialog shows the real reason (bad key, rate limit, unreachable endpoint) plus a one-line remedy, instead of a bare "empty response".
 
 Headless/CI use: `silentfrog-cli review <url> [--provider gemini|openai|anthropic|ollama] [--model NAME] [--prompt "..."] [--out findings.json]`.
 
@@ -494,7 +494,7 @@ The Site Crawl per-page detail view (double-click a result row) uses the same
 bucketed layout.
 
 The `Accessibility` tab (axe-core, WCAG 2.1/2.2) is opt-in: enable
-"Accessibility audit (axe-core, WCAG)" under Settings → *GEO checks*
+"Accessibility audit (axe-core, WCAG)" under Crawl settings… → *GEO checks*
 group. It
 renders the page with headless Chromium and reports keyboard, contrast,
 ARIA, and labeling violations, so it needs the `silentfrog[geo-render]`

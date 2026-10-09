@@ -172,3 +172,12 @@ def test_redirect_and_seo_windows_are_not_destroyed_on_close(qtbot) -> None:
 
     for child in win._child_windows:
         assert not child.testAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+
+
+def test_home_gear_tooltip_says_it_is_only_the_theme(qtbot) -> None:
+    # PR-F2 PLUMB-2: the gear is Appearance, not the crawl settings.
+    win = HomeWindow()
+    qtbot.addWidget(win)
+    gear = win.findChild(QtWidgets.QToolButton, "settingsGear")
+    assert gear is not None
+    assert gear.toolTip() == "Appearance (theme)"

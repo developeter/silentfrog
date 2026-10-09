@@ -85,27 +85,44 @@ def parse_axe_result(raw: Any) -> dict[str, Any]:
     return {"measured": True, "violations": violations, "counts": counts}
 
 
+def _not_measured(reason: str) -> dict[str, Any]:
+    return {"measured": False, "reason": reason}
+
+
+def _failure_reason(result: Any) -> str:
+    """Why a requested scan produced nothing ("" when the render succeeded)."""
+    if result is None:
+        return "The render pool returned no result."
+    if result.error:
+        return f"The page could not be rendered ({result.error})."
+    if result.script_result is None:
+        return "The axe-core script did not run on the page (blocked or errored)."
+    return ""
+
+
 async def collect_accessibility(
     url: str,
     crawl_options: CrawlOptions,
     policy: ProfilePolicy,
     pool: Any = None,
 ) -> dict[str, Any]:
-    """Run axe-core against the rendered page. ``{}`` (unmeasured) when the
-    flag is off, the profile does not render, the vendored source is
-    missing, or the render/script fails. Never raises."""
+    """Run axe-core against the rendered page. ``{}`` when the flag is off or
+    the profile does not render (not requested). ``{measured: False, reason}``
+    when it was requested but could not run, so the UI can say why. Never
+    raises."""
     if not crawl_options.accessibility_audit or not policy.render:
         return {}
     source = load_axe_source()
     if not source:
-        return {}
+        return _not_measured("The bundled axe-core script is missing.")
     from .bot_render import shared_render_pool
 
     active_pool = pool if pool is not None else shared_render_pool()
     result = await active_pool.render(url, inject_js=source, evaluate_js=AXE_EVALUATE)
-    if result is None or result.error or result.script_result is None:
-        return {}
-    return parse_axe_result(result.script_result)
+    reason = _failure_reason(result)
+    if reason:
+        return _not_measured(reason)
+    return parse_axe_result(result.script_result) or _not_measured("axe-core returned an unreadable result.")
 
 
 __all__ = [

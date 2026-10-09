@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ssl
+from collections.abc import Iterator
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Optional
@@ -8,6 +10,7 @@ import aiohttp  # type: ignore[import]  # aiohttp stubs missing
 from aiohttp import ClientSession, ClientTimeout  # type: ignore[import]  # aiohttp stubs missing
 
 from .crawl_options import DEFAULT_USER_AGENT
+from .ssrf import SsrfBlockedError
 from .transport import open_crawl_session
 
 
@@ -19,6 +22,39 @@ class HttpResponse:
     headers: dict[str, str]
     ttfb_ms: float
     total_ms: float
+    # Why a status-0 fetch failed, when it can be told: "ssrf" (private-network
+    # guard) or "tls" (certificate). "" = unknown / not a failure.
+    error_kind: str = ""
+
+
+_TLS_ERRORS = (ssl.SSLError, ssl.CertificateError, aiohttp.ClientSSLError)
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """The exception plus everything it wraps: aiohttp hides the real cause in
+    ``os_error`` / ``certificate_error`` / ``__cause__``. Bounded, cycle-safe."""
+    pending: list[BaseException | None] = [exc]
+    seen: list[BaseException] = []
+    while pending and len(seen) < 8:
+        current = pending.pop(0)
+        if current is None or any(current is prior for prior in seen):
+            continue
+        seen.append(current)
+        yield current
+        pending.extend(
+            [current.__cause__, current.__context__, getattr(current, "os_error", None)]
+            + [getattr(current, "certificate_error", None)]
+        )
+
+
+def classify_fetch_error(exc: BaseException) -> str:
+    """``"ssrf"``, ``"tls"`` or ``""`` for a failed fetch's exception."""
+    for err in _exception_chain(exc):
+        if isinstance(err, SsrfBlockedError):
+            return "ssrf"
+        if isinstance(err, _TLS_ERRORS):
+            return "tls"
+    return ""
 
 
 async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpResponse:
@@ -40,8 +76,8 @@ async def fetch(session: aiohttp.ClientSession, url: str, timeout: int) -> HttpR
                 ttfb_ms=ttfb,
                 total_ms=total,
             )
-    except Exception:
-        return HttpResponse("", 0, url, {}, 0.0, 0.0)
+    except Exception as exc:
+        return HttpResponse("", 0, url, {}, 0.0, 0.0, classify_fetch_error(exc))
 
 
 async def fetch_page(url: str, timeout: int = 10, headers: Optional[dict[str, str]] = None) -> HttpResponse:

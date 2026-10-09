@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from qtpy import QtCore
+
 from silentfrog.geo_checks_badge import (
     GROUP_ORDER,
     build_badges,
@@ -130,3 +132,50 @@ def test_ai_visibility_tab_badge_tooltip_lists_env_vars(qtbot) -> None:
     tip = tab._badges_label.toolTip()
     assert "SILENTFROG_AI_CITATIONS_ENABLE" in tip
     assert "SILENTFROG_PSI_ENABLE" in tip
+
+
+def _unmeasured_mapping() -> dict[str, object]:
+    from silentfrog.crawl_types import AiVisibilityCheck, AiVisibilityPayload, AiVisibilitySummary
+    from silentfrog.render_diff import build_render_diff_check
+
+    ssr = build_render_diff_check(None)  # status "info": not measured
+    assert ssr.status == "info"
+    checks = [ssr, AiVisibilityCheck("Access", "Robots", "good", "", "", key="access_robots")]
+    summary = AiVisibilitySummary(verdict="Strong", good_count=2, warning_count=0, critical_count=0, score=100)
+    # The same dict shape CrawlPayload.to_mapping() produces after normalisation.
+    return AiVisibilityPayload.from_raw(AiVisibilityPayload(summary=summary, checks=checks).to_dict()).to_dict()
+
+
+def test_normalised_payload_still_badges_unmeasured_ssr_as_grey_circle(qtbot) -> None:
+    mapping = _unmeasured_mapping()
+    assert all(c["status"] == "good" for c in mapping["checks"])  # type: ignore[index]
+    tab = AiVisibilityTab()
+    qtbot.addWidget(tab)
+    tab.update(mapping)
+    text = tab._badges_label.text()
+    assert 'color:#9aa0a6;">&nbsp; SSR parity ○' in text
+    assert "SSR parity ✓" not in text
+
+
+def test_unmeasured_row_shows_info_status_and_score_is_unchanged(qtbot) -> None:
+    mapping = _unmeasured_mapping()
+    tab = AiVisibilityTab()
+    qtbot.addWidget(tab)
+    tab.update(mapping)
+    model = tab.view.model()
+    statuses = [model.index(r, 2).data() for r in range(model.rowCount())]
+    assert statuses == ["Info", "Good"]
+    assert model.index(0, 2).data(role=QtCore.Qt.ItemDataRole.BackgroundRole) is None
+    assert "100 / 100" in tab._geo_score.text()
+    assert "Strong" in tab._summary.text()
+
+
+def test_measured_ssr_check_badges_green() -> None:
+    badges = build_badges([{"key": "access_ssr_parity", "status": "good"}])
+    assert next(b for b in badges if b.group == "SSR parity").glyph == "✓"
+
+
+def test_lab_cwv_hint_does_not_claim_ssr_box_produces_it() -> None:
+    hint = next(b.hint for b in build_badges([]) if b.group == "Lab CWV")
+    assert "SSR" not in hint
+    assert "Not collected" in hint

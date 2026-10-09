@@ -227,23 +227,21 @@ def auto_suggest_profile(url_count: int, selected: AuditProfile) -> AuditProfile
     return selected
 
 
-def parse_header_lines(text: str) -> tuple[dict[str, str], bool]:
+def parse_header_lines(text: str) -> tuple[dict[str, str], list[int]]:
+    """Parse ``Key: Value`` lines. Returns the headers and the 1-based numbers
+    of the non-blank lines that were ignored because they are not ``Key: Value``."""
     headers: dict[str, str] = {}
-    invalid = False
-    for raw in text.splitlines():
+    bad_lines: list[int] = []
+    for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
             continue
-        if ":" not in line:
-            invalid = True
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip():
+            bad_lines.append(number)
             continue
-        key, value = line.split(":", 1)
-        key_clean = key.strip()
-        if not key_clean:
-            invalid = True
-            continue
-        headers[key_clean] = value.strip()
-    return headers, invalid
+        headers[key.strip()] = value.strip()
+    return headers, bad_lines
 
 
 # --- Persisted opt-in ticks (QSettings seam lives in crawl_prefs.py) ---------

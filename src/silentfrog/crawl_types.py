@@ -1176,19 +1176,31 @@ class AiVisibilityCheck:
     # that resolve against docs/RESEARCH_CITATIONS.md. See research_evidence.py.
     evidence_class: str = ""
     evidence_source_ids: tuple[str, ...] = ()
+    # v2.0 PR-F2: False when the row reports "not measured" (raw status
+    # ``info``). ``status`` folds info into ``good`` (score/verdict unchanged);
+    # this flag keeps the distinction across every round trip so the UI can
+    # show "Info" and the GEO badge can show a grey circle.
+    measured: bool = True
 
     @classmethod
     def from_raw(cls, value: Mapping[str, Any]) -> AiVisibilityCheck:
+        raw_status = str(value.get("status", "")).strip().lower()
         return cls(
             area=str(value.get("area", "")).strip(),
             check=str(value.get("check", "")).strip(),
             status=_normalize_ai_visibility_status(value.get("status", "")),
+            measured=raw_status != "info" and value.get("measured", True) is not False,
             details=str(value.get("details", "")).strip(),
             recommendation=str(value.get("recommendation", "")).strip(),
             key=str(value.get("key", "")).strip(),
             evidence_class=str(value.get("evidence_class", "")).strip(),
             evidence_source_ids=_evidence_source_ids(value.get("evidence_source_ids")),
         )
+
+    @property
+    def unmeasured(self) -> bool:
+        """True for a "not measured" row: explicit flag or a raw ``info`` status."""
+        return not self.measured or self.status.strip().lower() == "info"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1200,6 +1212,7 @@ class AiVisibilityCheck:
             "key": self.key,
             "evidence_class": self.evidence_class,
             "evidence_source_ids": list(self.evidence_source_ids),
+            "measured": not self.unmeasured,
         }
 
 

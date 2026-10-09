@@ -14,6 +14,13 @@ _PROFILE_CHOICES = (
     (AuditProfile.DEEP, "Deep — full probing, rendering, integrations"),
 )
 
+
+def _bad_header_lines_message(bad_lines: list[int]) -> str:
+    if not bad_lines:
+        return ""
+    return f"Line(s) {', '.join(str(n) for n in bad_lines)} ignored: expected 'Key: Value'."
+
+
 # The four GEO checks that only actually run when the crawl policy renders
 # the page (H4: DEEP only) — used to drive the "needs Deep" note below.
 _RENDER_PROFILE_LABELS: dict[str, str] = {
@@ -370,6 +377,11 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         self.txt_headers.setFixedHeight(80)
         self.txt_headers.setStyleSheet(self._field_stylesheet(theme))
         adv_layout.addWidget(self.txt_headers)
+        self.lbl_headers_error = QtWidgets.QLabel("")
+        self.lbl_headers_error.setWordWrap(True)
+        self.lbl_headers_error.setStyleSheet("color:#d32f2f;")  # same red as headers_label's "invalid" state
+        self.lbl_headers_error.hide()
+        adv_layout.addWidget(self.lbl_headers_error)
 
         adv_layout.addWidget(QtWidgets.QLabel("Cookies"))
         cookies_help = QtWidgets.QLabel(
@@ -637,13 +649,16 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
 
     def _validate_headers(self) -> None:
         styles = {"invalid": "color:#d32f2f;", "valid": "color:#2e7d32;", "empty": ""}
-        text = self.txt_headers.toPlainText().strip()
-        if not text:
+        text = self.txt_headers.toPlainText()
+        if not text.strip():
             self.headers_label.setStyleSheet(styles["empty"])
+            self.lbl_headers_error.hide()
             return
-        _, invalid = parse_header_lines(text)
-        state = "invalid" if invalid else "valid"
+        _, bad_lines = parse_header_lines(text)
+        state = "invalid" if bad_lines else "valid"
         self.headers_label.setStyleSheet(styles[state])
+        self.lbl_headers_error.setText(_bad_header_lines_message(bad_lines))
+        self.lbl_headers_error.setVisible(bool(bad_lines))
 
     def _render_checkboxes(self) -> tuple[QtWidgets.QCheckBox, ...]:
         return (self.chk_ssr_parity, self.chk_bot_render, self.chk_render_js, self.chk_accessibility_audit)

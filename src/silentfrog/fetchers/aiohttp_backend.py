@@ -27,6 +27,7 @@ class AiohttpBackend:
             ttfb_ms=resp.ttfb_ms,
             total_ms=resp.total_ms,
             backend=self.name,
+            error_kind=resp.error_kind,
         )
 
 

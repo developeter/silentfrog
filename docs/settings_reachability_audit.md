@@ -2,8 +2,10 @@
 > PLUMB-1, A5, RND-6 (persisted opt-in ticks), PLUMB-3, D2, A6 label part (active-checks label,
 > results-page label, `CrawlHistoryRun.settings_summary`), PLUMB-7 (results-table tooltip), and
 > A1, A2, PLUMB-5, A3 (Trust > Tech & extraction tab, Excel sheets, AI-export JSON, CHANGELOG
-> wording). PR-F2 covers RND-3, PLUMB-4, INT-10, the RND-5 hint, RND-2, A4, D5, D6 and PLUMB-2
-> (honest statuses and reasons). PR-G covers D4, D3, PLUMB-6, INT-1 to INT-9, INT-11, RND-1,
+> wording). PR-F2 fixes RND-3, PLUMB-4, INT-10, the RND-5 hint (unmeasured checks show "Info" and a grey
+> circle in the GEO badge; the false "SSR box produces Lab CWV" hint is gone), RND-2 (axe now runs on
+> CSP pages), A4, D5, D6 and PLUMB-2 (accessibility, topic-embedding, export and fetch-failure
+> messages name the reason; ignored header lines are numbered; the Home gear reads "Appearance (theme)"). PR-G covers D4, D3, PLUMB-6, INT-1 to INT-9, INT-11, RND-1,
 > RND-4, the A6 concurrency fix and D7. Lab Core Web Vitals collection (RND-5 part A) stays deferred.
 
 **Short answer: mostly, yes.** Almost every box you tick does run in the engine. You see nothing for six reasons, all confirmed with probes:

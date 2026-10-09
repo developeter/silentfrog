@@ -6,8 +6,8 @@ a page whose body drifts from what the title promises scores low,
 which hurts both topical SEO and how confidently generative engines
 can attribute the page to a query.
 
-Everything degrades: without ``silentfrog[embeddings]`` (or when the
-flag is off) the payload is unmeasured and no check is emitted. The
+Everything degrades: when the flag is off no check is emitted; when it is on
+but scoring fails (extra missing, model not loadable) an info row says why. The
 model runs fully locally (first use downloads it from the HF hub);
 no text ever leaves the machine. The ``embedder`` seam keeps tests
 model-free.
@@ -161,10 +161,22 @@ _CHECK_RECOMMENDATION = (
 )
 
 
+def _not_measured_check(reason: str) -> AiVisibilityCheck:
+    return AiVisibilityCheck(
+        area="Topic clarity",
+        check=_CHECK_TITLE,
+        status="info",
+        details=f"Not measured: {reason}",
+        recommendation=_CHECK_RECOMMENDATION,
+        key="topic_embedding_coherence",
+    )
+
+
 def build_topic_embedding_check(payload: TopicEmbeddingsPayload) -> AiVisibilityCheck | None:
-    """Topic-clarity check — ``None`` (not emitted) when unmeasured."""
+    """Topic-clarity check. ``None`` (not emitted) when the feature never ran;
+    an ``info`` row "Not measured: <reason>" when it ran and could not score."""
     if not payload.measured:
-        return None
+        return _not_measured_check(payload.reason) if payload.reason else None
     status = "good" if payload.coherence >= _COHERENCE_GOOD else "warning"
     return AiVisibilityCheck(
         area="Topic clarity",

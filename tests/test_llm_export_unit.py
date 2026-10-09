@@ -438,6 +438,19 @@ def test_page_export_optional_integrations_measured() -> None:
     assert "color-contrast" in md
 
 
+def test_page_export_prints_the_reason_instead_of_feature_off() -> None:
+    # PR-F2 PLUMB-2: a feature that ran and failed names the cause.
+    url = "https://e.com/p"
+    payload = _minimal_payload(url, 72, _CHECKS)
+    raw = payload.to_mapping()
+    raw["accessibility"] = {"measured": False, "reason": "The page could not be rendered (Timeout)."}
+    raw["topic_embeddings"] = {"measured": False, "reason": "sentence-transformers unavailable"}
+    md = export_page_for_llm(CrawlPayload.from_raw(raw), url, mode="full").markdown
+    assert "Not measured: The page could not be rendered (Timeout)." in md
+    assert "Not measured: sentence-transformers unavailable" in md
+    assert "Not measured (feature off)." in md
+
+
 def test_page_export_not_measured_markers_for_empty_integrations() -> None:
     export = export_page_for_llm(_minimal_payload("https://e.com/p", 72, _CHECKS), "https://e.com/p", mode="full")
     md = export.markdown

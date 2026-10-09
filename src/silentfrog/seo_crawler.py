@@ -72,7 +72,22 @@ from .transport import allow_private_network, insecure_tls, open_crawl_session
 _HOST_DELAYS = crawl_http._HOST_DELAYS
 
 
-def _fetch_failure_message(url: str) -> str:
+_FAILURE_HINTS = {
+    "ssrf": (
+        "This address is on a private network (localhost or an intranet host), which Silentfrog blocks by default. "
+        "To audit it, tick 'Allow private-network targets (disable SSRF protection)' in Crawl settings and run again."
+    ),
+    "tls": (
+        "The HTTPS certificate could not be verified. If you trust this host (self-signed or intranet), "
+        "tick 'Allow insecure TLS (skip certificate verification)' in Crawl settings and run again."
+    ),
+}
+
+
+def _fetch_failure_message(url: str, error_kind: str = "") -> str:
+    hint = _FAILURE_HINTS.get(error_kind)
+    if hint:
+        return f"Unable to fetch {url}. {hint}"
     base = f"Unable to fetch {url}. Check the URL, network connectivity, and HTTPS/TLS certificate setup."
     if sys.platform == "darwin":
         return (
@@ -112,7 +127,7 @@ async def _fetch_analysis_response(
             await asyncio.sleep(_BACKOFF_DELAY)
         assert resp is not None
         if resp.status == 0 and not resp.body:
-            raise RuntimeError(_fetch_failure_message(url))
+            raise RuntimeError(_fetch_failure_message(url, resp.error_kind))
     return resp, robots_snapshot
 
 
@@ -142,6 +157,7 @@ async def _strategy_fetch(
         headers=result.headers,
         ttfb_ms=result.ttfb_ms,
         total_ms=result.total_ms,
+        error_kind=result.error_kind,
     )
 
 

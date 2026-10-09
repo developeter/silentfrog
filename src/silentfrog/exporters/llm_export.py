@@ -186,6 +186,14 @@ def _is_measured(data: Any) -> bool:
     return isinstance(data, Mapping) and bool(data.get("measured"))
 
 
+def _not_measured_lines(title: str, data: Any) -> list[str]:
+    """Placeholder section for an unmeasured signal: the recorded reason when
+    the feature ran and could not measure, else the plain "feature off"."""
+    reason = str(data.get("reason") or "").strip() if isinstance(data, Mapping) else ""
+    note = f"- Not measured: {reason}" if reason else "- Not measured (feature off)."
+    return [f"### {title}", "", note, ""]
+
+
 def _row_cell(row: Sequence[Any], index: int) -> str:
     return str(row[index]).strip() if len(row) > index else ""
 
@@ -544,7 +552,7 @@ def _schema_lines(schema: Any) -> list[str]:
 def _rich_results_lines(data: Mapping[str, Any]) -> list[str]:
     title = "Rich results (schema-derived)"
     if not _is_measured(data):
-        return [f"### {title}", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines(title, data)
     eligible = data.get("eligible_types") or []
     warnings = data.get("warnings") or []
     lines = [
@@ -624,7 +632,7 @@ def _scripts_lines(scripts: Any) -> list[str]:
 
 def _lighthouse_lines(data: Mapping[str, Any]) -> list[str]:
     if not _is_measured(data):
-        return ["### Lighthouse (lab)", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines("Lighthouse (lab)", data)
     cats = ("performance", "accessibility", "best_practices", "seo")
     lines = ["### Lighthouse (lab)", ""]
     lines.extend(f"- {name.replace('_', ' ').title()}: {data.get(name, 0)}" for name in cats)
@@ -650,7 +658,7 @@ _AI_CRAWL_HEADERS = ["Agent", "Token", "Robots.txt OK", "Nonstandard directive",
 def _render_parity_lines(render: Mapping[str, Any]) -> list[str]:
     status = render.get("status") if isinstance(render, Mapping) else None
     if not status or status == "not_measured":
-        return ["### SSR / render parity", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines("SSR / render parity", render)
     lines = ["### SSR / render parity", "", f"- Status: {status}"]
     if render.get("reason"):
         lines.append(f"- Reason: {render['reason']}")
@@ -664,7 +672,7 @@ def _render_parity_lines(render: Mapping[str, Any]) -> list[str]:
 def _bot_render_lines(data: Mapping[str, Any]) -> list[str]:
     title = "Per-bot render diffs"
     if not _is_measured(data):
-        return [f"### {title}", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines(title, data)
     bots = data.get("bots") if isinstance(data.get("bots"), Mapping) else {}
     rows = [
         [token, info.get("status", "-"), info.get("missing_links", 0), info.get("reason", "-")]
@@ -683,7 +691,7 @@ def _section_ai_crawler(payload: Any) -> list[str]:
 
 def _integration_lines(title: str, data: Mapping[str, Any]) -> list[str]:
     if not _is_measured(data):
-        return [f"### {title}", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines(title, data)
     return [f"### {title}", "", *_kv_lines(data), ""]
 
 
@@ -709,7 +717,7 @@ def _accessibility_row(violation: Mapping[str, Any]) -> list[Any]:
 def _accessibility_lines(data: Mapping[str, Any]) -> list[str]:
     title = "Accessibility (axe-core)"
     if not _is_measured(data):
-        return [f"### {title}", "", "- Not measured (feature off).", ""]
+        return _not_measured_lines(title, data)
     violations = data.get("violations") if isinstance(data.get("violations"), list) else []
     counts = data.get("counts") if isinstance(data.get("counts"), Mapping) else {}
     lines = [f"### {title}", ""]

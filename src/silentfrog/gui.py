@@ -110,7 +110,7 @@ class HomeWindow(QMainWindow):
         settings_icon = importlib.resources.files("silentfrog").joinpath("assets/settings.png")
         gear.setIcon(QtGui.QIcon(str(settings_icon)))
         gear.setIconSize(QtCore.QSize(28, 28))
-        gear.setToolTip("Settings")
+        gear.setToolTip("Appearance (theme)")
         gear.setFixedSize(44, 44)
         gear.setCursor(Qt.PointingHandCursor)
         gear.clicked.connect(self._open_settings)

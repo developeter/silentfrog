@@ -388,3 +388,25 @@ def test_unusable_stored_custom_extraction_does_not_stop_windows_opening(qtbot) 
     page = WebpageSeoWindow()
     qtbot.addWidget(page)
     assert page._crawl_options == CrawlOptions.default()
+
+
+def test_bad_header_lines_are_reported_by_number() -> None:
+    # PR-F2 D6: the parser says WHICH lines it dropped (1-based, blank lines count).
+    from silentfrog.crawl_options import parse_header_lines
+
+    headers, bad = parse_header_lines("X-One: 1\nnot a header\n\n: novalue-key\nX-Two: 2")
+    assert headers == {"X-One": "1", "X-Two": "2"}
+    assert bad == [2, 4]
+    assert parse_header_lines("") == ({}, [])
+
+
+def test_settings_dialog_names_the_ignored_header_lines(qtbot) -> None:
+    dialog = CrawlSettingsDialog(CrawlOptions.default(), show_profile=False)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert not dialog.lbl_headers_error.isVisible()
+    dialog.txt_headers.setPlainText("X-Ok: 1\nbroken line")
+    assert dialog.lbl_headers_error.isVisible()
+    assert dialog.lbl_headers_error.text() == "Line(s) 2 ignored: expected 'Key: Value'."
+    dialog.txt_headers.setPlainText("X-Ok: 1")
+    assert not dialog.lbl_headers_error.isVisible()
