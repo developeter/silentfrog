@@ -90,7 +90,12 @@ class _CrawlContext:
 
     @property
     def concurrency(self) -> int:
-        return max(1, min(16, self.config.spider.crawl_concurrency))
+        """Workers in flight. Gentle mode's "Max parallel requests" raises the
+        spider default of 4 (A6: values above 4 used to have no effect); the
+        per-host throttle still caps requests to any single host."""
+        opts = self.config.crawl_options
+        requested = opts.max_concurrent_per_host if opts.gentle_mode else 0
+        return max(1, min(16, max(self.config.spider.crawl_concurrency, requested)))
 
 
 async def crawl_site(

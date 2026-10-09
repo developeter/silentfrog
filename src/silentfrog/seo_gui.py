@@ -489,6 +489,7 @@ class WebpageSeoWindow(QtWidgets.QWidget):
             timeout=15,
             on_success=lambda result: self.dataReady.emit({"img_update": result}),
             on_error=lambda err: self.errorSig.emit(err),
+            options=self._crawl_options,
         )
 
     def _remember_url(self, url: str) -> None:

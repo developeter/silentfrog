@@ -25,6 +25,9 @@ Groups recognised:
   ``ai_citations_common_crawl``
 - ``AI Share of Voice`` — ``sov_openai``, ``sov_perplexity``, ``sov_gemini``,
   ``sov_share``
+- ``Authority (Semrush)`` — the ``semrush_*`` rows (one info row while
+  enabled but unmeasured, so the group reads "gated" with the reason)
+- ``Google`` — the ``gsc_*`` / ``ga4_*`` rows (same convention)
 """
 
 from __future__ import annotations
@@ -55,20 +58,50 @@ _GROUPS: dict[str, tuple[str, ...]] = {
         "sov_gemini",
         "sov_share",
     ),
+    "Authority (Semrush)": (
+        "semrush_domain_authority_above_30",
+        "semrush_organic_keywords_present",
+        "semrush_organic_traffic_above_threshold",
+        "semrush_backlinks_above_threshold",
+        "semrush_referring_domains_diverse",
+        "semrush_paid_signal_present",
+    ),
+    "Google": (
+        "gsc_impressions_present",
+        "gsc_ctr_above_average",
+        "gsc_position_in_top_10",
+        "gsc_query_count",
+        "ga4_engagement_above_median",
+        "ga4_bounce_below_threshold",
+    ),
 }
 
 _ENABLEMENT_HINTS: dict[str, str] = {
     "Lab CWV": ("Not collected yet: Silentfrog does not measure lab Core Web Vitals in this version."),
-    "CrUX field": ("Set SILENTFROG_PSI_ENABLE=1; optionally set SILENTFROG_PSI_API_KEY for higher PSI rate."),
-    "SSR parity": "Settings → tick 'Run SSR parity check (requires Playwright)'.",
-    "AI Citations": ("Set SILENTFROG_AI_CITATIONS_ENABLE=1; for the Brave probe also set SILENTFROG_BRAVE_API_KEY."),
-    "AI Share of Voice": (
-        "Set SILENTFROG_AI_SOV_ENABLE=1 and add an OpenAI/Perplexity/Gemini key in Settings → "
-        "AI share of voice (BYO keys)."
+    "CrUX field": (
+        "Set SILENTFROG_PSI_ENABLE=1 (optionally SILENTFROG_PSI_API_KEY for a higher PSI rate), then restart the app."
     ),
+    "SSR parity": "Settings → tick 'Run SSR parity check (requires Playwright)'.",
+    "AI Citations": (
+        "Set SILENTFROG_AI_CITATIONS_ENABLE=1 (Brave probe: also SILENTFROG_BRAVE_API_KEY), then restart the app."
+    ),
+    "AI Share of Voice": (
+        "Tick 'Use AI share of voice in audits' and add an OpenAI/Perplexity/Gemini key in Crawl settings → "
+        "AI share of voice (BYO keys), or set SILENTFROG_AI_SOV_ENABLE=1 and restart the app."
+    ),
+    "Authority (Semrush)": "Crawl settings → Authority (Semrush): tick 'Use Semrush in audits' and save an API key.",
+    "Google": "Crawl settings → Connect Google…: connect Search Console / Analytics and tick 'Use Google data'.",
 }
 
-GROUP_ORDER: tuple[str, ...] = ("Lab CWV", "CrUX field", "SSR parity", "AI Citations", "AI Share of Voice")
+GROUP_ORDER: tuple[str, ...] = (
+    "Lab CWV",
+    "CrUX field",
+    "SSR parity",
+    "AI Citations",
+    "AI Share of Voice",
+    "Authority (Semrush)",
+    "Google",
+)
 
 
 @dataclass(frozen=True)

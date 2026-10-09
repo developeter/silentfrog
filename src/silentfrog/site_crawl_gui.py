@@ -1260,6 +1260,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
             base_url,
             on_payload_updated=lambda updated, row=source_row: model.update_payload(row, updated),
             parent=self,
+            options=self._effective_options(),
         )
         self._detail_windows.append(dialog)
         dialog.show()
@@ -1272,7 +1273,7 @@ class SiteCrawlWindow(QtWidgets.QWidget):
         payload = self._load_payload_for_detail(url)
         if payload is None:
             return
-        dialog = SiteCrawlDetailDialog(payload, url, parent=self)
+        dialog = SiteCrawlDetailDialog(payload, url, parent=self, options=self._effective_options())
         self._detail_windows.append(dialog)
         dialog.show()
 
@@ -1640,10 +1641,12 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
         base_url: str,
         on_payload_updated: Any | None = None,
         parent: QtWidgets.QWidget | None = None,
+        options: CrawlOptions | None = None,
     ) -> None:
         super().__init__(parent)
         self._payload = payload
         self._base_url = base_url
+        self._options = options
         self._on_payload_updated = on_payload_updated
         self.setWindowTitle("Site Crawl Page Detail")
         layout = QtWidgets.QVBoxLayout(self)
@@ -1754,6 +1757,7 @@ class SiteCrawlDetailDialog(QtWidgets.QDialog):
             timeout=15,
             on_success=lambda result: self.imageSig.emit(result),
             on_error=lambda error: self.errorSig.emit(error),
+            options=self._options,
         )
 
     def _handle_image_update(self, rows: list[list[str]]) -> None:

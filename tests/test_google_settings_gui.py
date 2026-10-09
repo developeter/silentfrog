@@ -479,3 +479,44 @@ def test_run_test_connection_reports_working_when_the_api_call_succeeds(monkeypa
     ok, message = GoogleConnectDialog._run_test_connection("sc-domain:example.com", "")
 
     assert (ok, message) == (True, "Working.")
+
+
+# --- PR-G2 INT-1: wording follows what this build actually ships -------------
+
+
+def test_google_launcher_tooltip_does_not_promise_a_missing_builtin_app(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(settings_dialog, "_google_available", lambda: True)
+    monkeypatch.setattr("silentfrog.integrations.google.app_client.builtin_client_available", lambda: False)
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    tip = dialog.btn_google_connect.toolTip()
+    assert "no built-in Google app" in tip and "client_secret.json" in tip
+
+    monkeypatch.setattr("silentfrog.integrations.google.app_client.builtin_client_available", lambda: True)
+    other = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(other)
+    assert "no built-in" not in other.btn_google_connect.toolTip()
+    assert "built-in Google app" in other.btn_google_connect.toolTip()
+
+
+def test_not_connected_yet_note_sits_next_to_use_google_data(qtbot, monkeypatch) -> None:
+    _patch_status(monkeypatch)
+    dialog = GoogleConnectDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert "Not connected yet" in dialog.lbl_not_connected_note.text()
+    assert dialog.lbl_not_connected_note.isVisible() is True
+
+    dialog._sync_account_buttons("gsc", True)
+    assert dialog.lbl_not_connected_note.isVisible() is False
+
+    dialog._sync_account_buttons("gsc", False)
+    assert dialog.lbl_not_connected_note.isVisible() is True
+
+
+def test_connected_account_hides_the_not_connected_note_from_the_start(qtbot, monkeypatch) -> None:
+    _patch_status(monkeypatch, ga4=True)
+    dialog = GoogleConnectDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert dialog.lbl_not_connected_note.isVisible() is False

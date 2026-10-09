@@ -54,6 +54,40 @@ being audited.
   aiohttp's default User-Agent and nothing else, so a cookie-gated
   `Disallow:` is honoured.
 
+### Integrations say why they show nothing, and stop wasting paid calls
+
+#### Changed
+- Semrush and Google, when ticked but unusable (no key, no connected account,
+  no property, daily cap reached, API error), now add one Info row with the
+  reason to the AI Visibility tab instead of nothing; the GEO checks badge gains
+  "Authority (Semrush)" and "Google" groups. The GEO Score is unchanged.
+- **Use AI share of voice in audits** checkbox (off by default) next to the
+  ChatGPT / Perplexity / Gemini keys; `SILENTFROG_AI_SOV_ENABLE=1` still works.
+- The Google connect tooltip no longer promises a built-in app this build does
+  not have, and the Connect Google window warns "Not connected yet" next to
+  "Use Google data in audits". Recommendations for environment-variable
+  switches say to restart the app.
+- The Semrush daily cap starts at 2 (one overview takes two calls) and
+  "Test connection" is refused once the day's budget is spent. Semrush errors
+  such as `ERROR 120 :: WRONG KEY` now show their message.
+- A high GA4 bounce rate is Info, never a warning.
+- Per-bot SSR rendering records each bot's HTTP status: a bot answered 403 by a
+  WAF, or served less content than the server HTML, is flagged instead of
+  showing green, and the renders reuse the crawl's browser pool.
+- Gentle mode's "Max parallel requests" above 4 now raises the Site Crawl worker
+  count (it was capped at 4).
+- The robots.txt tester and "Analyze images" use the Crawl settings: TLS and
+  private-network scopes, User-Agent and origin-scoped headers. A blocked
+  localhost fetch says which box to tick.
+- A private-network audit no longer asks Google's favicon service about the
+  intranet host; it asks the site's own `/favicon.ico`.
+
+#### Fixed
+- Concurrent pages of a crawl no longer each spend their own Semrush overview or
+  AI share-of-voice sampling (one in-flight call per domain / host). A failed
+  sampling (for example a wrong key) is not remembered, and changing a key
+  re-samples.
+
 ### Installer feedback: window stays open, clear summary, CRLF `.bat`
 
 Double-clicking `install_silentfrog.bat` opened a console that downloaded

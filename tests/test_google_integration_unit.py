@@ -109,7 +109,7 @@ def test_checks_measured_emit_good_and_warning() -> None:
     by_key = {c.key: c for c in checks}
     assert by_key["gsc_ctr_above_average"].status == "good"  # 5% > 2%
     assert by_key["gsc_position_in_top_10"].status == "good"  # pos 6 <= 10
-    assert by_key["ga4_bounce_below_threshold"].status == "warning"  # 80% > 70%
+    assert by_key["ga4_bounce_below_threshold"].status == "info"  # 80% > 70%: informational only (INT-8)
     assert by_key["ga4_engagement_above_median"].status == "good"  # 45s >= 30s
 
 
@@ -348,3 +348,23 @@ def test_from_env_keyring_raising_returns_none(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(oauth_mod, "load_token", _boom)
 
     assert conn.from_env() is None
+
+
+def test_high_bounce_rate_never_changes_the_geo_score() -> None:
+    # INT-8: bounce is an off-page behavioural signal, so 90% must not cost points.
+    from silentfrog.ai_visibility import build_ai_visibility_summary
+
+    gsc = GscMetrics()
+    ga4 = Ga4Metrics(pageviews=100, avg_engagement_seconds=45, bounce_rate=0.9, conversions=0, measured=True)
+    with_bounce = build_ai_visibility_summary(build_real_performance_checks(gsc, ga4))
+    without_ga4 = build_ai_visibility_summary(build_real_performance_checks(gsc, Ga4Metrics()))
+    assert with_bounce.warning_count == 0
+    assert with_bounce.score == without_ga4.score == 100
+
+
+def test_metrics_status_fields_round_trip_and_stay_out_of_measured_dicts() -> None:
+    stock = GscMetrics(impressions=3, measured=True).to_dict()
+    assert "enabled" not in stock and "reason" not in stock
+    unmeasured = GscMetrics(enabled=True, reason="Not connected yet").to_dict()
+    assert GscMetrics.from_dict(unmeasured).reason == "Not connected yet"
+    assert Ga4Metrics.from_dict(Ga4Metrics(enabled=True, reason="x").to_dict()).enabled is True

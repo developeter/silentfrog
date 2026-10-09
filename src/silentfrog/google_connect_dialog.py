@@ -104,6 +104,7 @@ class GoogleConnectDialog(QtWidgets.QDialog):
         self.setWindowTitle("Connect Google")
         self.setMinimumSize(480, 360)
         self._active_job: tuple[str, str | None, _JobHolder] | None = None
+        self._connected: dict[str, bool] = {"gsc": False, "ga4": False}
         self._poll_timer = QtCore.QTimer(self)
         self._poll_timer.setInterval(200)
         self._poll_timer.timeout.connect(self._on_poll_timer)
@@ -281,6 +282,13 @@ class GoogleConnectDialog(QtWidgets.QDialog):
             "Score either way (§1.5)."
         )
         layout.addWidget(self.chk_use_google_data)
+        self.lbl_not_connected_note = QtWidgets.QLabel(
+            "Not connected yet: connect Search Console or Analytics above first. Until then, ticking this "
+            "box only adds 'Not connected' rows to audits."
+        )
+        self.lbl_not_connected_note.setWordWrap(True)
+        self.lbl_not_connected_note.setStyleSheet("color:#d32f2f;")
+        layout.addWidget(self.lbl_not_connected_note)
         warning = QtWidgets.QLabel(
             "If you use your own client and its consent screen is still in Testing, refresh "
             "tokens expire after 7 days and the connection will silently stop returning data. "
@@ -358,6 +366,8 @@ class GoogleConnectDialog(QtWidgets.QDialog):
         _label, connect_btn, disconnect_btn = self._widgets_for(account)
         connect_btn.setText("Reconnect" if connected else "Connect…")
         disconnect_btn.setEnabled(connected)
+        self._connected[account] = connected
+        self.lbl_not_connected_note.setVisible(not any(self._connected.values()))
         if account == "gsc":
             self.btn_gsc_refresh_sites.setEnabled(connected)
 

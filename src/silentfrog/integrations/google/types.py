@@ -12,6 +12,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _status_fields(enabled: bool, reason: str) -> dict[str, Any]:
+    """The optional "enabled but unmeasured" fields of a metrics dict. Emitted
+    only when set, so a measured or stock dict keeps its original shape."""
+    extra: dict[str, Any] = {}
+    if enabled:
+        extra["enabled"] = True
+    if reason:
+        extra["reason"] = reason
+    return extra
+
+
 @dataclass(frozen=True)
 class GscMetrics:
     impressions: int = 0
@@ -20,9 +31,13 @@ class GscMetrics:
     position: float = 0.0
     top_queries: tuple[str, ...] = field(default_factory=tuple)
     measured: bool = False
+    # INT-3: the opt-in is on but nothing could be measured; ``reason`` says why.
+    enabled: bool = False
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **_status_fields(self.enabled, self.reason),
             "impressions": self.impressions,
             "clicks": self.clicks,
             "ctr": round(self.ctr, 4),
@@ -42,6 +57,8 @@ class GscMetrics:
             position=float(value.get("position", 0.0) or 0.0),
             top_queries=tuple(str(q) for q in value.get("top_queries", []) if q),
             measured=bool(value.get("measured", False)),
+            enabled=bool(value.get("enabled", False)),
+            reason=str(value.get("reason", "") or ""),
         )
 
 
@@ -52,9 +69,12 @@ class Ga4Metrics:
     bounce_rate: float = 0.0
     conversions: int = 0
     measured: bool = False
+    enabled: bool = False
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **_status_fields(self.enabled, self.reason),
             "pageviews": self.pageviews,
             "avg_engagement_seconds": round(self.avg_engagement_seconds, 1),
             "bounce_rate": round(self.bounce_rate, 4),
@@ -72,6 +92,8 @@ class Ga4Metrics:
             bounce_rate=float(value.get("bounce_rate", 0.0) or 0.0),
             conversions=int(value.get("conversions", 0) or 0),
             measured=bool(value.get("measured", False)),
+            enabled=bool(value.get("enabled", False)),
+            reason=str(value.get("reason", "") or ""),
         )
 
 

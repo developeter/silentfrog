@@ -502,7 +502,7 @@ def test_site_crawl_detail_can_analyze_images(monkeypatch, qtbot) -> None:
     )
     updates: list[CrawlPayload] = []
 
-    def fake_run_image_analysis(base, rows, timeout, on_success, on_error):
+    def fake_run_image_analysis(base, rows, timeout, on_success, on_error, options=None):
         on_success([[rows[0][0], 640, 320, "42 KB", "image/png", "30m"]])
         return threading.Thread()
 

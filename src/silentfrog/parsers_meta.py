@@ -893,7 +893,16 @@ async def _to_data_uri(img_url: str) -> str:
         return img_url
 
 
-async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
+def _default_favicon_url(page_url: str, domain: str, *, private_network: bool) -> str:
+    """Fallback favicon when the page declares none. A private-network audit
+    must not tell Google's favicon service which intranet host it audited
+    (D7), so it asks the origin's own /favicon.ico instead."""
+    if private_network:
+        return urljoin(page_url, "/favicon.ico")
+    return f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+
+
+async def _make_serp_snippet(soup: BeautifulSoup, page_url: str, *, private_network: bool = False) -> dict[str, str]:
     parsed = urlparse(page_url)
     domain = parsed.netloc
 
@@ -923,7 +932,7 @@ async def _make_serp_snippet(soup: BeautifulSoup, page_url: str) -> dict[str, st
         raw_desc = _attr(desc_tag, "content").strip()
     description = (raw_desc[:157] + ELLIPSIS) if len(raw_desc) > 160 else raw_desc
 
-    favicon = f"https://www.google.com/s2/favicons?sz=48&domain={domain}"
+    favicon = _default_favicon_url(page_url, domain, private_network=private_network)
     favicon_tag = soup.find("link", rel=lambda val: isinstance(val, str) and "icon" in val.lower())
     if isinstance(favicon_tag, Tag):
         href_val = _attr(favicon_tag, "href").strip()

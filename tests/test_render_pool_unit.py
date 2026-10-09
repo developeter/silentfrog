@@ -408,3 +408,23 @@ async def test_render_pool_scope_async_closes_the_pool_on_error() -> None:
             raise RuntimeError("crawl blew up")
     assert manager.stopped is True
     assert active_render_pool() is None
+
+
+@pytest.mark.asyncio
+async def test_render_result_carries_the_main_document_http_status(monkeypatch) -> None:
+    # RND-1: a WAF 403 must be visible on the result, not just the page body.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(_FakePage, "goto", lambda self, url, timeout=0, wait_until="": SimpleNamespace(status=403))
+    pool = RenderPool(browser_factory=lambda: _FakeManager())
+    result = await pool.render("https://e.com/blocked")
+    pool.close()
+    assert result.http_status == 403
+
+
+@pytest.mark.asyncio
+async def test_render_result_http_status_is_zero_without_a_response() -> None:
+    pool = RenderPool(browser_factory=lambda: _FakeManager())
+    result = await pool.render("https://e.com/a")
+    pool.close()
+    assert result.http_status == 0

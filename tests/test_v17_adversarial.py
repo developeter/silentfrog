@@ -154,7 +154,10 @@ def test_collect_semrush_skips_without_key(monkeypatch) -> None:
     from silentfrog.integrations.semrush import client
 
     monkeypatch.setattr(client, "resolve_api_key", lambda: "")
-    assert asyncio.run(seo_crawler._collect_semrush("https://example.com/page")) == {}
+    # INT-3: no network call, and the audit is told why instead of getting nothing.
+    fragment = asyncio.run(seo_crawler._collect_semrush("https://example.com/page"))
+    assert fragment["measured"] is False and fragment["enabled"] is True
+    assert "API key" in fragment["reason"]
 
 
 def test_registrable_domain_handles_multipart_tld() -> None:

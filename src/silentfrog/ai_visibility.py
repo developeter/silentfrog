@@ -447,8 +447,9 @@ _AI_VISIBILITY_CHECK_TOOLTIPS = {
     ),
     "ga4_bounce_below_threshold": (
         "GA4 bounce rate for this URL.\n\n"
-        "Bounce above ~70% is a warning — visitors leave without engaging, often an above-the-fold "
-        "relevance or intent-match problem. Below the threshold => good."
+        "Bounce above ~70% is shown as info — visitors leave without engaging, sometimes an above-the-fold "
+        "relevance or intent-match problem, but the right benchmark depends on the page type, so it never "
+        "affects the GEO Score. Below the threshold => good."
     ),
     "lighthouse_perf_above_90": (
         "Lighthouse Performance lab score (0-100) from PageSpeed Insights.\n\n"
@@ -999,11 +1000,13 @@ def _build_optional_integration_checks(
     # the optional 8th area stays invisible on stock audits.
     if ai_citations.measured:
         checks.extend(build_ai_citations_checks(ai_citations))
-    # Real performance / Engagement (V7): only when GSC/GA4 connected.
-    if gsc.measured or ga4.measured:
+    # Real performance / Engagement (V7): when GSC/GA4 are connected, or the
+    # opt-in is on but unmeasured (INT-3: the rows then say why).
+    if gsc.measured or ga4.measured or gsc.enabled or ga4.enabled:
         checks.extend(build_real_performance_checks(gsc, ga4))
-    # Authority signals (V17): only when Semrush is connected (optional).
-    if semrush.measured:
+    # Authority signals (V17): when Semrush is connected, or enabled but
+    # unmeasured (one info row with the reason).
+    if semrush.measured or semrush.enabled:
         checks.extend(build_semrush_authority_checks(semrush))
     # Rich results (V14): schema-derived on every audit; Lighthouse only
     # after the opt-in single-page run, so it doesn't clutter stock pages.

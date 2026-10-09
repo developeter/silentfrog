@@ -104,7 +104,8 @@ def _row(spec: _Spec, metrics: SemrushMetrics) -> AiVisibilityCheck:
 
 def build_semrush_authority_checks(metrics: SemrushMetrics) -> list[AiVisibilityCheck]:
     """Six rows in the optional "Authority signals" area. Unmeasured => a
-    single ``info`` row; otherwise one good/info row per signal — never a
+    single ``info`` row carrying the reason (no key, cap reached, API error);
+    otherwise one good/info row per signal — never a
     warning, per §1.5."""
     if not metrics.measured:
         return [
@@ -112,8 +113,8 @@ def build_semrush_authority_checks(metrics: SemrushMetrics) -> list[AiVisibility
                 AUTHORITY_AREA,
                 "Semrush authority data",
                 "info",
-                "Not connected.",
-                "Settings -> Authority (Semrush): add an API key to fetch authority signals.",
+                metrics.reason or "Not connected.",
+                "Crawl settings > Authority (Semrush): add an API key and keep the daily cap at 2 or more.",
                 "semrush_domain_authority_above_30",
             )
         ]

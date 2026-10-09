@@ -56,14 +56,26 @@ def _enabled() -> bool:
     return load_config().enabled
 
 
-def from_env() -> GoogleConnection | None:
-    """Build a token-backed connection from env + keyring, or None when
-    the integration isn't enabled/configured. The GSC site URL / GA4
-    property id come from env when set, else fall back to the stored
-    config (``env always wins over config`` so headless/CI behaviour is
-    unchanged). Never raises."""
+def _no_account_reason() -> str:
+    """Why an enabled integration has no usable account: the sentence the
+    audit's 'Not connected' rows show (INT-1/INT-3)."""
+    from .app_client import builtin_client_available
+
+    if builtin_client_available():
+        return "Not connected yet: open Crawl settings > Connect Google... and click Connect."
+    return (
+        "Not connected yet: this build has no built-in Google app, so connect with your own "
+        "client_secret.json (Crawl settings > Connect Google...)."
+    )
+
+
+def connect() -> tuple[GoogleConnection | None, str]:
+    """Build a token-backed connection from env + keyring. Returns
+    ``(connection, "")`` when usable, ``(None, "")`` when the integration is
+    not enabled (a stock audit), and ``(None, reason)`` when it IS enabled but
+    cannot measure anything, so the audit can say why. Never raises."""
     if not _enabled():
-        return None
+        return None, ""
     config = load_config()
     site_url = os.environ.get("SILENTFROG_GSC_SITE_URL", "").strip() or config.gsc_site_url
     property_id = os.environ.get("SILENTFROG_GA4_PROPERTY_ID", "").strip() or config.ga4_property_id
@@ -79,14 +91,33 @@ def from_env() -> GoogleConnection | None:
         if ga4_token and property_id:
             ga4_service = oauth.build_ga4_service(ga4_token)
     except Exception:
-        return None
+        return (
+            None,
+            "Google client libraries could not start (install silentfrog[google]) or the stored token is invalid.",
+        )
     if gsc_service is None and ga4_service is None:
-        return None
-    return GoogleConnection(
-        gsc=GscClient(gsc_service),
-        ga4=Ga4Client(ga4_service, property_id),
-        site_url=site_url,
+        if gsc_token or ga4_token:
+            return (
+                None,
+                "Connected, but no Search Console property or GA4 property id is set (Connect Google...).",
+            )
+        return None, _no_account_reason()
+    return (
+        GoogleConnection(
+            gsc=GscClient(gsc_service),
+            ga4=Ga4Client(ga4_service, property_id),
+            site_url=site_url,
+        ),
+        "",
     )
 
 
-__all__ = ["GoogleConnection", "from_env"]
+def from_env() -> GoogleConnection | None:
+    """The connection from :func:`connect`, or None when the integration isn't
+    enabled/configured. The GSC site URL / GA4 property id come from env when
+    set, else the stored config (env always wins over config so headless/CI
+    behaviour is unchanged). Never raises."""
+    return connect()[0]
+
+
+__all__ = ["GoogleConnection", "connect", "from_env"]

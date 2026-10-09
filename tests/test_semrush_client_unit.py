@@ -181,3 +181,78 @@ async def test_test_connection_network_exception(monkeypatch, tmp_path) -> None:
 async def test_test_connection_empty_key() -> None:
     ok, _message = await run_test_connection("")
     assert ok is False
+
+
+# --- PR-G2: INT-5 / INT-7 / INT-9 -----------------------------------------
+
+
+def _csv_server_app(web, posts: list[str]):
+    """A fake Semrush endpoint that counts real requests and answers slowly
+    enough that concurrent callers overlap."""
+    import asyncio
+
+    async def handler(request):
+        posts.append(request.query.get("type", ""))
+        await asyncio.sleep(0.05)
+        body = _DOMAIN_RANKS_BODY if request.query.get("type") == "domain_ranks" else _BACKLINKS_BODY
+        return web.Response(text=body)
+
+    app = web.Application()
+    app.router.add_get("/", handler)
+    return app
+
+
+@pytest.mark.asyncio
+async def test_concurrent_overviews_for_one_domain_spend_two_calls(aiohttp_server, monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    from aiohttp import web
+
+    from silentfrog.integrations.semrush import client
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    posts: list[str] = []
+    server = await aiohttp_server(_csv_server_app(web, posts))
+    monkeypatch.setattr(client, "_BASE_URL", str(server.make_url("/")))
+
+    results = await asyncio.gather(*[fetch_domain_overview("example.com", "KEY", max_calls=100) for _ in range(4)])
+
+    assert all(result.measured for result in results)
+    assert sorted(posts) == ["backlinks_overview", "domain_ranks"]
+
+
+@pytest.mark.asyncio
+async def test_error_body_with_a_numeric_code_is_reported_by_message(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    body = "ERROR 120 :: WRONG KEY - ID PAIR"
+    ok, message = await run_test_connection("KEY", session=_DummySession(bodies=[body]))
+    assert ok is False
+    assert "WRONG KEY" in message
+
+    metrics = await fetch_domain_overview("example.com", "KEY", 100, session=_DummySession(bodies=[body, body]))
+    assert metrics.measured is False and metrics.enabled is True
+    assert "WRONG KEY" in metrics.reason
+    assert _parse_csv(body) == []
+
+
+@pytest.mark.asyncio
+async def test_connection_test_refuses_once_the_daily_budget_is_spent(monkeypatch, tmp_path) -> None:
+    from silentfrog.integrations.semrush.budget import record_call
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    record_call()
+    session = _DummySession(bodies=[_DOMAIN_RANKS_BODY])
+
+    ok, message = await run_test_connection("KEY", session=session, max_calls=1)
+
+    assert ok is False and "cap" in message
+    assert session.calls == 0
+    ok, _ = await run_test_connection("KEY", session=session, max_calls=2)
+    assert ok is True and session.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_budget_exhausted_overview_says_why(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    metrics = await fetch_domain_overview("example.com", "KEY", max_calls=1, session=_DummySession())
+    assert metrics.measured is False and "cap" in metrics.reason

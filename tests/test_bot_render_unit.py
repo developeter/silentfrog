@@ -186,3 +186,75 @@ async def test_render_for_bots_unknown_token_gets_synthetic_ua() -> None:
     pool = _FakePool()
     await render_for_bots("https://e.com/p", _BASELINE, pool=pool, tokens=["somebot-x"])
     assert pool.user_agents == ["Mozilla/5.0 (compatible; somebot-x)"]
+
+
+# --- PR-G2: RND-1 (HTTP status, two-sided diff) and RND-4 (active pool) ------
+
+
+class _StatusPool(_FakePool):
+    """Serves the same HTML to everyone but answers some UAs with an HTTP status."""
+
+    def __init__(self, status_for, html_for=None) -> None:
+        super().__init__(html_for=html_for)
+        self._status_for = status_for
+
+    async def render(self, url: str, timeout: int = 15, user_agent: str = "") -> RenderResult:
+        result = await super().render(url, timeout, user_agent)
+        return RenderResult(url=url, rendered_html=result.rendered_html, http_status=self._status_for(user_agent))
+
+
+@pytest.mark.asyncio
+async def test_bot_answered_403_is_not_good_even_with_identical_html() -> None:
+    pool = _StatusPool(lambda ua: 403 if "GPTBot" in ua else 200)
+    payload = await render_for_bots("https://e.com/p", _BASELINE, pool=pool, tokens=["gptbot", "googlebot"])
+    assert payload["bots"]["gptbot"]["status"] != "good"
+    assert payload["bots"]["gptbot"]["reason"].startswith("Bot received HTTP 403")
+    assert payload["bots"]["googlebot"]["status"] == "good"
+    check = build_bot_render_check(payload)
+    assert check is not None and check.status == "warning" and "gptbot" in check.details
+
+
+@pytest.mark.asyncio
+async def test_site_wide_waf_block_is_flagged_although_every_bot_agrees() -> None:
+    # Uniform statuses are not "divergence", so only the 403 reason can flag it.
+    pool = _StatusPool(lambda ua: 403)
+    payload = await render_for_bots("https://e.com/p", _BASELINE, pool=pool, tokens=["gptbot", "googlebot"])
+    check = build_bot_render_check(payload)
+    assert check is not None and check.status == "warning"
+    assert "gptbot" in check.details and "googlebot" in check.details
+
+
+@pytest.mark.asyncio
+async def test_bot_served_less_than_the_server_html_is_flagged() -> None:
+    richer = _BASELINE.replace("</body>", "<h2>Pricing</h2><p>" + "x" * 600 + "</p></body>")
+    stripped = "<html><body><h1>Title</h1></body></html>"
+    pool = _FakePool(html_for=lambda ua: stripped if "GPTBot" in ua else richer)
+    payload = await render_for_bots("https://e.com/p", richer, pool=pool, tokens=["gptbot", "googlebot"])
+    assert payload["bots"]["gptbot"]["status"] != "good"
+    assert payload["bots"]["gptbot"]["reason"].startswith("Bot received less")
+    assert payload["bots"]["googlebot"]["status"] == "good"
+
+
+@pytest.mark.asyncio
+async def test_bot_renders_reuse_the_active_crawl_pool(monkeypatch) -> None:
+    from silentfrog import bot_render, seo_crawler
+    from silentfrog.crawl_options import AuditProfile, CrawlOptions, ProfilePolicy
+
+    crawl_pool = object()
+    seen: dict[str, object] = {}
+
+    async def fake_render_for_bots(url, body, pool=None, tokens=None):
+        seen["pool"] = pool
+        return {"measured": True, "reason": "", "bots": {}}
+
+    monkeypatch.setattr(bot_render, "render_for_bots", fake_render_for_bots)
+    monkeypatch.setattr(seo_crawler, "active_render_pool", lambda: crawl_pool)
+    monkeypatch.setattr(seo_crawler, "playwright_available", lambda: True)
+    opts = CrawlOptions.from_ui(gentle_mode=False, max_parallel=4, bot_render=True, profile=AuditProfile.DEEP)
+    response = type("R", (), {"url": "https://e.com/p", "body": _BASELINE})()
+    await seo_crawler._collect_bot_renders(response, opts, ProfilePolicy.for_profile(opts.profile))
+    assert seen["pool"] is crawl_pool
+
+    monkeypatch.setattr(seo_crawler, "playwright_available", lambda: False)
+    await seo_crawler._collect_bot_renders(response, opts, ProfilePolicy.for_profile(opts.profile))
+    assert seen["pool"] is None

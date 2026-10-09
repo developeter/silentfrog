@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import replace
 from typing import Any, cast
 from urllib.parse import urljoin, urlparse
 
@@ -260,7 +261,7 @@ async def _collect_analysis_sections(
     meta_robots = _meta_robots_value(response.headers, soup)
     robots_rules = robots_snapshot or await _parse_robots(request_url, timeout=timeout, options=crawl_options)
     robots_map = robots_rules.directive_map()
-    serp_snippet = await _make_serp_snippet(soup, response.url)
+    serp_snippet = await _make_serp_snippet(soup, response.url, private_network=crawl_options.allow_private_network)
     discovery = await fetch_discovery_files(
         response.url,
         robots_map=robots_map,
@@ -394,7 +395,10 @@ async def _collect_bot_renders(response: Any, crawl_options: CrawlOptions, polic
         return {}
     from .bot_render import render_for_bots
 
-    return await render_for_bots(response.url, response.body)
+    # RND-4: reuse the crawl's pool (sized to its concurrency) instead of a
+    # second process-wide Chromium; a single-page audit has none -> shared pool.
+    pool = active_render_pool() if playwright_available() else None
+    return await render_for_bots(response.url, response.body, pool=pool)
 
 
 async def _collect_accessibility(response: Any, crawl_options: CrawlOptions, policy: ProfilePolicy) -> dict[str, Any]:
@@ -571,18 +575,27 @@ def _collect_tech_stack(response: Any, soup: BeautifulSoup, crawl_options: Crawl
     return detect_tech(response.body, headers, scripts, generator).to_dict()
 
 
-async def _collect_google_metrics(url: str) -> dict[str, Any]:
-    """v2.0 V7 — GSC + GA4 metrics, gated on SILENTFROG_GOOGLE_ENABLE +
-    a connected account. Returns {} (unmeasured) on a stock audit."""
-    from .integrations.google.connection import from_env
+def _google_unavailable(reason: str) -> dict[str, Any]:
+    """Enabled-but-unmeasured Google fragment: both accounts say why (INT-3)."""
+    status = {"measured": False, "enabled": True, "reason": reason}
+    return {"gsc": dict(status), "ga4": dict(status)}
 
-    connection = from_env()
+
+async def _collect_google_metrics(url: str) -> dict[str, Any]:
+    """v2.0 V7 — GSC + GA4 metrics, gated on SILENTFROG_GOOGLE_ENABLE or the
+    Connect Google opt-in. {} (unmeasured, silent) on a stock audit; when
+    enabled but not usable the fragment carries the reason."""
+    from .integrations.google.connection import connect
+
+    connection, reason = connect()
     if connection is None:
-        return {}
+        return _google_unavailable(reason) if reason else {}
     try:
         return await asyncio.to_thread(connection.metrics_for, url)
-    except Exception:  # noqa: BLE001 — integration failure degrades silently
-        return {}
+    except Exception:  # noqa: BLE001 — integration failure degrades to a reason
+        return _google_unavailable(
+            "Google request failed (network error or expired token). Reconnect in Crawl settings."
+        )
 
 
 def _semrush_enabled() -> bool:
@@ -627,23 +640,30 @@ def _registrable_domain(url: str) -> str:
 async def _collect_semrush(url: str) -> dict[str, Any]:
     """v2.0 V17 — Semrush authority metrics, gated on the Settings checkbox (SemrushConfig.enabled) or
     SILENTFROG_SEMRUSH_ENABLE, plus an API key (keyring or env). Returns {}
-    (unmeasured) on a stock audit. Cached per registrable domain so the
-    daily call budget covers ~1-2 calls per domain. Never raises."""
+    on a stock audit; once enabled, an unmeasured result carries
+    ``{measured: False, enabled: True, reason}`` so the audit can say why
+    (INT-3). Cached per registrable domain so the daily call budget covers
+    ~1-2 calls per domain. Never raises."""
     if not _semrush_enabled():
         return {}
     from .integrations.semrush.client import fetch_domain_overview, resolve_api_key
+    from .integrations.semrush.types import SemrushMetrics
 
     api_key = resolve_api_key()
     if not api_key:
-        return {}
+        return SemrushMetrics.unavailable(
+            "No Semrush API key stored. Add one in Crawl settings > Authority (Semrush)."
+        ).to_dict()
     domain = _registrable_domain(url)
     if not domain:
-        return {}
+        return SemrushMetrics.unavailable(
+            "Semrush needs a public domain (localhost and IP addresses have none)."
+        ).to_dict()
     try:
         metrics = await fetch_domain_overview(domain, api_key, _semrush_max_calls())
-    except Exception:  # noqa: BLE001 — integration failure degrades silently
-        return {}
-    return metrics.to_dict()
+    except Exception:  # noqa: BLE001 — integration failure degrades to a reason
+        return SemrushMetrics.unavailable("Semrush request failed unexpectedly.").to_dict()
+    return replace(metrics, enabled=True).to_dict()
 
 
 async def _collect_rich_results(structured_data: dict[str, Any], url: str, *, probe_gsc: bool = True) -> dict[str, Any]:
@@ -730,10 +750,24 @@ async def _collect_crux(url: str) -> dict[str, Any]:
     return crux.to_dict()
 
 
-async def analyse_images(base: str, rows: list[list[str]], timeout: int = 10) -> list[list[str]]:
-    async with open_crawl_session() as sess:
-        coros = [_image_info(sess, urljoin(base, row[0]), timeout) for row in rows]
-        out = await asyncio.gather(*coros, return_exceptions=True)
+async def analyse_images(
+    base: str,
+    rows: list[list[str]],
+    timeout: int = 10,
+    options: CrawlOptions | None = None,
+) -> list[list[str]]:
+    """Fetch image dimensions/size/type/cache. Honours the audit's TLS / SSRF
+    posture and sends the user's headers only to the audited origin (PLUMB-6,
+    D1), so loopback / cookie-gated images measure like the page itself."""
+    opts = options or CrawlOptions.default()
+    urls = [urljoin(base, row[0]) for row in rows]
+    with crawl_http.crawl_posture(opts):
+        async with open_crawl_session() as sess:
+            coros = [
+                _image_info(sess, url, timeout, crawl_http._request_headers(opts, origin=base, target=url))
+                for url in urls
+            ]
+            out = await asyncio.gather(*coros, return_exceptions=True)
 
     result: list[list[str]] = []
     for o in out:

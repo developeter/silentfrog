@@ -119,7 +119,7 @@ def _render_with_browser(
     except Exception as exc:  # pragma: no cover - real browser failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
     try:
-        page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
+        response = page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
         vitals_payload = _collect_cdp_vitals(page) if collect_vitals else None
         script_result = _run_page_script(page, inject_js, evaluate_js)
         return RenderResult(
@@ -127,11 +127,19 @@ def _render_with_browser(
             rendered_html=page.content(),
             vitals_payload=vitals_payload,
             script_result=script_result,
+            http_status=_response_status(response),
         )
     except Exception as exc:  # pragma: no cover - real navigation failures
         return RenderResult(url=url, rendered_html="", error=f"{type(exc).__name__}: {exc}")
     finally:
         _safe_close(page)
+
+
+def _response_status(response: Any) -> int:
+    """Main-document HTTP status from ``page.goto``'s response (0 when absent
+    or not an int, e.g. a ``data:`` URL or a test double)."""
+    status = getattr(response, "status", 0)
+    return status if isinstance(status, int) and not isinstance(status, bool) else 0
 
 
 def _safe_close(closeable: Any) -> None:

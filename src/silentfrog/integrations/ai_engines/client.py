@@ -10,18 +10,22 @@ knob is read INSIDE this module, not passed in by the caller) and the
 Semrush client's keyring-first key resolution.
 
 A stock audit makes ZERO calls here: ``fetch_share_of_voice`` short-circuits
-before opening a session unless ``SILENTFROG_AI_SOV_ENABLE`` is set AND at
-least one engine has a resolvable key.
+before opening a session unless ``SILENTFROG_AI_SOV_ENABLE`` is set (or the
+Settings opt-in in ``ai_engines.config`` is ticked) AND at least one engine
+has a resolvable key.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any
 
 import aiohttp
 from aiohttp import ClientTimeout
 
+from ..single_flight import single_flight
+from .config import load_config
 from .history import record_point
 from .sampling import build_prompts
 from .scoring import cites_domain, count_competitor_mentions, mentions_brand, sentiment_label
@@ -46,19 +50,25 @@ _ENV_KEY_FALLBACKS = {
     "anthropic": "SILENTFROG_ANTHROPIC_API_KEY",
 }
 
-# One sampling per host per app session: the collector runs per audited URL,
-# and a site crawl would otherwise repeat the same paid brand-level prompts
-# for every page of the host. Keyed by host only — callers derive the brand
-# deterministically from the host, so a second brand for the same host
-# cannot occur today. Concurrent same-host workers may race past this once
-# (bounded by max_concurrent_per_host); that is accepted over a loop-bound
-# lock, since audits run under more than one event loop.
+# One sampling per (host, keys) per app session: the collector runs per audited
+# URL, and a site crawl would otherwise repeat the same paid brand-level prompts
+# for every page of the host. Keyed by host plus a hash of the resolved keys, so
+# fixing a wrong key re-samples instead of serving the old result; callers
+# derive the brand deterministically from the host. Only a report where at
+# least one engine really answered is stored (a 401 must stay retryable), and
+# concurrent same-host callers share one in-flight sampling (single_flight).
 _REPORT_MEMO: dict[str, ShareOfVoiceReport] = {}
 
 
 def _enabled() -> bool:
+    """Env knob OR the Settings checkbox (``ai_engines.config``); default OFF."""
     raw = os.environ.get("SILENTFROG_AI_SOV_ENABLE", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return raw in {"1", "true", "yes", "on"} or load_config().enabled
+
+
+def _memo_key(host: str, keys: dict[str, str]) -> str:
+    material = ";".join(f"{engine}={key}" for engine, key in sorted(keys.items()))
+    return f"{host}:{hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _competitors() -> tuple[str, ...]:
@@ -237,29 +247,13 @@ def _keyed_engines() -> dict[str, str]:
     return {engine: key for engine, key in keys.items() if key}
 
 
-async def fetch_share_of_voice(
+async def _sample_all(
     host: str,
     brand: str,
-    session: aiohttp.ClientSession | None = None,
-    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+    keys: dict[str, str],
+    session: aiohttp.ClientSession | None,
+    timeout_seconds: int,
 ) -> ShareOfVoiceReport:
-    """Sample the standard prompt set against every keyed engine and score
-    the results. Returns an unmeasured report — with ZERO network calls —
-    when the feature is off, the host/brand can't be derived, or no engine
-    has a key. A host is sampled at most once per app session (the signal is
-    host-level and off-page; every page of a crawl reuses the same report).
-    Never raises."""
-    host = (host or "").strip().lower()
-    brand = (brand or "").strip()
-    if not _enabled() or not host or not brand:
-        return ShareOfVoiceReport(host=host, brand=brand)
-    keys = _keyed_engines()
-    if not keys:
-        return ShareOfVoiceReport(host=host, brand=brand)
-    memoized = _REPORT_MEMO.get(host)
-    if memoized is not None:
-        return memoized
-
     prompts = build_prompts(brand)
     competitors = _competitors()
     own_session = session is None
@@ -278,9 +272,37 @@ async def fetch_share_of_voice(
     stats = {engine.engine: _history_stats(engine) for engine in engines if engine.measured}
     if stats:
         record_point(host, stats)
-    report = ShareOfVoiceReport(host=host, brand=brand, engines=engines, measured=True)
-    _REPORT_MEMO[host] = report
+    report = ShareOfVoiceReport(host=host, brand=brand, engines=engines, measured=bool(stats))
+    if report.measured:
+        _REPORT_MEMO[_memo_key(host, keys)] = report
     return report
+
+
+async def fetch_share_of_voice(
+    host: str,
+    brand: str,
+    session: aiohttp.ClientSession | None = None,
+    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+) -> ShareOfVoiceReport:
+    """Sample the standard prompt set against every keyed engine and score
+    the results. Returns an unmeasured report — with ZERO network calls —
+    when the feature is off, the host/brand can't be derived, or no engine
+    has a key. A host is sampled at most once per app session while its keys
+    are unchanged (the signal is host-level and off-page; every page of a
+    crawl reuses the same report), and concurrent callers share one sampling.
+    A sampling in which no engine answered is not remembered. Never raises."""
+    host = (host or "").strip().lower()
+    brand = (brand or "").strip()
+    if not _enabled() or not host or not brand:
+        return ShareOfVoiceReport(host=host, brand=brand)
+    keys = _keyed_engines()
+    if not keys:
+        return ShareOfVoiceReport(host=host, brand=brand)
+    memo_key = _memo_key(host, keys)
+    memoized = _REPORT_MEMO.get(memo_key)
+    if memoized is not None:
+        return memoized
+    return await single_flight(("sov", memo_key), lambda: _sample_all(host, brand, keys, session, timeout_seconds))
 
 
 __all__ = [

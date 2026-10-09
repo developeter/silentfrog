@@ -19,7 +19,7 @@ from .crawl_constants import _ACCEPT_DEFAULT, _ACCEPT_LANGUAGE_DEFAULT
 from .crawl_options import CrawlOptions
 from .http_client import fetch_text
 from .robots_simulator import RobotsRules, parse_robots
-from .transport import open_crawl_session
+from .transport import allow_private_network, insecure_tls, open_crawl_session
 
 _HOST_LIMITERS: dict[str, tuple[int, asyncio.Semaphore]] = {}
 _HOST_LIMITER_LOCK = asyncio.Lock()
@@ -64,6 +64,17 @@ async def _throttle_host(host: str, options: CrawlOptions):
         return
     semaphore = await _get_host_semaphore(host, max(1, options.max_concurrent_per_host))
     async with semaphore:
+        yield
+
+
+@contextmanager
+def crawl_posture(options: CrawlOptions) -> Iterator[None]:
+    """Enter the TLS / SSRF scopes ``options`` opted into (H7), for callers that
+    fetch outside ``analyse`` (robots tester, image analysis)."""
+    with (
+        insecure_tls(enabled=options.allow_insecure_tls),
+        allow_private_network(enabled=options.allow_private_network),
+    ):
         yield
 
 
@@ -119,9 +130,14 @@ def _headers_from_options(options: CrawlOptions) -> dict[str, str]:
     return {**_base_headers(options), **options.extra_headers}
 
 
-async def _image_info(session: aiohttp.ClientSession, url: str, timeout: int):
+async def _image_info(
+    session: aiohttp.ClientSession,
+    url: str,
+    timeout: int,
+    headers: dict[str, str] | None = None,
+):
     try:
-        async with session.get(url, timeout=ClientTimeout(total=timeout)) as r:
+        async with session.get(url, timeout=ClientTimeout(total=timeout), headers=headers) as r:
             raw = await r.read()
 
         size_b = len(raw)

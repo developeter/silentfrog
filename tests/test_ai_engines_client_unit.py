@@ -247,3 +247,118 @@ async def test_test_connection_unknown_engine_short_circuits() -> None:
     ok, message = await run_test_connection("claude", "KEY")
     assert ok is False
     assert "Unknown engine" in message
+
+
+# --- PR-G2: INT-2 (Settings opt-in), INT-4 (single flight), INT-6 (memo) ------
+
+
+class _OpenAiServer:
+    """A local OpenAI stand-in that counts real POSTs and answers slowly enough
+    for concurrent callers to overlap (so a missing guard shows as extra POSTs)."""
+
+    def __init__(self) -> None:
+        self.posts = 0
+        self.status = 200
+
+    async def handler(self, _request):
+        import asyncio
+
+        from aiohttp import web
+
+        self.posts += 1
+        await asyncio.sleep(0.05)
+        if self.status != 200:
+            return web.Response(status=self.status)
+        return web.json_response(_OPENAI_BODY)
+
+
+async def _sov_setup(aiohttp_server, monkeypatch, tmp_path, *, enable_env: str | None) -> _OpenAiServer:
+    from aiohttp import web
+
+    fake = _OpenAiServer()
+    app = web.Application()
+    app.router.add_post("/v1/chat", fake.handler)
+    server = await aiohttp_server(app)
+    monkeypatch.setattr(sov_client, "_OPENAI_URL", str(server.make_url("/v1/chat")))
+    monkeypatch.setattr(sov_client, "_keyring", lambda: (_ for _ in ()).throw(RuntimeError("no keychain in tests")))
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    if enable_env is None:
+        monkeypatch.delenv("SILENTFROG_AI_SOV_ENABLE", raising=False)
+    else:
+        monkeypatch.setenv("SILENTFROG_AI_SOV_ENABLE", enable_env)
+    monkeypatch.setenv("SILENTFROG_OPENAI_API_KEY", "KEY-1")
+    monkeypatch.delenv("SILENTFROG_PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("SILENTFROG_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("SILENTFROG_AI_SOV_PROMPTS", "What is Acme?;Is Acme good?")
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_settings_opt_in_enables_sampling_without_the_env_var(aiohttp_server, monkeypatch, tmp_path) -> None:
+    from silentfrog.integrations.ai_engines.config import AiEnginesConfig, save_config
+
+    fake = await _sov_setup(aiohttp_server, monkeypatch, tmp_path, enable_env=None)
+    assert sov_client._enabled() is False
+    assert (await fetch_share_of_voice("acme.com", "Acme")).measured is False
+    assert fake.posts == 0  # both switches off: not a single paid call
+
+    save_config(AiEnginesConfig(enabled=True))
+    assert sov_client._enabled() is True
+    report = await fetch_share_of_voice("acme.com", "Acme")
+    assert report.measured is True
+    assert fake.posts == 2  # 1 keyed engine x 2 prompts
+
+
+@pytest.mark.asyncio
+async def test_concurrent_callers_for_one_host_share_one_sampling(aiohttp_server, monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    fake = await _sov_setup(aiohttp_server, monkeypatch, tmp_path, enable_env="1")
+
+    reports = await asyncio.gather(*[fetch_share_of_voice("acme.com", "Acme") for _ in range(4)])
+
+    assert fake.posts == 2  # engines x prompts, not 4x that
+    assert all(report.measured for report in reports)
+
+
+@pytest.mark.asyncio
+async def test_failed_sampling_is_not_remembered_and_a_fixed_key_resamples(
+    aiohttp_server, monkeypatch, tmp_path
+) -> None:
+    fake = await _sov_setup(aiohttp_server, monkeypatch, tmp_path, enable_env="1")
+    fake.status = 401
+
+    failed = await fetch_share_of_voice("acme.com", "Acme")
+    assert failed.measured is False
+    assert sov_client._REPORT_MEMO == {}
+
+    fake.status = 200
+    monkeypatch.setenv("SILENTFROG_OPENAI_API_KEY", "KEY-2")
+    fixed = await fetch_share_of_voice("acme.com", "Acme")
+    assert fixed.measured is True
+    assert fake.posts == 4  # 2 failed probes, then 2 real ones
+
+
+@pytest.mark.asyncio
+async def test_memo_is_per_key_so_a_changed_key_resamples(aiohttp_server, monkeypatch, tmp_path) -> None:
+    fake = await _sov_setup(aiohttp_server, monkeypatch, tmp_path, enable_env="1")
+
+    await fetch_share_of_voice("acme.com", "Acme")
+    await fetch_share_of_voice("acme.com", "Acme")
+    assert fake.posts == 2  # same host, same key: sampled once
+
+    monkeypatch.setenv("SILENTFROG_OPENAI_API_KEY", "KEY-2")
+    await fetch_share_of_voice("acme.com", "Acme")
+    assert fake.posts == 4
+    assert all("KEY-" not in memo_key for memo_key in sov_client._REPORT_MEMO)  # keys are hashed, never stored
+
+
+def test_ai_engines_config_defaults_off_and_survives_corruption(monkeypatch, tmp_path) -> None:
+    from silentfrog.integrations.ai_engines.config import AiEnginesConfig, load_config, save_config
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    assert load_config().enabled is False
+    save_config(AiEnginesConfig(enabled=True))
+    assert load_config().enabled is True
+    (tmp_path / "ai_engines" / "config.json").write_text("{not json", encoding="utf-8")
+    assert load_config().enabled is False

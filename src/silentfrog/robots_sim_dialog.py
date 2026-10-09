@@ -17,12 +17,14 @@ already destroyed; see the v2.0 roadmap R1/R3 notes).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from qtpy import QtCore, QtWidgets
 
-from .crawl_options import DEFAULT_USER_AGENT
-from .http_client import fetch_page
+from .crawl_http import _request_headers, crawl_posture
+from .crawl_options import DEFAULT_USER_AGENT, CrawlOptions
+from .http_client import HttpResponse, fetch_page
 from .robots_simulator import RobotsRule, RobotsSimResult, simulate_robots
 
 
@@ -35,6 +37,28 @@ def _robots_txt_url(target_url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
 
+# Fetch outcome -> status line. A dict lookup (not if/elif) so a new outcome is
+# one row; the ssrf/tls rows name the Crawl settings box that unblocks them.
+_FETCH_STATUS_TEXT = {
+    "ok": "Fetched.",
+    "empty": "No robots.txt found (treated as empty).",
+    "ssrf": (
+        "Blocked: private-network address. Tick 'Allow private-network targets' in Crawl settings, then fetch again."
+    ),
+    "tls": "Certificate could not be verified. Tick 'Allow insecure TLS' in Crawl settings, then fetch again.",
+    "error": "Could not reach the host (network error or timeout).",
+}
+
+
+def _fetch_outcome(resp: HttpResponse) -> str:
+    """Key into ``_FETCH_STATUS_TEXT`` for one robots.txt fetch."""
+    if resp.status == 0:
+        return resp.error_kind if resp.error_kind in _FETCH_STATUS_TEXT else "error"
+    if resp.status >= 400 or not resp.body:
+        return "empty"
+    return "ok"
+
+
 def _rule_label(rule: RobotsRule | None) -> str:
     if rule is None:
         return "No rule matched — allowed by RFC 9309's permissive default."
@@ -43,19 +67,32 @@ def _rule_label(rule: RobotsRule | None) -> str:
 
 class _RobotsFetchWorker(QtCore.QThread):
     """Fetches one robots.txt body off the UI thread via the guarded
-    ``fetch_page`` helper. A non-2xx/errored response becomes an empty body,
-    matching ``robots_matcher.fetch_robots_matcher``'s own contract."""
+    ``fetch_page`` helper under the same TLS / SSRF scopes, user agent and
+    audited-origin headers the Crawl settings dialog currently holds (D3). A
+    non-2xx/errored response becomes an empty body, matching
+    ``robots_matcher.fetch_robots_matcher``'s own contract; ``outcome`` says
+    which kind of empty it was."""
 
     finished_fetch = QtCore.Signal(str)
 
-    def __init__(self, robots_url: str, parent: QtCore.QObject | None = None) -> None:
+    def __init__(
+        self,
+        robots_url: str,
+        parent: QtCore.QObject | None = None,
+        options: CrawlOptions | None = None,
+    ) -> None:
         super().__init__(parent)
         self._robots_url = robots_url
+        self._options = options or CrawlOptions.default()
+        self.outcome = "empty"
 
     def run(self) -> None:
-        resp = asyncio.run(fetch_page(self._robots_url, timeout=10))
-        body = resp.body if resp.status and resp.status < 400 else ""
-        self.finished_fetch.emit(body)
+        opts = self._options
+        headers = _request_headers(opts, origin=self._robots_url, target=self._robots_url)
+        with crawl_posture(opts):
+            resp = asyncio.run(fetch_page(self._robots_url, timeout=10, headers=headers))
+        self.outcome = _fetch_outcome(resp)
+        self.finished_fetch.emit(resp.body if self.outcome == "ok" else "")
 
 
 _LIVE_FETCH_WORKERS: set[_RobotsFetchWorker] = set()
@@ -76,8 +113,13 @@ def _retain_until_stopped(worker: _RobotsFetchWorker) -> None:
 class RobotsSimDialog(QtWidgets.QDialog):
     """Modal robots.txt simulator launched from Settings → Advanced."""
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        options_provider: Callable[[], CrawlOptions] | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._options_provider = options_provider
         self.setWindowTitle("Test a URL against robots.txt")
         self.setMinimumWidth(520)
         self._fetch_worker: _RobotsFetchWorker | None = None
@@ -145,16 +187,18 @@ class RobotsSimDialog(QtWidgets.QDialog):
             self.lbl_fetch_status.setText("Enter a valid http(s) URL first.")
             return
         self.lbl_fetch_status.setText("Fetching…")
-        worker = _RobotsFetchWorker(robots_url)
+        options = self._options_provider() if self._options_provider else None
+        worker = _RobotsFetchWorker(robots_url, options=options)
         worker.finished_fetch.connect(self._on_fetch_finished)
         _retain_until_stopped(worker)
         self._fetch_worker = worker
         worker.start()
 
     def _on_fetch_finished(self, body: str) -> None:
-        self._fetch_worker = None
+        worker, self._fetch_worker = self._fetch_worker, None
+        outcome = worker.outcome if worker is not None else ("ok" if body else "empty")
         self.txt_robots_body.setPlainText(body)
-        self.lbl_fetch_status.setText("Fetched." if body else "No robots.txt found (treated as empty).")
+        self.lbl_fetch_status.setText(_FETCH_STATUS_TEXT[outcome])
 
     def done(self, result: int) -> None:
         """Detach an in-flight fetch before the modal goes away, so its

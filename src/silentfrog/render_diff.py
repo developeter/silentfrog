@@ -40,6 +40,9 @@ class RenderResult:
     # ``RenderPool.render`` (e.g. the axe-core scan result). ``None`` means
     # no script was requested, or it failed/returned nothing.
     script_result: Any = None
+    # RND-1: HTTP status of the main document (0 = unknown / not navigated), so
+    # a bot that was answered 403 by a WAF is not mistaken for a clean render.
+    http_status: int = 0
 
 
 RenderStatus = Literal["good", "warning", "critical", "not_measured"]

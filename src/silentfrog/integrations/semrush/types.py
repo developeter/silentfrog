@@ -32,6 +32,15 @@ class SemrushMetrics:
     paid_keywords: int = 0
     paid_traffic: int = 0
     measured: bool = False
+    # INT-3: the opt-in is on but nothing could be measured; ``reason`` says why
+    # (no key, budget spent, API error ...). Both stay default on a stock audit.
+    enabled: bool = False
+    reason: str = ""
+
+    @classmethod
+    def unavailable(cls, reason: str) -> SemrushMetrics:
+        """Enabled but unmeasured, with the human-readable cause."""
+        return cls(enabled=True, reason=reason)
 
     @classmethod
     def empty(cls) -> SemrushMetrics:
@@ -53,10 +62,18 @@ class SemrushMetrics:
             paid_keywords=_to_int(value.get("paid_keywords", 0)),
             paid_traffic=_to_int(value.get("paid_traffic", 0)),
             measured=bool(value.get("measured", False)),
+            enabled=bool(value.get("enabled", False)),
+            reason=str(value.get("reason", "") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if self.enabled:
+            extra["enabled"] = True
+        if self.reason:
+            extra["reason"] = self.reason
         return {
+            **extra,
             "domain_authority": self.domain_authority,
             "organic_keywords": self.organic_keywords,
             "organic_traffic": self.organic_traffic,

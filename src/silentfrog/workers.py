@@ -69,12 +69,13 @@ def run_image_analysis(
     timeout: int,
     on_success: Callable[[list[list[str]]], None],
     on_error: Callable[[str], None],
+    options: CrawlOptions | None = None,
 ) -> threading.Thread:
     rows_list = [list(row) for row in rows]
 
     def _target() -> None:
         try:
-            result = asyncio.run(analyse_images(base, rows_list, timeout=timeout))
+            result = asyncio.run(analyse_images(base, rows_list, timeout=timeout, options=options))
             on_success(result)
         except Exception as exc:  # noqa: BLE001
             on_error(str(exc))

@@ -1,8 +1,9 @@
 """Semrush Analytics API v3 client (v2.0 V17, optional + off by default).
 
 The Semrush API is NOT JSON — it returns semicolon-separated CSV text
-(first line = headers). On error the body is a single line beginning
-``ERROR ::``. Every parser is tolerant and never raises; the client
+(first line = headers). On error the body is a single line like
+``ERROR 120 :: WRONG KEY - ID PAIR`` (the numeric code is optional). Every
+parser is tolerant and never raises; the client
 degrades to ``SemrushMetrics(measured=False)`` on an empty key, an
 exhausted budget, an HTTP error, or an unparseable body.
 
@@ -19,12 +20,14 @@ in ``integrations.google.oauth`` (keyring first, env fallback).
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import aiohttp
 from aiohttp import ClientTimeout
 
 from ..._psi_cache import read_cache, write_cache
+from ..single_flight import single_flight
 from .budget import record_call, remaining
 from .types import SemrushMetrics
 
@@ -36,6 +39,10 @@ _KEYRING_SERVICE = "silentfrog-semrush"
 
 _DOMAIN_RANKS_COLUMNS = "Db,Dn,Rk,Or,Ot,Oc,Ad,At,Ac"
 _BACKLINKS_COLUMNS = "ascore,total,domains_num"
+
+# ``ERROR 120 :: WRONG KEY - ID PAIR`` / ``ERROR :: ...``: the numeric code is
+# optional, so a plain ``startswith("ERROR ::")`` misses the coded form (INT-9).
+_ERROR_RE = re.compile(r"^\s*ERROR\b\s*(?P<code>\d+)?\s*::\s*(?P<message>.*)$", re.IGNORECASE)
 
 
 def _keyring() -> Any:
@@ -69,12 +76,23 @@ def _to_int(value: Any) -> int:
         return 0
 
 
+def _error_message(body: str) -> str:
+    """``"WRONG KEY - ID PAIR (code 120)"`` for an error body, ``""`` otherwise."""
+    lines = (body or "").strip().splitlines()
+    match = _ERROR_RE.match(lines[0]) if lines else None
+    if match is None:
+        return ""
+    message = match.group("message").strip() or "unknown error"
+    code = match.group("code")
+    return f"{message} (code {code})" if code else message
+
+
 def _parse_csv(body: str) -> list[dict[str, str]]:
     """Tolerant Semrush CSV parser: split lines, split on ``;``, zip
-    headers→row. Returns ``[]`` for empty input or an ``ERROR ::`` body.
+    headers→row. Returns ``[]`` for empty input or an ``ERROR`` body.
     Never raises."""
     text = (body or "").strip()
-    if not text or text.startswith("ERROR ::"):
+    if not text or _error_message(text):
         return []
     lines = [line for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
@@ -114,12 +132,27 @@ async def _get_text(
         return None
 
 
+async def _fetch_row(
+    session: aiohttp.ClientSession,
+    params: dict[str, str],
+    timeout: int,
+) -> tuple[dict[str, str] | None, str]:
+    """One metered call -> (first CSV row or None, why it has none)."""
+    body = await _get_text(session, params, timeout)
+    if body is None:
+        return None, "request failed (HTTP or network error)"
+    rows = _parse_csv(body)
+    if rows:
+        return rows[0], ""
+    return None, _error_message(body) or "no data returned"
+
+
 async def _fetch_domain_ranks(
     session: aiohttp.ClientSession,
     domain: str,
     api_key: str,
     timeout: int,
-) -> dict[str, str] | None:
+) -> tuple[dict[str, str] | None, str]:
     params = {
         "type": "domain_ranks",
         "key": api_key,
@@ -127,11 +160,7 @@ async def _fetch_domain_ranks(
         "database": _DATABASE,
         "export_columns": _DOMAIN_RANKS_COLUMNS,
     }
-    body = await _get_text(session, params, timeout)
-    if body is None:
-        return None
-    rows = _parse_csv(body)
-    return rows[0] if rows else None
+    return await _fetch_row(session, params, timeout)
 
 
 async def _fetch_backlinks(
@@ -139,7 +168,7 @@ async def _fetch_backlinks(
     domain: str,
     api_key: str,
     timeout: int,
-) -> dict[str, str] | None:
+) -> tuple[dict[str, str] | None, str]:
     params = {
         "type": "backlinks_overview",
         "key": api_key,
@@ -147,11 +176,7 @@ async def _fetch_backlinks(
         "target_type": "root_domain",
         "export_columns": _BACKLINKS_COLUMNS,
     }
-    body = await _get_text(session, params, timeout)
-    if body is None:
-        return None
-    rows = _parse_csv(body)
-    return rows[0] if rows else None
+    return await _fetch_row(session, params, timeout)
 
 
 # Semrush echoes the requested column code in some responses and the
@@ -191,6 +216,40 @@ def _build_metrics(ranks: dict[str, str] | None, backlinks: dict[str, str] | Non
     )
 
 
+async def _overview_uncached(
+    domain: str,
+    api_key: str,
+    max_calls: int,
+    session: aiohttp.ClientSession | None,
+    timeout_seconds: int,
+) -> SemrushMetrics:
+    """Cache check, budget check, the two metered calls and the cache write,
+    as one unit so concurrent callers for a domain cannot interleave them."""
+    cached = _read_cache(domain)
+    if cached is not None:
+        return cached
+
+    # Both calls of a full overview must fit the remaining budget.
+    if remaining(max_calls) < 2:
+        return SemrushMetrics.unavailable(f"Daily Semrush call cap reached ({max_calls}); a domain overview needs 2.")
+
+    own_session = session is None
+    if own_session:
+        session = aiohttp.ClientSession()
+    try:
+        ranks, ranks_error = await _fetch_domain_ranks(session, domain, api_key, timeout_seconds)
+        backlinks, backlinks_error = await _fetch_backlinks(session, domain, api_key, timeout_seconds)
+    finally:
+        if own_session and session is not None:
+            await session.close()
+
+    if ranks is None and backlinks is None:
+        return SemrushMetrics.unavailable(f"Semrush {ranks_error or backlinks_error}.")
+    result = _build_metrics(ranks, backlinks)
+    _write_cache(domain, result)
+    return result
+
+
 async def fetch_domain_overview(
     domain: str,
     api_key: str,
@@ -199,49 +258,34 @@ async def fetch_domain_overview(
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
 ) -> SemrushMetrics:
     """Domain overview = domain_ranks + backlinks_overview (up to 2 metered
-    calls). Cache-first per domain, budget-guarded. Returns an unmeasured
-    ``SemrushMetrics`` cleanly on empty key, exhausted budget, or any
-    HTTP/parse error. Never raises."""
+    calls). Cache-first per domain, budget-guarded, and single-flight per
+    (loop, domain) so a crawl's concurrent pages spend one overview, not one
+    each (INT-5). Returns an unmeasured ``SemrushMetrics`` (with a ``reason``)
+    on empty key, exhausted budget, or any HTTP/parse/API error. Never raises."""
     domain = (domain or "").strip().lower()
     if not domain or not api_key:
         return SemrushMetrics.empty()
-
-    cached = _read_cache(domain)
-    if cached is not None:
-        return cached
-
-    # Both calls of a full overview must fit the remaining budget.
-    if remaining(max_calls) < 2:
-        return SemrushMetrics.empty()
-
-    own_session = session is None
-    if own_session:
-        session = aiohttp.ClientSession()
-    try:
-        ranks = await _fetch_domain_ranks(session, domain, api_key, timeout_seconds)
-        backlinks = await _fetch_backlinks(session, domain, api_key, timeout_seconds)
-    finally:
-        if own_session and session is not None:
-            await session.close()
-
-    if ranks is None and backlinks is None:
-        return SemrushMetrics.empty()
-    result = _build_metrics(ranks, backlinks)
-    _write_cache(domain, result)
-    return result
+    return await single_flight(
+        ("semrush", domain),
+        lambda: _overview_uncached(domain, api_key, max_calls, session, timeout_seconds),
+    )
 
 
 async def test_connection(
     api_key: str,
     session: aiohttp.ClientSession | None = None,
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+    max_calls: int | None = None,
 ) -> tuple[bool, str]:
     """Hit a cheap ``domain_ranks`` endpoint and report ``(ok, message)``.
 
-    ``ok`` is True when the body parses and does not start with
-    ``ERROR ::``. Never raises."""
+    ``ok`` is True when the body parses and is not an ``ERROR`` line. The test
+    is one metered call, so with ``max_calls`` set it is refused once the
+    daily budget is spent (INT-7). Never raises."""
     if not api_key:
         return False, "No API key set."
+    if max_calls is not None and remaining(max_calls) < 1:
+        return False, f"Daily Semrush call cap reached ({max_calls}); try again tomorrow or raise the cap."
     params = {
         "type": "domain_ranks",
         "key": api_key,
@@ -259,7 +303,7 @@ async def test_connection(
             await session.close()
     if body is None:
         return False, "Semrush request failed (HTTP or network error)."
-    if body.strip().startswith("ERROR ::"):
+    if _error_message(body):
         return False, body.strip()
     if not _parse_csv(body):
         return False, "Semrush returned an unrecognised response."

@@ -117,23 +117,54 @@ def close_shared_render_pool() -> None:
 # --- payload production ------------------------------------------------------
 
 
-def _diff_entry(baseline_html: str, rendered_html: str, error: str) -> dict[str, Any]:
-    if error:
-        return {
-            "status": "warning",
-            "missing_headings": [],
-            "missing_main_text_chars": 0,
-            "missing_links": 0,
-            "reason": f"Render failed: {error}",
-        }
-    diff = compute_render_diff(baseline_html, rendered_html)
+# Reason prefixes that mark a bot as a problem on its own, even when every bot
+# agrees (a site-wide WAF block is uniform, not "divergent").
+_PROBLEM_REASON_PREFIXES = ("Render failed", "Bot received")
+_STATUS_RANK = {"good": 0, "warning": 1, "critical": 2}
+
+
+def _problem_entry(reason: str) -> dict[str, Any]:
     return {
-        "status": diff.status,
-        "missing_headings": list(diff.missing_headings),
-        "missing_main_text_chars": diff.missing_main_text_chars,
-        "missing_links": diff.missing_links,
-        "reason": diff.reason,
+        "status": "warning",
+        "missing_headings": [],
+        "missing_main_text_chars": 0,
+        "missing_links": 0,
+        "reason": reason,
     }
+
+
+def _two_sided_diff(baseline_html: str, rendered_html: str) -> dict[str, Any]:
+    """The bot's render vs the server HTML in both directions. Forward catches
+    content only the render has (JS / bot-only content); backward catches a
+    bot that was served *less* than the baseline (a stripped or block page),
+    which the one-sided diff reported as clean (RND-1)."""
+    forward = compute_render_diff(baseline_html, rendered_html)
+    entry = {
+        "status": forward.status,
+        "missing_headings": list(forward.missing_headings),
+        "missing_main_text_chars": forward.missing_main_text_chars,
+        "missing_links": forward.missing_links,
+        "reason": forward.reason,
+    }
+    if forward.status == "critical" or not (baseline_html or "").strip():
+        return entry
+    backward = compute_render_diff(rendered_html, baseline_html)
+    if _STATUS_RANK.get(backward.status, 0) <= _STATUS_RANK.get(forward.status, 0):
+        return entry
+    entry["status"] = backward.status
+    entry["reason"] = (
+        f"Bot received less than the server HTML: {len(backward.missing_headings)} heading(s), "
+        f"{backward.missing_main_text_chars} text chars and {backward.missing_links} link(s) missing."
+    )
+    return entry
+
+
+def _diff_entry(baseline_html: str, rendered_html: str, error: str, http_status: int = 0) -> dict[str, Any]:
+    if error:
+        return _problem_entry(f"Render failed: {error}")
+    if http_status >= 400:
+        return _problem_entry(f"Bot received HTTP {http_status} (blocked or challenged), not the page.")
+    return _two_sided_diff(baseline_html, rendered_html)
 
 
 async def render_for_bots(
@@ -157,7 +188,8 @@ async def render_for_bots(
     for token in bot_tokens:
         user_agent = BOT_USER_AGENTS.get(token, f"Mozilla/5.0 (compatible; {token})")
         result = await active_pool.render(url, timeout=_RENDER_TIMEOUT_SECONDS, user_agent=user_agent)
-        bots[token] = _diff_entry(baseline_html, result.rendered_html, result.error)
+        status = int(getattr(result, "http_status", 0) or 0)
+        bots[token] = _diff_entry(baseline_html, result.rendered_html, result.error, status)
     return {"measured": True, "reason": "", "bots": bots}
 
 
@@ -196,7 +228,7 @@ def build_bot_render_check(payload: Mapping[str, Any] | None) -> AiVisibilityChe
     failed = sorted(
         token
         for token, entry in bots_map.items()
-        if isinstance(entry, Mapping) and str(entry.get("reason", "")).startswith("Render failed")
+        if isinstance(entry, Mapping) and str(entry.get("reason", "")).startswith(_PROBLEM_REASON_PREFIXES)
     )
     problem_tokens = sorted(set(divergent) | set(failed))
     if problem_tokens:
@@ -205,8 +237,8 @@ def build_bot_render_check(payload: Mapping[str, Any] | None) -> AiVisibilityChe
             check=_CHECK_TITLE,
             status="warning",
             details=(
-                f"{len(problem_tokens)} of {len(bots_map)} bots diverge from the majority "
-                f"rendered view: {', '.join(problem_tokens)}."
+                f"{len(problem_tokens)} of {len(bots_map)} bots were blocked, failed to render or "
+                f"received a different view than the rest: {', '.join(problem_tokens)}."
             ),
             recommendation=_CHECK_RECOMMENDATION,
             key="access_bot_render",

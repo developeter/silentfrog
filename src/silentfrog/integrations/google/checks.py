@@ -16,7 +16,7 @@ from .types import Ga4Metrics, GscMetrics
 _CTR_GOOD = 0.02  # ~2% CTR is around average; above is a good signal
 _POSITION_TOP = 10.0
 _ENGAGEMENT_GOOD_SECONDS = 30.0
-_BOUNCE_WARN = 0.70
+_BOUNCE_HIGH = 0.70
 
 REAL_PERFORMANCE_AREA = "Real performance"
 ENGAGEMENT_AREA = "Engagement"
@@ -45,9 +45,9 @@ def _gsc_checks(gsc: GscMetrics) -> list[AiVisibilityCheck]:
                 REAL_PERFORMANCE_AREA,
                 "Search Console data",
                 "info",
-                "Not connected.",
-                "Connect via Settings → Connect Google, or set SILENTFROG_GOOGLE_ENABLE=1 and "
-                "SILENTFROG_GSC_SITE_URL for headless use.",
+                gsc.reason or "Not connected.",
+                "Connect via Crawl settings > Connect Google. For headless use set SILENTFROG_GOOGLE_ENABLE=1 "
+                "and SILENTFROG_GSC_SITE_URL, then restart the app (environment variables are read at start-up).",
                 "gsc_impressions_present",
             )
         ]
@@ -96,14 +96,14 @@ def _ga4_checks(ga4: Ga4Metrics) -> list[AiVisibilityCheck]:
                 ENGAGEMENT_AREA,
                 "Analytics data",
                 "info",
-                "Not connected.",
-                "Connect via Settings → Connect Google, or set SILENTFROG_GOOGLE_ENABLE=1 and "
-                "SILENTFROG_GA4_PROPERTY_ID for headless use.",
+                ga4.reason or "Not connected.",
+                "Connect via Crawl settings > Connect Google. For headless use set SILENTFROG_GOOGLE_ENABLE=1 "
+                "and SILENTFROG_GA4_PROPERTY_ID, then restart the app (environment variables are read at start-up).",
                 "ga4_engagement_above_median",
             )
         ]
-    bounce_high = ga4.bounce_rate > _BOUNCE_WARN
     engaged = ga4.avg_engagement_seconds >= _ENGAGEMENT_GOOD_SECONDS
+    bounce_high = ga4.bounce_rate > _BOUNCE_HIGH
     return [
         _check(
             ENGAGEMENT_AREA,
@@ -113,12 +113,14 @@ def _ga4_checks(ga4: Ga4Metrics) -> list[AiVisibilityCheck]:
             "-",
             "ga4_engagement_above_median",
         ),
+        # INT-8: bounce is an off-page behavioural signal (benchmarks differ by
+        # page type), so a high value is information, never a warning (§1.5).
         _check(
             ENGAGEMENT_AREA,
             "Bounce rate",
-            "warning" if bounce_high else "good",
+            "info" if bounce_high else "good",
             f"Bounce {ga4.bounce_rate * 100:.0f}%.",
-            "High bounce — improve above-the-fold relevance and intent match." if bounce_high else "-",
+            "High bounce: check above-the-fold relevance and intent match." if bounce_high else "-",
             "ga4_bounce_below_threshold",
         ),
     ]

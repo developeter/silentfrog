@@ -59,6 +59,19 @@ def _scrapling_available() -> bool:
     return importlib.util.find_spec("scrapling") is not None
 
 
+def _google_connect_tooltip() -> str:
+    """Connect-button tooltip that matches this build: it only promises the
+    built-in Google app when one is actually packaged (INT-1)."""
+    from .integrations.google.app_client import builtin_client_available
+
+    if builtin_client_available():
+        return "Off by default. Connect your Google account through Silentfrog's built-in Google app."
+    return (
+        "Off by default. This build has no built-in Google app, so you need your own OAuth Desktop-app "
+        "client_secret.json (choose it in the next window) before Connect works."
+    )
+
+
 def _google_available() -> bool:
     """Return True when the optional silentfrog[google] extra is importable.
 
@@ -253,8 +266,14 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
             )
         form.addRow("API key", self.edit_semrush_key)
         self.spin_semrush_max_calls = QtWidgets.QSpinBox()
-        self.spin_semrush_max_calls.setRange(1, 10000)
+        # A full domain overview is two metered calls, so a cap of 1 could never
+        # fetch anything (INT-7); the floor is 2.
+        self.spin_semrush_max_calls.setRange(2, 10000)
         self.spin_semrush_max_calls.setValue(100)
+        self.spin_semrush_max_calls.setToolTip(
+            "Daily cap on metered Semrush calls. One domain overview takes 2 calls, so the minimum is 2; "
+            "Test connection takes 1 more from the same budget."
+        )
         form.addRow("Max Semrush calls per day", self.spin_semrush_max_calls)
         self.btn_semrush_test = QtWidgets.QPushButton("Test connection")
         self.btn_semrush_test.clicked.connect(self._on_semrush_test)
@@ -272,16 +291,25 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _build_ai_engines_group(self, theme: str) -> QtWidgets.QGroupBox:
         """BYO-key AI share-of-voice controls (v3 G3). Optional + empty by
         default — each key is persisted to the OS keychain only, never to
-        QSettings or disk; sampling itself stays gated on
-        SILENTFROG_AI_SOV_ENABLE regardless of whether a key is set."""
+        QSettings or disk; sampling itself stays gated on the 'Use AI share of
+        voice in audits' checkbox (or SILENTFROG_AI_SOV_ENABLE) regardless of
+        whether a key is set."""
         box = QtWidgets.QGroupBox("AI share of voice (BYO keys)")
         form = QtWidgets.QFormLayout(box)
         intro = QtWidgets.QLabel(
-            "Samples ChatGPT, Perplexity and Gemini with your own API keys. Off by default — enable "
-            "with SILENTFROG_AI_SOV_ENABLE=1. Keys are stored in the OS keychain, never in the repo."
+            "Samples ChatGPT, Perplexity and Gemini with your own API keys. Off by default; tick the box "
+            "below to include it in audits (each audited host costs a handful of paid API calls). Keys are "
+            "stored in the OS keychain, never in the repo."
         )
         intro.setWordWrap(True)
         form.addRow(intro)
+        self.chk_sov_enabled = QtWidgets.QCheckBox("Use AI share of voice in audits")
+        self.chk_sov_enabled.setStyleSheet(self._checkbox_stylesheet(theme))
+        self.chk_sov_enabled.setToolTip(
+            "Off by default. When checked, audits sample the engines you added a key for. These are paid "
+            "API calls, made once per host per session. Equivalent to SILENTFROG_AI_SOV_ENABLE=1."
+        )
+        form.addRow(self.chk_sov_enabled)
         self.edit_sov_keys: dict[str, QtWidgets.QLineEdit] = {}
         for engine, label in _SOV_ENGINES:
             edit = QtWidgets.QLineEdit()
@@ -461,10 +489,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QtWidgets.QLabel("Google (Search Console / Analytics 4)"))
         self.btn_google_connect = QtWidgets.QPushButton("Connect Google…")
-        self.btn_google_connect.setToolTip(
-            "Off by default. Connect your own Google account through Silentfrog's built-in "
-            "Google app (or bring your own client_secret.json)."
-        )
+        self.btn_google_connect.setToolTip(_google_connect_tooltip())
         if not _google_available():
             self.btn_google_connect.setEnabled(False)
             self.btn_google_connect.setToolTip(
@@ -492,7 +517,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _on_open_robots_sim(self) -> None:
         from .robots_sim_dialog import RobotsSimDialog
 
-        RobotsSimDialog(self).exec()
+        RobotsSimDialog(self, options_provider=self.options).exec()
 
     def _connect_signals(self) -> None:
         self.chk_gentle.toggled.connect(self._on_gentle_toggled)
@@ -579,6 +604,9 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
     def _initialize_ai_engines(self) -> None:
         """Prefill each masked BYO key from the keychain/env. Degrades to
         empty per field when neither is available."""
+        from .integrations.ai_engines.config import load_config
+
+        self.chk_sov_enabled.setChecked(load_config().enabled)
         for engine, edit in self.edit_sov_keys.items():
             edit.setText(self._load_sov_key(engine))
 
@@ -743,6 +771,7 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         dialog closes."""
         self._persist_semrush()
         self._persist_ai_engine_keys()
+        self._persist_ai_engine_enabled()
         super().accept()
 
     def _persist_semrush(self) -> None:
@@ -794,6 +823,13 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         except Exception:
             return False
 
+    def _persist_ai_engine_enabled(self) -> None:
+        """Persist the 'Use AI share of voice' opt-in (pure JSON config the
+        crawler reads; the keys stay in the keychain)."""
+        from .integrations.ai_engines.config import AiEnginesConfig, save_config
+
+        save_config(AiEnginesConfig(enabled=self.chk_sov_enabled.isChecked()))
+
     def _persist_ai_engine_keys(self) -> None:
         """Persist each non-empty BYO key to the OS keychain only — never to
         QSettings or disk. Swallows when keyring is unavailable, same as
@@ -825,11 +861,12 @@ class CrawlSettingsDialog(QtWidgets.QDialog):
         from .integrations.semrush.client import test_connection
 
         key = self.edit_semrush_key.text().strip()
+        max_calls = self.spin_semrush_max_calls.value()
         self.lbl_semrush_test.setText("Testing…")
 
         def _target() -> None:
             try:
-                ok, message = asyncio.run(test_connection(key))
+                ok, message = asyncio.run(test_connection(key, max_calls=max_calls))
             except Exception as exc:  # noqa: BLE001
                 ok, message = False, str(exc)
             text = self._semrush_test_status(ok, message)

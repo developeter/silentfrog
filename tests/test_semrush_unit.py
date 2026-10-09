@@ -356,3 +356,75 @@ def test_semrush_test_status_failure_passes_message_through_and_never_stores(mon
 
     text = CrawlSettingsDialog._semrush_test_status(False, "No API key set.")
     assert text == "✗ No API key set."
+
+
+# --- PR-G2: INT-7 (cap floor, budget-aware test) and INT-2 (SoV checkbox) -----
+
+
+def _stubbed_dialog(qtbot, monkeypatch, tmp_path):
+    from silentfrog.crawl_options import CrawlOptions
+    from silentfrog.settings_dialog import CrawlSettingsDialog
+
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_semrush_key", staticmethod(lambda: ""))
+    monkeypatch.setattr(CrawlSettingsDialog, "_load_sov_key", staticmethod(lambda engine: ""))
+    monkeypatch.setattr(CrawlSettingsDialog, "_store_semrush_key", staticmethod(lambda key: True))
+    dialog = CrawlSettingsDialog(CrawlOptions.default())
+    qtbot.addWidget(dialog)
+    return dialog
+
+
+def test_semrush_cap_spinbox_cannot_go_below_one_full_overview(qtbot, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("SILENTFROG_DATA_DIR", str(tmp_path))
+    save_config(SemrushConfig(enabled=True, max_calls=1))  # an old cap that could never fetch anything
+    dialog = _stubbed_dialog(qtbot, monkeypatch, tmp_path)
+
+    assert dialog.spin_semrush_max_calls.minimum() == 2
+    assert dialog.spin_semrush_max_calls.value() == 2
+    assert "2 calls" in dialog.spin_semrush_max_calls.toolTip()
+
+
+def test_semrush_test_button_passes_the_cap_so_the_budget_is_respected(qtbot, monkeypatch, tmp_path) -> None:
+    import threading
+
+    from silentfrog.integrations.semrush import client
+
+    seen: dict[str, object] = {}
+
+    async def fake_test_connection(key, **kwargs):
+        seen.update(key=key, **kwargs)
+        return True, "Connection OK."
+
+    class _InlineThread:
+        def __init__(self, target, daemon=False) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    monkeypatch.setattr(client, "test_connection", fake_test_connection)
+    monkeypatch.setattr(threading, "Thread", _InlineThread)
+    dialog = _stubbed_dialog(qtbot, monkeypatch, tmp_path)
+    dialog.edit_semrush_key.setText("KEY")
+    dialog.spin_semrush_max_calls.setValue(7)
+
+    dialog._on_semrush_test()
+
+    assert seen == {"key": "KEY", "max_calls": 7}
+
+
+def test_ai_share_of_voice_checkbox_defaults_off_and_persists_on_accept(qtbot, monkeypatch, tmp_path) -> None:
+    from silentfrog.integrations.ai_engines.config import load_config as load_sov_config
+
+    dialog = _stubbed_dialog(qtbot, monkeypatch, tmp_path)
+    assert dialog.chk_sov_enabled.text() == "Use AI share of voice in audits"
+    assert dialog.chk_sov_enabled.isChecked() is False
+    dialog.accept()
+    assert load_sov_config().enabled is False  # accepting alone never turns paid calls on
+
+    dialog = _stubbed_dialog(qtbot, monkeypatch, tmp_path)
+    dialog.chk_sov_enabled.setChecked(True)
+    dialog.accept()
+    assert load_sov_config().enabled is True
+
+    assert _stubbed_dialog(qtbot, monkeypatch, tmp_path).chk_sov_enabled.isChecked() is True

@@ -5,8 +5,10 @@
 > wording). PR-F2 fixes RND-3, PLUMB-4, INT-10, the RND-5 hint (unmeasured checks show "Info" and a grey
 > circle in the GEO badge; the false "SSR box produces Lab CWV" hint is gone), RND-2 (axe now runs on
 > CSP pages), A4, D5, D6 and PLUMB-2 (accessibility, topic-embedding, export and fetch-failure
-> messages name the reason; ignored header lines are numbered; the Home gear reads "Appearance (theme)"). PR-G covers D4, D3, PLUMB-6, INT-1 to INT-9, INT-11, RND-1,
-> RND-4, the A6 concurrency fix and D7. Lab Core Web Vitals collection (RND-5 part A) stays deferred.
+> messages name the reason; ignored header lines are numbered; the Home gear reads "Appearance
+> (theme)"). PR-G1 shipped D1 and D4. PR-G2 fixes D3, PLUMB-6, INT-1 to INT-9, INT-11, RND-1, RND-4,
+> the A6 concurrency fix and D7, which completes the series: every defect id in this file is now
+> fixed except the deferred one below. Lab Core Web Vitals collection (RND-5 part A) stays deferred.
 
 **Short answer: mostly, yes.** Almost every box you tick does run in the engine. You see nothing for six reasons, all confirmed with probes:
 
